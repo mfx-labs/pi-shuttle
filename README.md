@@ -10,8 +10,7 @@ the composed product. It does **not** contain Project Gateway MCP source or
 pi-guard source; those remain separately versioned component repositories
 and are composed here as pinned dependencies.
 
-Status: **pre-release product contract gate** — documentation and planning
-only. No production code, no commits, no external mutations.
+Status: **PS-2 implementation gate** — the CLI/config-model foundation is implemented and awaiting senior review (uncommitted, unstaged). Pre-release; unpublished; no external mutations; no commits yet.
 
 ## Layout
 
@@ -23,3 +22,4 @@ only. No production code, no commits, no external mutations.
 - `docs/test-and-release-plan.md` — test lanes A–D and release gates
 - `docs/work-packages.md` — dependency-ordered implementation plan (PS-0..PS-8)
 - `docs/decisions/` — ADRs (only where durable rationale is required)
+- `docs/reports/` — gate implementation/review reports
