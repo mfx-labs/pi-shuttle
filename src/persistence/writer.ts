@@ -20,7 +20,9 @@
  *     → durable publish → verify → release
  *
  * is covered by an exclusive sibling lock artifact (`<path>.lock`) acquired
- * with the atomic O_CREAT|O_EXCL primitive (`openSync 'wx'`). The lock is
+ * with the atomic O_CREAT|O_EXCL primitive (`openSync 'wx'`) — shared
+ * with the PS-3 installer via `src/persistence/lock.ts` (single locking
+ * design; see that module for the exact semantics). The lock is
  * held across read/decode/transition/publish/verify, so:
  *   - stale snapshots cannot report success: the transition input is always
  *     the current authoritative state, read AFTER ownership is acquired;
@@ -45,6 +47,7 @@
 import { closeSync, fchmodSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { MAX_CONFIG_BYTES, readBoundedTextFile } from '../config/json.js';
+import { acquireLock, releaseLock } from './lock.js';
 
 export type WriteResult = { readonly ok: true; readonly changed: boolean } | { readonly ok: false; readonly code: string; readonly message: string };
 
@@ -56,14 +59,6 @@ export interface WriteOptions {
    * descriptor. Widens no authority or I/O capability.
    */
   readonly write?: (fd: number, buffer: Buffer, offset: number, length: number) => number;
-}
-
-/** Bounded contention wait: 20 attempts × 25 ms (max ~500 ms), then BUSY. */
-const LOCK_RETRIES = 20;
-const LOCK_RETRY_DELAY_MS = 25;
-
-function sleepSync(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 /** Write the complete byte buffer; zero/invalid progress fails closed. */
@@ -145,51 +140,6 @@ function publishBytes(path: string, bytes: Buffer, write?: (fd: number, buffer: 
       // best-effort cleanup; the failure result stands
     }
     return { ok: false, code: 'ERR-PS2-WRITE-FAILED', message: `could not write ${path} (${(err as NodeJS.ErrnoException).code ?? 'unknown error'})` };
-  }
-}
-
-// ─── exclusive lock artifact (<path>.lock) ───────────────────────────────
-
-type LockResult = { readonly ok: true; readonly fd: number } | { readonly ok: false; readonly code: string; readonly message: string };
-
-/** Acquire the sibling lock atomically (O_CREAT|O_EXCL). Bounded retry; never steals. */
-function acquireLock(lockPath: string): LockResult {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      const fd = openSync(lockPath, 'wx', 0o600);
-      try {
-        writeSync(fd, `${process.pid}\n`);
-      } catch {
-        // informational lock content; acquisition stands without it
-      }
-      return { ok: true, fd };
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') {
-        return { ok: false, code: 'ERR-PS2-CONFIG-LOCK', message: `lock could not be acquired for ${lockPath} (${(err as NodeJS.ErrnoException).code ?? 'unknown error'})` };
-      }
-      if (attempt >= LOCK_RETRIES) {
-        return {
-          ok: false,
-          code: 'ERR-PS2-CONFIG-BUSY',
-          message: `another pi-shuttle state operation is in progress (lock: ${lockPath}); waited ${LOCK_RETRIES + 1} attempts. If no other operation is running, remove the stale lock file and retry`,
-        };
-      }
-      sleepSync(LOCK_RETRY_DELAY_MS);
-    }
-  }
-}
-
-/** Release the lock: unlink first (a crash here leaves no stale lock), then close. */
-function releaseLock(fd: number, lockPath: string): void {
-  try {
-    unlinkSync(lockPath);
-  } catch {
-    // best-effort; the critical section already completed
-  }
-  try {
-    closeSync(fd);
-  } catch {
-    // best-effort
   }
 }
 

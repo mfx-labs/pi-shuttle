@@ -1,0 +1,177 @@
+/**
+ * PS-3 installer selection: batch-mode argument parsing (closed grammar)
+ * and the interactive component prompts (installation-contract §2).
+ * Batch mode REQUIRES explicit component selections — no silent defaults
+ * (installation-contract §2: "no silent defaults in batch mode for
+ * components 1–2"). Interactive defaults are yes/yes per the contract.
+ */
+export interface InstallerSelections {
+  readonly gateway: boolean;
+  readonly piGuard: boolean;
+}
+
+export interface InstallerOptions {
+  readonly help: boolean;
+  readonly batch: boolean;
+  readonly selections?: InstallerSelections;
+  /** Share-dir override (prompt 3 / --install-dir). */
+  readonly installDir?: string;
+  /** Bin-dir override (prompt 4 / --bin-dir). */
+  readonly binDir?: string;
+  /** Local artifact directory (the PS-3 local component lane). */
+  readonly artifactDir?: string;
+  /** Optional strict artifact digest expectations (local lane verification). */
+  readonly expectGatewaySha256?: string;
+  readonly expectPiGuardSha256?: string;
+}
+
+export type InstallerArgResult = { readonly ok: true; readonly options: InstallerOptions } | { readonly ok: false; readonly message: string };
+
+export const INSTALLER_USAGE = [
+  'usage: pi-shuttle-installer [options]',
+  '',
+  'options:',
+  '  --help                         show this help',
+  '  --batch                        non-interactive; component selections are required',
+  '  --gateway <yes|no>             install Project Gateway MCP (required in batch)',
+  '  --pi-guard <yes|no>            install pi-guard (required in batch)',
+  '  --install-dir <path>           installation directory (default ~/.local/share/pi-shuttle)',
+  '  --bin-dir <path>               command/bin directory (default ~/.local/bin)',
+  '  --artifact-dir <path>          local component artifact directory (local lane)',
+  '  --expect-gateway-sha256 <hex>  strict expected digest for the gateway artifact',
+  '  --expect-pi-guard-sha256 <hex> strict expected digest for the pi-guard artifact',
+].join('\n') + '\n';
+
+const YES = new Set(['yes', 'y']);
+const NO = new Set(['no', 'n']);
+
+function parseYesNo(value: string): boolean | null {
+  const v = value.toLowerCase();
+  if (YES.has(v)) return true;
+  if (NO.has(v)) return false;
+  return null;
+}
+
+/** Parse installer argv against the closed grammar. Deterministic. */
+export function parseInstallerArgs(argv: readonly string[]): InstallerArgResult {
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
+    return { ok: true, options: { help: true, batch: false } };
+  }
+  let batch = false;
+  let gateway: boolean | undefined;
+  let piGuard: boolean | undefined;
+  let installDir: string | undefined;
+  let binDir: string | undefined;
+  let artifactDir: string | undefined;
+  let expectGatewaySha256: string | undefined;
+  let expectPiGuardSha256: string | undefined;
+  let i = 0;
+  while (i < argv.length) {
+    const flag = argv[i]!;
+    const next = argv[i + 1];
+    switch (flag) {
+      case '--batch':
+        batch = true;
+        i += 1;
+        break;
+      case '--gateway':
+      case '--pi-guard': {
+        if (next === undefined) return { ok: false, message: `${flag} requires a value\n${INSTALLER_USAGE}` };
+        const parsed = parseYesNo(next);
+        if (parsed === null) return { ok: false, message: `${flag} must be yes or no\n${INSTALLER_USAGE}` };
+        if (flag === '--gateway') gateway = parsed;
+        else piGuard = parsed;
+        i += 2;
+        break;
+      }
+      case '--install-dir':
+      case '--bin-dir':
+      case '--artifact-dir':
+      case '--expect-gateway-sha256':
+      case '--expect-pi-guard-sha256': {
+        if (next === undefined || next.length === 0) return { ok: false, message: `${flag} requires a value\n${INSTALLER_USAGE}` };
+        if (flag === '--install-dir') installDir = next;
+        else if (flag === '--bin-dir') binDir = next;
+        else if (flag === '--artifact-dir') artifactDir = next;
+        else if (flag === '--expect-gateway-sha256') expectGatewaySha256 = next;
+        else expectPiGuardSha256 = next;
+        i += 2;
+        break;
+      }
+      default:
+        return { ok: false, message: `unknown installer option: ${flag}\n${INSTALLER_USAGE}` };
+    }
+  }
+  if (batch && (gateway === undefined || piGuard === undefined)) {
+    return { ok: false, message: 'batch mode requires explicit --gateway and --pi-guard selections\n' + INSTALLER_USAGE };
+  }
+  if (!batch && (gateway !== undefined || piGuard !== undefined) && (gateway === undefined || piGuard === undefined)) {
+    // SIR-PS3-005: an explicit component selection flag must never imply a
+    // silent default for the other component. Require BOTH selections.
+    const missing = gateway === undefined ? '--gateway' : '--pi-guard';
+    return { ok: false, message: `explicit component selections require both --gateway and --pi-guard (missing ${missing}); no silent defaults\n` + INSTALLER_USAGE };
+  }
+  if (!batch && (gateway !== undefined || piGuard !== undefined)) {
+    // Both selections supplied without --batch: deterministic
+    // non-prompting path (documented; used by tests) — no silent default
+    // is possible because both components were explicit.
+    batch = true;
+  }
+  return {
+    ok: true,
+    options: {
+      help: false,
+      batch,
+      ...(gateway !== undefined || piGuard !== undefined ? { selections: { gateway: gateway ?? true, piGuard: piGuard ?? true } } : {}),
+      ...(installDir !== undefined ? { installDir } : {}),
+      ...(binDir !== undefined ? { binDir } : {}),
+      ...(artifactDir !== undefined ? { artifactDir } : {}),
+      ...(expectGatewaySha256 !== undefined ? { expectGatewaySha256 } : {}),
+      ...(expectPiGuardSha256 !== undefined ? { expectPiGuardSha256 } : {}),
+    },
+  };
+}
+
+/** Minimal prompt seam (readline-backed in main.ts; injectable for tests). */
+export interface PromptUI {
+  ask(question: string, defaultValue?: string): Promise<string>;
+}
+
+export interface InteractiveResult {
+  readonly selections: InstallerSelections;
+  readonly installDir?: string;
+  readonly binDir?: string;
+  readonly configureProject: boolean;
+}
+
+/** The five approved interactive prompts (installation-contract §2). */
+export async function promptSelections(ui: PromptUI, defaults: { readonly installDir: string; readonly binDir: string }): Promise<InteractiveResult> {
+  const gateway = await askYesNo(ui, 'Install Project Gateway MCP?', true);
+  const piGuard = await askYesNo(ui, 'Install Pi integration / pi-guard?', true);
+  const installDir = await ui.ask(`Installation directory [${defaults.installDir}]: `, defaults.installDir);
+  const binDir = await ui.ask(`Command/bin directory [${defaults.binDir}]: `, defaults.binDir);
+  const configureProject = await askYesNo(ui, 'Configure a project now?', false);
+  return {
+    selections: { gateway, piGuard },
+    ...(installDir.trim().length > 0 ? { installDir: installDir.trim() } : {}),
+    ...(binDir.trim().length > 0 ? { binDir: binDir.trim() } : {}),
+    configureProject,
+  };
+}
+
+async function askYesNo(ui: PromptUI, question: string, defaultValue: boolean): Promise<boolean> {
+  const hint = defaultValue ? 'Y/n' : 'y/N';
+  for (;;) {
+    const answer = (await ui.ask(`${question} [${hint}]: `, defaultValue ? 'yes' : 'no')).trim().toLowerCase();
+    const parsed = parseYesNo(answer);
+    if (parsed !== null) return parsed;
+    if (answer.length === 0) return defaultValue;
+    process.stderr.write(`pi-shuttle-installer: please answer yes or no\n`);
+  }
+}
+
+/** Truthful deferred guidance for prompt 5 (project onboarding is PS-4-owned). */
+export const PROJECT_ONBOARDING_DEFERRED = [
+  'Project configuration is owned by the PS-4 work package and is not part of this installer.',
+  'Once available, configure a project with: pi-shuttle project add <path>',
+].join('\n');

@@ -10,7 +10,29 @@ the composed product. It does **not** contain Project Gateway MCP source or
 pi-guard source; those remain separately versioned component repositories
 and are composed here as pinned dependencies.
 
-Status: **PS-2 implementation gate** — the CLI/config-model foundation is implemented and awaiting senior review (uncommitted, unstaged). Pre-release; unpublished; no external mutations; no commits yet.
+Status: **PS-3 implementation gate** — the installer/component-composition
+foundation is implemented and awaiting senior review (uncommitted,
+unstaged). Pre-release; unpublished; no external mutations; no commits
+yet.
+
+## Local installer (PS-3)
+
+Run the local installer from the repository build:
+
+```text
+npm run build
+./install.sh --batch --gateway yes --pi-guard no --artifact-dir <dir>
+```
+
+- Interactive mode prompts for components, install/bin directories, and
+  project configuration (which truthfully defers to `pi-shuttle project
+  add <path>` — PS-4).
+- Batch mode requires explicit `--gateway yes|no` / `--pi-guard yes|no`.
+- Components are installed from digest-verified local artifacts under
+  `<artifact-dir>/` (release artifacts and the public installer URL are
+  pending publication); the receipt is written to
+  `~/.local/state/pi-shuttle/install.json`.
+- Supported lane: Linux x86_64 only. macOS arm64 stays gated (PS-6).
 
 ## Layout
 
