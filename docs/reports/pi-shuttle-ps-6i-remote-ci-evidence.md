@@ -104,6 +104,10 @@ authoritative baseline `5efff90e` is an ancestor of remote master.
 | Lane B — macOS arm64 evidence | `31699150163` | **success** |
 | Lane C — macOS Intel evidence | `31699150153` | **success** |
 
+Follow-up observation: the evidence-report push (`4744117f`) re-triggered
+all three lanes on final master — Lane A `31699812064`, Lane B
+`31699812169`, Lane C `31699812095` — all **success** again.
+
 ### Lane C (SUPPORTED real-stack lane, run `31699150153`)
 
 Build + tests job (`94443775935`, macos-15-intel):
