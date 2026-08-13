@@ -54,6 +54,47 @@ function ok(stdout: string): CommandOutcome {
   return { exitCode: 0, stdout, stderr: '' };
 }
 
+// ─── PS6-MAC-001 duplicate-object guard ───────────────────────────────────
+
+/**
+ * Read-only filesystem object identity (dev + ino) of an existing path;
+ * null when the path cannot be observed (absent/unreadable — never fatal).
+ * Directory inodes are stable across path spellings: on default APFS,
+ * realpath preserves the INPUT spelling of the final component (case and
+ * Unicode variants of one directory resolve to the same object with
+ * different canonical strings), and bind mounts/symlinks can surface one
+ * directory under multiple paths.
+ */
+export function filesystemObjectIdentity(path: string): { readonly dev: number; readonly ino: number } | null {
+  try {
+    const st = statSync(path);
+    return { dev: st.dev, ino: st.ino };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * PS6-MAC-001: the same filesystem object must never be registered twice
+ * under different canonical spellings (operator-cli-contract §3: "fail
+ * closed on conflicting registration of the same root under a different
+ * identity"). Returns the already-registered root when the candidate is
+ * the same object as a registered root under a DIFFERENT canonical string;
+ * identical spellings and distinct objects return null (the normal replay
+ * path and the ordinary second-project path own those cases). Pure and
+ * read-only; never mutates, never normalizes strings.
+ */
+export function duplicateObjectRegistration(canonicalRoot: string, registeredRoots: readonly string[]): string | null {
+  const candidate = filesystemObjectIdentity(canonicalRoot);
+  if (candidate === null) return null;
+  for (const root of registeredRoots) {
+    if (root === canonicalRoot) continue; // identical spelling → exact-replay path
+    const other = filesystemObjectIdentity(root);
+    if (other !== null && other.dev === candidate.dev && other.ino === candidate.ino) return root;
+  }
+  return null;
+}
+
 // ─── bootstrap input composition (pure; SIR-PS2-009 drift surface) ───────
 
 export interface BootstrapComposeInput {
@@ -234,6 +275,26 @@ export async function addProject(ctx: OperatorContext, inputPath: string): Promi
   const lock = acquireProjectLock(ctx.layout);
   if (!lock.ok) return { ok: false, ...fail('ERR-PS4-BUSY', `project add: ${lock.message}`, 1) };
   try {
+    // 6b. PS6-MAC-001 duplicate-object guard (under the lock, BEFORE any
+    //     operator directory or store creation): the candidate root's
+    //     filesystem object identity (dev+ino) is compared against every
+    //     registered workspace root. On default APFS, realpath preserves
+    //     the input spelling of the final component, so case/Unicode
+    //     variant spellings of ONE directory produce different canonical
+    //     strings; the same object must never get a second registration
+    //     (and a second store) — fail closed with a typed error naming the
+    //     already-registered spelling. Nothing has been created yet.
+    const registeredRead = readRuntimeDocument(ctx.layout.runtimeConfigPath);
+    const registeredRoots = registeredRead.ok
+      ? registeredRead.document.surfaces.flatMap((s) => (s.workspaces ?? []).map((w) => w.root))
+      : [];
+    const objectDuplicate = duplicateObjectRegistration(canonicalRoot, registeredRoots);
+    if (objectDuplicate !== null) {
+      return {
+        ok: false,
+        ...fail('ERR-PS4-REG-DUPLICATE-OBJECT', `project add: ${canonicalRoot} is the same filesystem object as the already-registered project ${objectDuplicate} (registered under a different path spelling); one filesystem object must have exactly one registration — re-run with the registered spelling or use \`pi-shuttle project list\``, 1),
+      };
+    }
     // 7. Operator-owned directories.
     const prepared = prepareOperatorDirs(ctx.layout, storeId, canonicalRoot);
     if (!prepared.ok) return { ok: false, ...fail(prepared.code, `project add: ${prepared.message}`, 1) };

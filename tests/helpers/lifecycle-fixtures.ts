@@ -10,17 +10,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
 import { GATEWAY_PACKAGE_VERSION, PI_GUARD_VERSION } from '../../src/compat/manifest.js';
-import { resolveLayout } from '../../src/host/environment.js';
+import { canonicalizePath, resolveLayout } from '../../src/host/environment.js';
 import { componentDirName, GATEWAY_PACKAGE_NAME } from '../../src/installer/components.js';
 import { writeReceipt, newReceipt } from '../../src/installer/receipt.js';
 import type { ComponentStatus, GatewaySmoke } from '../../src/installer/receipt.js';
 import { writeFakePi } from './installer-fixtures.js';
 
-/** Create a fresh isolated environment root (0700). */
+/** Create a fresh isolated environment root (0700), on its CANONICAL spelling. */
 export function makeEnv(): string {
   const dir = mkdtempSync(join(tmpdir(), 'ps4-test-'));
   chmodSync(dir, 0o700);
-  return dir;
+  // PS6-TEST-001: the product canonicalizes project roots (realpath); on
+  // macOS `os.tmpdir()` returns /var/folders/... whose canonical spelling
+  // is /private/var/folders/... — fixtures must live on the canonical
+  // spelling so raw == canonical expectations hold on every platform.
+  // No-op on Linux (no /var symlink in /tmp).
+  return canonicalizePath(dir) ?? dir;
 }
 
 export function cleanupEnv(env: string): void {

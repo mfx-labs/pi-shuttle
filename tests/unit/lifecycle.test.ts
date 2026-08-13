@@ -9,9 +9,9 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, readdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readRuntimeDocument } from '../../src/config/document.js';
-import { resolveLayout } from '../../src/host/environment.js';
+import { canonicalizePath, resolveLayout } from '../../src/host/environment.js';
 import { deriveStoreId, deriveStoreLocator, deriveSurfaceId, deriveWorkspaceId } from '../../src/registry/identity.js';
-import { addProject, listProjects, removeProject } from '../../src/lifecycle/projects.js';
+import { addProject, duplicateObjectRegistration, listProjects, removeProject } from '../../src/lifecycle/projects.js';
 import type { OperatorContext } from '../../src/lifecycle/state.js';
 import { cleanupEnv, fixturePathEnv, installFixtureGateway, makeEnv, makeProjectRoot, runCli, writeReceiptFixture, writeFakeGit } from '../helpers/lifecycle-fixtures.js';
 
@@ -157,6 +157,60 @@ test('project add: receipt gates — absent receipt, unverified gateway, no gate
     const missing = await addProject(ctx, root);
     assert.equal(missing.exitCode, 1);
     assert.ok(missing.stderr.includes('ERR-PS4-RECEIPT-NO-GATEWAY'), missing.stderr);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('project add: duplicate-object guard — identical spelling and distinct objects pass; same object under a different spelling is refused (PS6-MAC-001, pure)', async () => {
+  const env = makeEnv();
+  try {
+    const a = makeProjectRoot(env, 'alpha');
+    const b = makeProjectRoot(env, 'beta');
+    assert.equal(duplicateObjectRegistration(a, [a]), null, 'identical spelling is the normal replay path');
+    assert.equal(duplicateObjectRegistration(a, []), null, 'no registrations → no duplicate');
+    assert.equal(duplicateObjectRegistration(a, [b]), null, 'distinct objects → no duplicate');
+    assert.equal(duplicateObjectRegistration(join(env, 'absent'), [a]), null, 'unobservable candidate → no duplicate (never fatal)');
+    // Defense in depth: a symlink to the same object is detected by
+    // object identity (production canonicalizes symlinks first, so this is
+    // the fail-closed backstop).
+    const link = join(env, 'alias');
+    symlinkSync(a, link);
+    assert.equal(duplicateObjectRegistration(link, [a]), a, 'same object via symlink spelling → duplicate detected');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('project add: case-variant spelling of a registered project fails closed with one registration (PS6-MAC-001, real CLI, darwin)', async (t) => {
+  if (process.platform !== 'darwin') {
+    t.skip('case-variant duplicate-object evidence requires a case-insensitive darwin volume; running on ' + process.platform);
+    return;
+  }
+  const env = makeEnv();
+  try {
+    const root = makeProjectRoot(env, 'Project');
+    installFixtureGateway(env);
+    writeReceiptFixture(env);
+    const ctx = contextFor(env);
+    const first = await addProject(ctx, root);
+    assert.equal(first.exitCode, 0, first.stderr);
+    const variant = join(env, 'project');
+    if (canonicalizePath(variant) === null) {
+      t.diagnostic(`volume at ${env} is case-sensitive: 'project' does not resolve to 'Project'; variant-duplicate assertion skipped`);
+      t.skip('case-sensitive volume; variant duplicate not applicable');
+      return;
+    }
+    const second = await addProject(ctx, variant);
+    assert.equal(second.exitCode, 1, second.stderr);
+    assert.ok(second.stderr.includes('ERR-PS4-REG-DUPLICATE-OBJECT'), second.stderr);
+    assert.ok(second.stderr.includes('same filesystem object'), second.stderr);
+    const read = readRuntimeDocument(ctx.layout.runtimeConfigPath);
+    assert.equal(read.ok, true);
+    if (read.ok) assert.equal(read.document.surfaces.length, 1, 'one filesystem object ⇒ exactly one registration');
+    // No second store locator was ever created (the guard fires before
+    // any operator-directory or Gateway bootstrap work).
+    assert.equal(readdirSync(ctx.layout.storesDir).length, 1, 'no duplicate store authority created');
   } finally {
     cleanupEnv(env);
   }

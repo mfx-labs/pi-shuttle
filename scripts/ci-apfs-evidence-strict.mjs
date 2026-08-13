@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 /**
- * PS-6 Lane B mandatory APFS evidence enforcement (SIR-PS6-004 correction).
+ * PS-6 Lane B mandatory APFS evidence enforcement (SIR-PS6-004 correction;
+ * PS6-MAC-001 semantics).
  *
  * The generic unit suite may retain truthful platform skips, but Lane B
  * first-class evidence must DISTINGUISH:
- *   PASS            — the darwin case-variant and Unicode canonicalization
- *                     evidence EXECUTED and passed on this runner
+ *   PASS            — the darwin case-variant and Unicode OBJECT-IDENTITY
+ *                     evidence (one filesystem object ⇒ at most one
+ *                     registration, via the dev+ino duplicate-object guard)
+ *                     EXECUTED and passed on this runner
  *   NOT EXECUTED    — any skip (case-sensitive volume, non-darwin host,
  *                     fixture failure to resolve) — the evidence job must
  *                     NOT be green
@@ -66,7 +69,7 @@ for (const line of output.split('\n')) {
 }
 
 if (skip > 0) {
-  console.error(`APFS evidence: NOT EXECUTED — ${skip} evidence test(s) skipped; mandatory Lane B case-variant/Unicode canonicalization evidence is missing (this prevents Lane B from being green)`);
+  console.error(`APFS evidence: NOT EXECUTED — ${skip} evidence test(s) skipped; mandatory Lane B case-variant/Unicode object-identity evidence is missing (this prevents Lane B from being green)`);
   console.error(output.trim().split('\n').filter((l) => l.includes('SKIP') || l.includes('skip')).slice(0, 12).join('\n'));
   process.exit(3);
 }
@@ -79,5 +82,5 @@ if (pass < 3) {
   console.error(`APFS evidence: NOT EXECUTED — expected at least the 3 committed evidence tests (symlink, case variant, Unicode), observed ${pass} passing`);
   process.exit(3);
 }
-console.log(`APFS evidence: PASS — ${pass} evidence tests executed and passed (case variant, Unicode NFC/NFD, symlink alias) on ${platform}`);
+console.log(`APFS evidence: PASS — ${pass} evidence tests executed and passed (case variant, Unicode NFC/NFD, symlink alias; one filesystem object ⇒ at most one registration) on ${platform}`);
 process.exit(0);

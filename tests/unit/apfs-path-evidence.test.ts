@@ -1,21 +1,29 @@
 /**
- * PS-6 APFS path-identity evidence tests.
+ * PS-6 APFS path-identity evidence tests (corrected after the real
+ * macos-15 arm64 runner evidence — PS6-MAC-001).
  *
- * These tests exercise the EXISTING canonicalization model (realpath-based
- * `canonicalizePath` → deterministic identity) — no case-folding or string
- * normalization is implemented or asserted anywhere. The required safe
- * outcome: one canonical filesystem object ⇒ one stable pi-shuttle
- * identity, so a second registration through any spelling alias is an
- * exact replay, never a duplicate authority.
+ * EMPIRICAL FACT (recorded from the Lane B runner, default APFS):
+ * `realpath` on macOS preserves the INPUT spelling of the final path
+ * component — it does NOT return the on-disk case, and it does NOT
+ * normalize Unicode (NFC input stays NFC). Therefore case and Unicode
+ * variant spellings of ONE directory produce DIFFERENT canonical strings
+ * and DIFFERENT pi-shuttle identities. The product therefore enforces the
+ * contract's fail-closed clause (operator-cli-contract §3: "no duplicate
+ * registration (fail closed on conflicting registration of the same root
+ * under a different identity)") with a dev+ino duplicate-object guard:
+ * one filesystem object ⇒ exactly one registration.
+ *
+ * These tests exercise the EXISTING canonicalization model and the guard
+ * — no case-folding or string normalization is implemented or asserted
+ * anywhere.
  *
  * Lane classification:
  *  - symlink alias: host-independent (runs on every lane);
- *  - case variant: real default APFS evidence (darwin only). When the CI
- *    volume is unexpectedly case-sensitive, the volume fact is recorded
- *    and ONLY the case-alias assertion is skipped, with a truthful reason
- *    — it is never converted into a product failure.
- *  - Unicode NFC/NFD spelling: darwin only (APFS always normalizes names
- *    to the on-disk form); skipped truthfully where not applicable.
+ *  - case variant: real default APFS evidence (darwin only). On a
+ *    case-sensitive volume the variant spelling does not resolve — the
+ *    volume fact is recorded truthfully and ONLY the case-alias assertion
+ *    is skipped (never converted into a product failure);
+ *  - Unicode NFC/NFD spelling: darwin only; same truthful skip policy.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,6 +32,7 @@ import { join } from 'node:path';
 import { canonicalizePath } from '../../src/host/environment.js';
 import { deriveStoreId, deriveSurfaceId, deriveWorkspaceId } from '../../src/registry/identity.js';
 import { registerSurface } from '../../src/registry/model.js';
+import { duplicateObjectRegistration } from '../../src/lifecycle/projects.js';
 import type { SurfaceConfig } from '../../src/config/document.js';
 
 function makeProjectDir(root: string, name: string): string {
@@ -85,7 +94,7 @@ test('PS6: symlink alias resolves to one canonical project and one identity (hos
   }
 });
 
-test('PS6: case variant on default APFS — one canonical object, one identity, one registration', (t) => {
+test('PS6: case variant on default APFS — one filesystem object, at most one registration (PS6-MAC-001)', (t) => {
   if (process.platform !== 'darwin') {
     t.skip('case-variant evidence requires real default APFS (darwin); running on ' + process.platform);
     return;
@@ -101,37 +110,43 @@ test('PS6: case variant on default APFS — one canonical object, one identity, 
     const canonicalLower = canonicalizePath(lowerSpelling);
 
     if (canonicalLower === null) {
-      // Case-sensitive volume (or the lower spelling genuinely absent):
-      // record the volume fact truthfully and skip ONLY the case-alias
-      // assertion — this is not a product failure.
+      // Case-sensitive volume: the variant spelling is a distinct/absent
+      // entry. Record the volume fact truthfully and skip ONLY the
+      // case-alias assertion — this is not a product failure.
       t.diagnostic(`volume at ${root} is case-sensitive: 'project' does not resolve to 'Project'; case-alias assertion skipped`);
       t.skip('volume is case-sensitive; case-alias assertion not applicable');
       return;
     }
-    assert.equal(canonicalLower, canonicalUpper, 'both spellings must canonicalize to the same on-disk spelling');
+
+    // One filesystem object: same device + inode across spellings.
     const stUpper = statSync(canonicalUpper);
     const stLower = statSync(canonicalLower);
     assert.equal(stLower.dev, stUpper.dev, 'same device');
     assert.equal(stLower.ino, stUpper.ino, 'same inode — one filesystem object');
-    assert.equal(deriveStoreId(canonicalLower), deriveStoreId(canonicalUpper), 'one pi-shuttle identity across case spellings');
-    assert.equal(deriveWorkspaceId(canonicalLower), deriveWorkspaceId(canonicalUpper));
-    assert.equal(deriveSurfaceId(canonicalLower), deriveSurfaceId(canonicalUpper));
 
-    const locator = join(root, 'stores', deriveStoreId(canonicalUpper));
-    const first = registerSurface({ surfaces: [] }, surfaceFor(canonicalUpper, locator));
-    assert.equal(first.ok, true);
-    if (!first.ok) return;
-    const second = registerSurface(first.value, surfaceFor(canonicalLower, locator));
-    assert.equal(second.ok, true);
-    if (!second.ok) return;
-    assert.equal(second.changed, false, 'adding the case variant must be an exact replay, never a duplicate registration');
-    assert.equal(second.value.surfaces.length, 1);
+    if (canonicalLower === canonicalUpper) {
+      // (Uncommon) realpath normalized the spelling: one canonical string
+      // ⇒ one identity directly.
+      assert.equal(deriveStoreId(canonicalLower), deriveStoreId(canonicalUpper));
+      assert.equal(duplicateObjectRegistration(canonicalUpper, [canonicalLower]), null, 'identical spelling is the normal replay path');
+    } else {
+      // Recorded empirical macOS default-APFS behavior (PS6-MAC-001):
+      // realpath preserves the input spelling of the final component, so
+      // the variant produces a different canonical string and a different
+      // identity — and the product MUST fail closed before a duplicate
+      // registration via the dev+ino duplicate-object guard.
+      t.diagnostic(`realpath preserves input spelling on this APFS volume: '${canonicalLower}' vs '${canonicalUpper}' — duplicate-object guard is the fail-closed mechanism`);
+      assert.notEqual(deriveStoreId(canonicalLower), deriveStoreId(canonicalUpper), 'variant spellings produce different identities (why the guard exists)');
+      assert.equal(duplicateObjectRegistration(canonicalUpper, [canonicalLower]), canonicalLower, 'the already-registered variant spelling must be detected by object identity');
+      assert.equal(duplicateObjectRegistration(canonicalLower, [canonicalUpper]), canonicalUpper, 'symmetrical detection');
+      assert.equal(duplicateObjectRegistration(canonicalUpper, [canonicalUpper]), null, 'identical spelling is never a duplicate');
+    }
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test('PS6: Unicode NFC/NFD spelling variants resolve to one canonical project on APFS', (t) => {
+test('PS6: Unicode NFC/NFD spelling variants — one filesystem object, at most one registration (PS6-MAC-001)', (t) => {
   if (process.platform !== 'darwin') {
     t.skip('Unicode spelling evidence requires APFS name handling (darwin); running on ' + process.platform);
     return;
@@ -153,12 +168,20 @@ test('PS6: Unicode NFC/NFD spelling variants resolve to one canonical project on
       t.skip('NFC spelling not resolvable on this volume');
       return;
     }
-    assert.equal(canonicalNfc, canonicalOnDisk, 'both spellings must canonicalize to the same on-disk spelling');
+    // One filesystem object across spellings.
     const stA = statSync(canonicalOnDisk);
     const stB = statSync(canonicalNfc);
     assert.equal(stB.dev, stA.dev, 'same device');
     assert.equal(stB.ino, stA.ino, 'same inode — one filesystem object');
-    assert.equal(deriveStoreId(canonicalNfc), deriveStoreId(canonicalOnDisk), 'one pi-shuttle identity across Unicode spellings');
+    if (canonicalNfc === canonicalOnDisk) {
+      assert.equal(deriveStoreId(canonicalNfc), deriveStoreId(canonicalOnDisk), 'one identity across Unicode spellings');
+    } else {
+      // Recorded empirical behavior: realpath preserves the input
+      // normalization — the guard fails closed on the duplicate object.
+      t.diagnostic(`realpath preserves input Unicode normalization on this APFS volume — duplicate-object guard is the fail-closed mechanism`);
+      assert.notEqual(deriveStoreId(canonicalNfc), deriveStoreId(canonicalOnDisk));
+      assert.equal(duplicateObjectRegistration(canonicalOnDisk, [canonicalNfc]), canonicalNfc);
+    }
     // No string normalization is applied anywhere: the identity derives
     // from the canonical filesystem spelling only.
     assert.equal(existsSync(canonicalNfc), true);
