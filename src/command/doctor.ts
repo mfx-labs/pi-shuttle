@@ -11,11 +11,16 @@
  *   - platform/architecture claims are manifest-bound (Linux x86_64 and
  *     darwin arm64 supported; macOS Intel/Windows never claimed);
  *   - Node is the running interpreter (same rule as the installer);
- *   - Git is discovered through PATH (never `/usr/bin/git`); the exact
- *     evidence lane is 2.45.4 — presence ≠ lane evidence;
- *   - Pi 0.83.0 is the baseline; 0.84.x is NOT a claimed lane and is
- *     reported `unsupported` per installation-contract §4 (the PS-3
- *     normative refusal policy is unchanged);
+ *     runtime minimum >= 22.19.0 (22.23.2 is the validated CI baseline,
+ *     reported never gating); native arm64 required on the darwin-arm64
+ *     lane (PS-6R policy);
+ *   - Git is discovered through PATH (never `/usr/bin/git`); runtime
+ *     minimum >= 2.30.0 (2.45.4 is the validated CI baseline, reported
+ *     never gating); presence ≠ lane evidence;
+ *   - Pi 0.83.0 is the known-good baseline; candidates >= 0.83.0 are
+ *     accepted only when the committed pi-guard compatibility probe
+ *     PASSES (probe FAIL → unsupported; probe infrastructure unavailable
+ *     → installed but unverified; below the minimum → unsupported);
  *   - Gateway/pi-guard verdicts come from the closed installation receipt
  *     plus read-only disk/Pi observation — never from filesystem
  *     existence alone;
@@ -40,7 +45,11 @@
  */
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { COMPATIBILITY_MANIFEST, GATEWAY_PACKAGE_VERSION, GIT_LANE_VERSION, NODE_LANE_VERSION, PI_COMPATIBILITY_BASELINE } from '../compat/manifest.js';
+import { fileURLToPath } from 'node:url';
+import { COMPATIBILITY_MANIFEST, GATEWAY_PACKAGE_VERSION, GIT_LANE_VERSION, GIT_RUNTIME_MINIMUM, NODE_LANE_VERSION, NODE_RUNTIME_MINIMUM, PI_COMPATIBILITY_BASELINE, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM } from '../compat/manifest.js';
+import { classifyAgainstMinimum, parseVersionTriple } from '../compat/versions.js';
+import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
+import { classifyNodeRuntime } from '../installer/preflight.js';
 import { readRuntimeDocument } from '../config/document.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { canonicalizePath, hostLane, resolveLayout } from '../host/environment.js';
@@ -73,7 +82,7 @@ export type DoctorResult =
   | { readonly ok: true; readonly exitCode: 0 | 1 | 2; readonly report: DoctorReport }
   | { readonly ok: false; readonly exitCode: 1; readonly message: string };
 
-/** Injectable doctor observations (host seam + probe environment). */
+/** Injectable pi observations (host seam + probe environment). */
 export interface DoctorContext {
   readonly env: HostEnvironment;
   readonly layout: LayoutPaths;
@@ -83,6 +92,12 @@ export interface DoctorContext {
   readonly pathEnv?: NodeJS.ProcessEnv;
   /** Injectable UID observation (test seam; defaults to `process.getuid()`). */
   readonly uid?: number;
+  /**
+   * PS-6R injectable pi-guard compatibility probe (default: the committed
+   * compiled probe spawned through the running node). Candidates (pi
+   * >= 0.83.0 other than the known-good baseline) require a PASS.
+   */
+  readonly piGuardProbe?: (piExecutable: string, piGuardDir: string) => Promise<{ readonly ok: boolean; readonly detail: string; readonly infrastructure: boolean }>;
 }
 
 /** Render a report deterministically; verdicts are printed exactly as vocabulary values. */
@@ -95,6 +110,39 @@ export function formatDoctorReport(report: DoctorReport): string {
     lines.push(`  note: ${note}`);
   }
   return lines.join('\n') + '\n';
+}
+
+/**
+ * The default pi-guard compatibility probe (PS-6R): spawns the committed
+ * compiled probe through the running node with a bounded timeout.
+ * `infrastructure: true` = the probe could not run (loader/entry
+ * unavailable, usage error) — fail closed as unverifiable; `ok: false`
+ * with `infrastructure: false` = the integration surface FAILED the
+ * probe (unsupported).
+ */
+export function defaultPiGuardProbe(nodeExecutable: string, pathEnv: NodeJS.ProcessEnv | undefined, home: string): (piExecutable: string, piGuardDir: string) => Promise<{ readonly ok: boolean; readonly detail: string; readonly infrastructure: boolean }> {
+  const probeCli = fileURLToPath(new URL('../compat/pi-guard-probe.js', import.meta.url));
+  return async (piExecutable, piGuardDir) => {
+    const loader = resolvePiLoaderFromBin(piExecutable);
+    if (loader === null) {
+      return { ok: false, detail: `pi extension loader could not be located from ${piExecutable}`, infrastructure: true };
+    }
+    const entry = join(piGuardDir, 'extensions', 'pi-guard', 'index.ts');
+    if (!existsSync(entry)) {
+      return { ok: false, detail: `installed pi-guard extension entry missing at ${entry}`, infrastructure: true };
+    }
+    const probeRun = await runProcess(nodeExecutable, [probeCli], {
+      timeoutMs: 60_000,
+      env: { ...pathEnv, PI_LOADER: loader, PI_GUARD_ENTRY: entry, HOME: home },
+    });
+    if (probeRun.exitCode === 0 && probeRun.signal === null && !probeRun.timedOut) {
+      return { ok: true, detail: probeRun.stdout.trim().slice(0, 200) || 'probe passed', infrastructure: false };
+    }
+    if (probeRun.exitCode === 1 && probeRun.signal === null && !probeRun.timedOut) {
+      return { ok: false, detail: (probeRun.stderr.trim() || probeRun.stdout.trim()).slice(0, 300) || 'probe FAIL', infrastructure: false };
+    }
+    return { ok: false, detail: `probe could not complete (exit ${probeRun.exitCode ?? 'unknown'}${probeRun.timedOut ? ', timed out' : ''})`, infrastructure: true };
+  };
 }
 
 function check(id: string, label: string, verdict: StatusVerdict, detail: string): DoctorCheck {
@@ -152,22 +200,31 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   // 1. Platform / architecture (manifest-bound claim; gate §13).
   checks.push(check('platform', 'platform', supportedLane ? 'supported' : 'unsupported', `${ctx.env.platform} ${ctx.env.arch} (lane ${lane})`));
 
-  // 2. Node (the running interpreter is the runtime node; same rule as the installer).
+  // 2. Node (the running interpreter is the runtime node; PS-6R minimum
+  //    >= 22.19.0 — exact baseline 22.23.2 is reporting, never a gate).
   const nodeRun = await runProcess(nodeExecutable, ['--version'], { env: ctx.pathEnv, timeoutMs: 10_000 });
   const nodeVersion = nodeRun.exitCode === 0 ? nodeRun.stdout.trim().replace(/^v/, '') : '';
+  const nodeClassification = nodeVersion === '' ? 'malformed' : classifyNodeRuntime(nodeVersion);
   // PS-6 darwin lane: on the darwin-arm64 host lane the ACTUAL Node
   // executable must be arm64 — a Rosetta/x64 Node cannot satisfy the
   // first-class darwin-arm64 lane (platform-support-contract §3.9; the
   // version probe alone cannot distinguish native from translated
-  // binaries). Read-only, argv-safe; never affects Linux behavior.
+  // binaries). Read-only, argv-safe; never affects Linux behavior. The
+  // architecture requirement applies to ANY version-compatible runtime.
   const requiresNativeArm64Node = ctx.env.platform === 'darwin' && ctx.env.arch === 'arm64';
   let nodeArch = '';
-  if (requiresNativeArm64Node) {
+  if (requiresNativeArm64Node && nodeClassification === 'supported') {
     const archRun = await runProcess(nodeExecutable, ['-p', 'process.arch'], { env: ctx.pathEnv, timeoutMs: 10_000 });
     nodeArch = archRun.exitCode === 0 && archRun.signal === null && !archRun.timedOut ? archRun.stdout.trim() : '';
   }
-  checks.push(check('node', 'node', nodeVersion === NODE_LANE_VERSION ? 'supported' : 'unsupported', nodeVersion === '' ? 'version probe produced no output' : `node ${nodeVersion}${nodeVersion === NODE_LANE_VERSION ? '' : ` — the validated lane is ${NODE_LANE_VERSION} (package floor >=22 is not a support claim)`}`));
-  if (requiresNativeArm64Node && nodeVersion === NODE_LANE_VERSION) {
+  if (nodeClassification === 'supported') {
+    checks.push(check('node', 'node', 'supported', `node ${nodeVersion} — version-compatible (minimum ${NODE_RUNTIME_MINIMUM}; validated CI baseline ${NODE_LANE_VERSION})`));
+  } else if (nodeClassification === 'below-minimum') {
+    checks.push(check('node', 'node', 'unsupported', `node ${nodeVersion} is below the minimum supported runtime ${NODE_RUNTIME_MINIMUM} (validated CI baseline ${NODE_LANE_VERSION})`));
+  } else {
+    checks.push(check('node', 'node', 'installed but unverified', nodeVersion === '' ? 'version probe produced no output' : `node version could not be parsed ('${nodeVersion}'); minimum supported runtime ${NODE_RUNTIME_MINIMUM}`));
+  }
+  if (requiresNativeArm64Node && nodeClassification === 'supported') {
     if (nodeArch === 'arm64') {
       const archCheck = checks[checks.length - 1]!;
       checks[checks.length - 1] = check('node', 'node', 'supported', `${archCheck.detail} — native arm64 executable (process.arch ${nodeArch})`);
@@ -180,7 +237,8 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     }
   }
 
-  // 3. Git (PATH discovery; presence ≠ evidence lane; exact lane 2.45.4).
+  // 3. Git (PATH discovery; PS-6R minimum >= 2.30.0 — exact baseline
+  //    2.45.4 is reporting, never a gate; presence/safety remain hard).
   const gitPath = resolveExecutable('git', ctx.pathEnv);
   if (gitPath === null) {
     checks.push(check('git', 'git', 'missing', 'git executable not found on PATH'));
@@ -190,26 +248,49 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     const match = gitText.match(/^git version (\S+)/);
     if (match === null) {
       checks.push(check('git', 'git', 'installed but unverified', `${gitPath} — version could not be confirmed (${gitText || 'probe failed'})`));
-    } else if (match[1] === GIT_LANE_VERSION) {
-      checks.push(check('git', 'git', 'supported', `${gitPath} — git ${match[1]}`));
     } else {
-      checks.push(check('git', 'git', 'unsupported', `${gitPath} — git ${match[1]} is not the validated evidence lane (${GIT_LANE_VERSION})`));
+      const gitVersion = match[1]!;
+      const gitVerdict = classifyAgainstMinimum(gitVersion, GIT_RUNTIME_MINIMUM);
+      if (gitVerdict === 'at-or-above') {
+        checks.push(check('git', 'git', 'supported', `${gitPath} — git ${gitVersion} (minimum ${GIT_RUNTIME_MINIMUM}; validated CI baseline ${GIT_LANE_VERSION})`));
+      } else if (gitVerdict === 'below-minimum') {
+        checks.push(check('git', 'git', 'unsupported', `${gitPath} — git ${gitVersion} is below the minimum supported version ${GIT_RUNTIME_MINIMUM} (validated CI baseline ${GIT_LANE_VERSION})`));
+      } else {
+        checks.push(check('git', 'git', 'installed but unverified', `${gitPath} — git version could not be parsed ('${gitVersion}'); minimum supported version ${GIT_RUNTIME_MINIMUM}`));
+      }
     }
   }
 
-  // 4. Pi (0.83.0 baseline; 0.84.x = unsupported, never claimed).
+  // 4. Pi (0.83.0 known-good; PS-6R: candidates >= 0.83.0 require the
+  //    committed pi-guard compatibility probe PASS; below minimum or
+  //    failed probe → unsupported; missing → missing).
   const piPath = resolveExecutable('pi', ctx.pathEnv);
   if (piPath === null) {
     checks.push(check('pi', 'pi', 'missing', 'pi executable not found on PATH'));
   } else {
     const piRun = await runProcess(piPath, ['--version'], { env: ctx.pathEnv, timeoutMs: 10_000 });
     const piVersion = piRun.exitCode === 0 ? (piRun.stdout.trim().split(/\s+/)[0] ?? '') : '';
+    const piTriple = piVersion === '' ? null : parseVersionTriple(piVersion);
     if (piVersion === PI_COMPATIBILITY_BASELINE) {
-      checks.push(check('pi', 'pi', 'supported', `${piPath} — pi ${piVersion} (verified baseline)`));
+      checks.push(check('pi', 'pi', 'supported', `${piPath} — pi ${piVersion} (known-good baseline)`));
     } else if (piVersion === '') {
       checks.push(check('pi', 'pi', 'installed but unverified', `${piPath} — version could not be confirmed`));
+    } else if (piTriple === null) {
+      checks.push(check('pi', 'pi', 'installed but unverified', `${piPath} — pi version could not be parsed ('${piVersion}'); minimum ${PI_RUNTIME_MINIMUM}`));
+    } else if (classifyAgainstMinimum(piVersion, PI_RUNTIME_MINIMUM) === 'below-minimum') {
+      checks.push(check('pi', 'pi', 'unsupported', `${piPath} — pi ${piVersion} is below the minimum supported version ${PI_RUNTIME_MINIMUM}; 0.83.0 is the known-good baseline`));
     } else {
-      checks.push(check('pi', 'pi', 'unsupported', `${piPath} — pi ${piVersion} is not a claimed lane; ${PI_COMPATIBILITY_BASELINE} is the verified baseline and 0.84.x is not a claimed lane`));
+      // Candidate >= 0.83.0: the committed pi-guard compatibility probe
+      // must PASS. The probe needs the installed pi-guard extension entry.
+      const piGuardDir = join(layout.packagesDir, componentDirName(PI_GUARD_PACKAGE_NAME, PI_GUARD_VERSION));
+      const probe = await (ctx.piGuardProbe ?? defaultPiGuardProbe(ctx.nodeExecutable ?? process.execPath, ctx.pathEnv, ctx.env.home))(piPath, piGuardDir);
+      if (probe.ok) {
+        checks.push(check('pi', 'pi', 'supported', `${piPath} — pi ${piVersion} (candidate; pi-guard compatibility probe PASS: ${probe.detail})`));
+      } else if (probe.infrastructure) {
+        checks.push(check('pi', 'pi', 'installed but unverified', `${piPath} — pi ${piVersion} candidate; compatibility probe could not run (${probe.detail})`));
+      } else {
+        checks.push(check('pi', 'pi', 'unsupported', `${piPath} — pi ${piVersion} candidate; pi-guard compatibility probe FAIL: ${probe.detail}`));
+      }
     }
   }
 

@@ -30,7 +30,8 @@ Status vocabulary (used exactly, never embellished):
 
 - **supported** — matches the manifest lane and verifies;
 - **unsupported** — not a claimed lane (e.g. macOS Intel without evidence,
-  Windows, Pi 0.84.x, Node ≠ 22.23.2, case-insensitive filesystem where the
+  Windows, Pi below the 0.83.0 minimum, Node below the 22.19.0 minimum,
+  a failed required compatibility probe, case-insensitive filesystem where the
   lane contract requires evidence);
 - **installed but unverified** — present, version cannot be confirmed
   against the manifest or compatibility predicate (e.g. unknown pi-guard
@@ -45,9 +46,9 @@ Checks (minimum, in order):
 |---|---|---|
 | 1 | platform | OS/arch vs manifest matrix (linux-x64, darwin-arm64) |
 | 2 | architecture | same |
-| 3 | Node | version probe == 22.23.2 |
-| 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version == 2.45.4 |
-| 5 | Pi installation/version | `pi` discovery + version; 0.83.0 supported, 0.84.x = unsupported (never claimed) |
+| 3 | Node | version probe >= 22.19.0 (minimum runtime; 22.23.2 is the validated CI baseline) |
+| 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version >= 2.30.0 (minimum; 2.45.4 is the validated CI baseline) |
+| 5 | Pi installation/version | `pi` discovery + version; 0.83.0 known-good; candidates >= 0.83.0 require the pi-guard compatibility probe PASS; below 0.83.0 = unsupported |
 | 6 | Project Gateway component | installed package path, manifest version match, `bin/project-gateway-mcp` executable |
 | 7 | pi-guard component/version | Pi package store discovery (read-only), extension entry, version == 0.1.2, ADR-037 predicate spot-checks |
 | 8 | trusted store integrity/readiness | per registered project: `bootstrap` replay-style verification (or the Gateway's verification path) — INITIALIZED=ready; ABSENT=missing; PARTIAL/UNSUPPORTED_VERSION/FOREIGN=broken (fail closed, no repair) |

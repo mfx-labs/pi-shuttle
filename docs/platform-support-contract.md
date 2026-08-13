@@ -13,12 +13,18 @@ Supported lane constants (inherited, never reinterpreted):
 
 - Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux) and
   `darwin-arm64-posix-utf8-node22` (macOS, proposed — PS-6);
-- Node: `22.23.2` (package floor `>=22.0.0` is not a support claim);
-- Git: `2.45.4` pinned binary;
-- Pi: `pi-0.83.0-extension-api-v1` (`SUPPORTED_PI_LANE`); **Pi 0.84.1 is
-  not a claimed lane** — the current Linux host runs 0.84.1 and this fact
-  must never be used as substitute evidence (Gateway runbook §1/§8;
-  P3A-WP15-006 remains open);
+- Node: runtime minimum `>=22.19.0`; `22.23.2` is the validated
+  deterministic CI baseline (reported, never an equality gate; the
+  package floor `>=22.0.0` is not a support claim);
+- Git: runtime minimum `>=2.30.0`; `2.45.4` is the validated
+  deterministic CI baseline (operator-provided, never `/usr/bin/git`;
+  Gateway executable safety/fingerprint checks remain fail-closed,
+  unchanged);
+- Pi: `pi-0.83.0-extension-api-v1` (`SUPPORTED_PI_LANE`); `0.83.0` is the
+  known-good baseline; candidates `>=0.83.0` (e.g. the current Linux
+  host's Pi 0.84.1) are accepted only on committed pi-guard
+  compatibility-probe PASS — never claimed, never substitute release
+  evidence (Gateway runbook §1/§8; P3A-WP15-006 remains open);
 - pi-guard: `0.1.2` (commit `7a7580cc...`, tag `v0.1.2`);
 - locale: UTF-8.
 
@@ -97,14 +103,18 @@ Portability rules (binding):
    after SHA verification and before activation. Notarization/signed
    packages are out of scope for v0.1.0 (no GUI, bash + node CLI); the
    docs must say so (no false security claims).
-8. **Git on macOS.** Git is not preinstalled; the pinned 2.45.4 must be
-   provided by the operator (homebrew etc.) and discovered by version
-   probe. `/usr/bin/git` (Apple shim) is never assumed. Lane D must record
-   the git origin (brew vs. custom build) and version.
-9. **Node on macOS.** Node 22.23.2 arm64 build required; version probe
-   must confirm the exact version AND that the binary is arm64 (a
-   Rosetta/Intel node under arm64 macOS would be unverified for the
-   darwin-arm64 lane — arch mismatch fails closed in doctor).
+8. **Git on macOS.** Git is not preinstalled; a Git satisfying the minimum
+   runtime version (>= 2.30.0) must be provided by the operator (homebrew
+   etc.) and discovered by version probe. The validated CI baseline is
+   exactly 2.45.4 (Lane B digest-pinned provision). `/usr/bin/git` (Apple
+   shim) is never assumed. Lane D must record the git origin (brew vs.
+   custom build) and version.
+9. **Node on macOS.** A native arm64 Node satisfying the minimum runtime
+   version (>= 22.19.0) is required; the version probe must confirm the
+   version AND that the binary is arm64 (a Rosetta/Intel node under arm64
+   macOS would be unverified for the darwin-arm64 lane — arch mismatch
+   fails closed in doctor). The validated CI baseline is exactly 22.23.2
+   (Lane B).
 
 ## 4. What "supported" means
 

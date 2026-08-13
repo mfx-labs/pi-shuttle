@@ -329,6 +329,13 @@ export interface PiGuardInput {
   readonly piExecutable: string;
   readonly piVersion: string;
   readonly tarExecutable: string;
+  /**
+   * PS-6R: required only for pi versions that are not the known-good
+   * baseline (candidates >= 0.83.0). Runs against the ACTIVATED package
+   * dir BEFORE any `pi install` mutation; a failed probe fails closed
+   * with no Pi-side mutation.
+   */
+  readonly compatibilityProbe?: (activatedPackageDir: string) => Promise<{ readonly ok: boolean; readonly detail: string }>;
 }
 
 /**
@@ -393,6 +400,21 @@ export async function installPiGuardComponent(input: PiGuardInput): Promise<Comp
   };
   const activated = activatePackageRoot(root ?? extracted.value, targetDir, verifyExisting);
   if (!activated.ok) return activated;
+
+  // PS-6R: a candidate pi version (not the known-good 0.83.0 baseline)
+  // must PASS the committed pi-guard compatibility probe BEFORE any
+  // external `pi install` mutation — a failed probe fails closed with no
+  // Pi-side change (the activated package dir remains rollback-tracked).
+  if (input.compatibilityProbe !== undefined) {
+    const probe = await input.compatibilityProbe(targetDir);
+    if (!probe.ok) {
+      return {
+        ok: false,
+        code: 'ERR-PS3-PIGUARD-PROBE',
+        message: `pi ${input.piVersion} is not the known-good baseline and the pi-guard compatibility probe FAILED: ${probe.detail}`,
+      };
+    }
+  }
 
   // Read-only pre-inspection: is the exact pinned source already present
   // in Pi's package store? (SIR-PS3-002/008)

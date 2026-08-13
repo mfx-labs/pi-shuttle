@@ -179,20 +179,46 @@ test('doctor: pi baseline is supported; pi non-baseline is unsupported (exit 2, 
   }
 });
 
-test('doctor: pi 0.84.x is not a claimed lane (exit 2)', async () => {
+test('doctor: pi below the minimum is unsupported (exit 2); a candidate is healthy only with a PASSING probe', async () => {
   const { env, ctx } = healthyContext();
   try {
     const binDir = join(env, 'fixture-bin');
     writeFakePi(binDir);
-    const pathEnv = { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.84.1' };
-    const result = await runDoctor({ ...ctx, pathEnv });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.exitCode, 2);
-    assert.equal(verdicts(result.report)['pi'], 'unsupported');
-    const detail = result.report.checks.find((c) => c.id === 'pi')!.detail;
-    assert.ok(detail.includes('0.83.0'), detail);
-    assert.ok(detail.includes('0.84.x is not a claimed lane'), detail);
+    // Below minimum (0.82.9): unsupported (exit 2).
+    const below = await runDoctor({ ...ctx, pathEnv: { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.82.9' } });
+    assert.equal(below.ok, true);
+    if (!below.ok) return;
+    assert.equal(below.exitCode, 2);
+    assert.equal(verdicts(below.report)['pi'], 'unsupported');
+    // Candidate (0.84.1) without a probe seam: the real probe cannot run
+    // (fixture pi has no extension loader) → unverifiable finding (exit 1),
+    // never silently green.
+    const unprobed = await runDoctor({ ...ctx, pathEnv: { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.84.1' } });
+    assert.equal(unprobed.ok, true);
+    if (!unprobed.ok) return;
+    assert.equal(verdicts(unprobed.report)['pi'], 'installed but unverified');
+    assert.equal(unprobed.exitCode, 1);
+    // Candidate with a PASSING probe → supported (doctor healthy).
+    const passed = await runDoctor({
+      ...ctx,
+      pathEnv: { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.84.1' },
+      piGuardProbe: async () => ({ ok: true, detail: 'fixture probe PASS', infrastructure: false }),
+    });
+    assert.equal(passed.ok, true);
+    if (!passed.ok) return;
+    assert.equal(passed.exitCode, 0, formatDoctorReport(passed.report));
+    assert.equal(verdicts(passed.report)['pi'], 'supported');
+    // Candidate with a FAILING probe → unsupported (doctor unhealthy).
+    const failed = await runDoctor({
+      ...ctx,
+      pathEnv: { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.84.1' },
+      piGuardProbe: async () => ({ ok: false, detail: 'fixture probe FAIL', infrastructure: false }),
+    });
+    assert.equal(failed.ok, true);
+    if (!failed.ok) return;
+    assert.equal(failed.exitCode, 2);
+    assert.equal(verdicts(failed.report)['pi'], 'unsupported');
+    assert.ok(failed.report.checks.find((c) => c.id === 'pi')!.detail.includes('probe FAIL'), 'detail names the probe failure');
   } finally {
     cleanupEnv(env);
   }
@@ -214,16 +240,35 @@ test('doctor: git missing is a finding; wrong evidence lane is unsupported (exit
   }
 });
 
-test('doctor: git wrong evidence lane is unsupported (exit 2)', async () => {
+test('doctor: git wrong version below the minimum is unsupported (exit 2); newer versions are healthy', async () => {
   const { env, ctx } = healthyContext();
   try {
     const binDir = join(env, 'fixture-bin');
-    writeFakeGit(binDir, '2.46.0');
-    const result = await runDoctor({ ...ctx, pathEnv: ctx.pathEnv });
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    assert.equal(result.exitCode, 2);
-    assert.equal(verdicts(result.report)['git'], 'unsupported');
+    // Below the minimum 2.30.0 → unsupported (exit 2).
+    writeFakeGit(binDir, '2.29.9');
+    const below = await runDoctor({ ...ctx, pathEnv: ctx.pathEnv });
+    assert.equal(below.ok, true);
+    if (!below.ok) return;
+    assert.equal(below.exitCode, 2);
+    assert.equal(verdicts(below.report)['git'], 'unsupported');
+    // Newer version (2.50.1): a difference from the CI baseline alone is
+    // never a failure — supported (doctor healthy).
+    writeFakeGit(binDir, '2.50.1');
+    const newer = await runDoctor({ ...ctx, pathEnv: ctx.pathEnv });
+    assert.equal(newer.ok, true);
+    if (!newer.ok) return;
+    assert.equal(newer.exitCode, 0, formatDoctorReport(newer.report));
+    assert.equal(verdicts(newer.report)['git'], 'supported');
+    const detail = newer.report.checks.find((c) => c.id === 'git')!.detail;
+    assert.ok(detail.includes('2.50.1'), 'detail reports the actual version');
+    assert.ok(detail.includes('minimum 2.30.0'), 'detail reports the minimum');
+    assert.ok(detail.includes('2.45.4'), 'detail reports the validated CI baseline');
+    // Exact minimum 2.30.0 is accepted.
+    writeFakeGit(binDir, '2.30.0');
+    const exactMin = await runDoctor({ ...ctx, pathEnv: ctx.pathEnv });
+    assert.equal(exactMin.ok, true);
+    if (!exactMin.ok) return;
+    assert.equal(exactMin.exitCode, 0, formatDoctorReport(exactMin.report));
   } finally {
     cleanupEnv(env);
   }

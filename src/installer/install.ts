@@ -29,10 +29,11 @@ import { existsSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:f
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireLock, releaseLock } from '../persistence/lock.js';
-import { GATEWAY_PS1_BASELINE_COMMIT, GATEWAY_PACKAGE_VERSION, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { GATEWAY_PS1_BASELINE_COMMIT, GATEWAY_PACKAGE_VERSION, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, checkTarPresent, classifyPiVersion, ensureWritableLayout, PI_NON_BASELINE_POLICY } from './preflight.js';
+import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, checkTarPresent, classifyPiVersion, ensureWritableLayout, PI_RUNTIME_POLICY } from './preflight.js';
 import { runProcess, resolveExecutable } from './process.js';
 import { componentDirName, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, GATEWAY_PACKAGE_NAME, PI_GUARD_PACKAGE_NAME } from './components.js';
 import type { GatewayInstallResult, PiGuardInstallResult } from './components.js';
@@ -230,6 +231,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   // classification applies only when pi-guard is selected.
   const piExecutable = resolveExecutable('pi');
   let piVersion = '';
+  let piGuardProbe: ((activatedPackageDir: string) => Promise<{ readonly ok: boolean; readonly detail: string }>) | undefined = undefined;
   if (options.selections.piGuard) {
     let observed: string | null = null;
     if (piExecutable !== null) {
@@ -237,11 +239,40 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       if (versionRun.exitCode === 0) observed = versionRun.stdout.trim().split(/\s+/)[0] ?? null;
     }
     const classification = classifyPiVersion(observed);
-    const policyVerdict = applyPiPolicy(classification, PI_NON_BASELINE_POLICY);
+    const policyVerdict = applyPiPolicy(classification, PI_RUNTIME_POLICY);
     if (!policyVerdict.ok) {
       return { kind: 'REFUSED', reason: policyVerdict.message };
     }
     piVersion = classification.lane === 'missing' ? '' : classification.version;
+    if (classification.lane === 'candidate') {
+      // PS-6R: a candidate pi (not the 0.83.0 known-good baseline) must
+      // PASS the committed pi-guard compatibility probe; the probe is
+      // built BEFORE any mutation and fails closed when its infrastructure
+      // (pi's extension loader) cannot be located.
+      if (piExecutable === null) {
+        return { kind: 'REFUSED', reason: 'pi was not found on PATH; a pi candidate cannot be probed without the pi executable' };
+      }
+      const loader = resolvePiLoaderFromBin(piExecutable);
+      if (loader === null) {
+        return { kind: 'REFUSED', reason: `pi ${classification.version} is a candidate (not the known-good baseline ${PI_COMPATIBILITY_BASELINE}) and its extension loader could not be located from ${piExecutable}; candidates require a verified integration surface` };
+      }
+      const resolvedLoader: string = loader;
+      const probeCli = fileURLToPath(new URL('../compat/pi-guard-probe.js', import.meta.url));
+      piGuardProbe = async (activatedDir) => {
+        const entry = join(activatedDir, 'extensions', 'pi-guard', 'index.ts');
+        const probeRun = await runProcess(process.execPath, [probeCli], {
+          timeoutMs: 60_000,
+          env: { ...env.pathEnv, PI_LOADER: resolvedLoader, PI_GUARD_ENTRY: entry, HOME: env.home },
+        });
+        if (probeRun.exitCode === 0 && probeRun.signal === null && !probeRun.timedOut) {
+          return { ok: true, detail: `pi ${classification.version} passed the pi-guard compatibility probe` };
+        }
+        return {
+          ok: false,
+          detail: probeRun.exitCode === 2 ? 'probe infrastructure error (loader or entry unavailable)' : (probeRun.stderr.trim() || probeRun.stdout.trim()).slice(0, 300) || `probe exited ${probeRun.exitCode ?? 'unknown'}`,
+        };
+      };
+    }
   }
 
   // Layout writability (creates the pi-shuttle layout dirs).
@@ -317,6 +348,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       piExecutable,
       piVersion,
       tarExecutable: tar,
+      compatibilityProbe: piGuardProbe,
     });
     if (!piGuard.ok) {
       const rollbackState = rollback(attempt);
@@ -396,6 +428,9 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   }
   if (piGuardResult !== undefined && !piGuardResult.digestVerified) {
     notesForDigest.push('pi-guard artifact digest is locally observed, not verified against a release expectation');
+  }
+  if (piGuardProbe !== undefined && piGuardResult !== undefined && piGuardResult.status === 'installed-verified') {
+    notes.push(`pi ${piGuardResult.piVersion} is not the known-good baseline ${PI_COMPATIBILITY_BASELINE}; the pi-guard compatibility probe PASSED before the Pi-side mutation`);
   }
   notes.push(...notesForDigest);
   const result = omitted.length === 0 && allSelectedVerified ? 'COMPLETE' : 'PARTIAL';

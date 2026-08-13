@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, classifyPiVersion, ensureWritableLayout } from '../../src/installer/preflight.js';
+import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, classifyNodeRuntime, classifyPiVersion, ensureWritableLayout } from '../../src/installer/preflight.js';
 import { resolveLayout } from '../../src/host/environment.js';
 
 const LINUX = { home: '/tmp/x', platform: 'linux', arch: 'x64' };
@@ -25,29 +25,57 @@ test('preflight: platform lane classification — linux x64 and darwin arm64 sup
 
 test('preflight: node lane is the exact validated version', () => {
   const verdict = checkNodeLane();
-  assert.equal(verdict.ok, true, 'the CI node lane is the validated 22.23.2 lane');
+  assert.equal(verdict.ok, true, 'the CI node lane (22.23.2) is at/above the minimum 22.19.0');
 });
 
-test('preflight: pi version classification against the 0.83.0 baseline', () => {
+test('preflight: node runtime classification boundaries (PS-6R)', () => {
+  // 22.18.x → reject (below minimum).
+  assert.equal(classifyNodeRuntime('22.18.9'), 'below-minimum');
+  assert.equal(classifyNodeRuntime('22.18.0'), 'below-minimum');
+  // 22.19.0 → accept (exact minimum).
+  assert.equal(classifyNodeRuntime('22.19.0'), 'supported');
+  // 22.23.2 → accept / known-good CI baseline.
+  assert.equal(classifyNodeRuntime('22.23.2'), 'supported');
+  // newer 22.x → accept.
+  assert.equal(classifyNodeRuntime('22.99.0'), 'supported');
+  // newer major → accept when semver-valid (all other required facts
+  // still apply: platform lane, native arm64 on darwin, presence).
+  assert.equal(classifyNodeRuntime('24.0.0'), 'supported');
+  // malformed → reject (fail closed).
+  assert.equal(classifyNodeRuntime('garbage'), 'malformed');
+  assert.equal(classifyNodeRuntime('v22'), 'malformed');
+  assert.equal(classifyNodeRuntime('22.19'), 'malformed');
+  assert.equal(classifyNodeRuntime('22.19.0-rc.1'), 'malformed');
+  assert.equal(classifyNodeRuntime(null), 'malformed');
+});
+
+test('preflight: pi version classification against the 0.83.0 baseline (PS-6R)', () => {
   assert.deepEqual(classifyPiVersion('0.83.0'), { lane: 'supported', version: '0.83.0' });
-  assert.deepEqual(classifyPiVersion('0.84.1'), { lane: 'not-supported-lane', version: '0.84.1' });
+  assert.deepEqual(classifyPiVersion('0.84.1'), { lane: 'candidate', version: '0.84.1' }, 'above the known-good baseline → candidate (needs the compatibility probe)');
+  assert.deepEqual(classifyPiVersion('0.83.1'), { lane: 'candidate', version: '0.83.1' });
+  assert.deepEqual(classifyPiVersion('1.0.0'), { lane: 'candidate', version: '1.0.0' });
+  assert.deepEqual(classifyPiVersion('0.82.9'), { lane: 'not-supported-lane', version: '0.82.9' }, 'below the minimum 0.83.0 → unsupported');
   assert.deepEqual(classifyPiVersion(' 0.83.0 '), { lane: 'supported', version: '0.83.0' }, 'whitespace is tolerated');
   assert.deepEqual(classifyPiVersion(null), { lane: 'missing' });
-  assert.deepEqual(classifyPiVersion('garbage'), { lane: 'not-supported-lane', version: 'garbage' });
+  assert.deepEqual(classifyPiVersion('garbage'), { lane: 'malformed', version: 'garbage' }, 'unparseable → malformed (fail closed)');
 });
 
-test('preflight: both hypothetical non-baseline Pi policies are implemented at the pure layer', () => {
-  const notBaseline = classifyPiVersion('0.84.1');
-  const refused = applyPiPolicy(notBaseline, 'refuse-non-baseline');
-  assert.equal(refused.ok, false);
-  if (!refused.ok) {
-    assert.equal(refused.code, 'ERR-PS3-PI-NOT-SUPPORTED-LANE');
-    assert.ok(refused.message.includes('0.83.0 is the verified baseline'), 'contract-mandated explanation');
-  }
-  const allowed = applyPiPolicy(notBaseline, 'allow-unverified');
-  assert.equal(allowed.ok, true, 'the alternative policy exists for the pending human decision');
+test('preflight: pi policies — probe-based acceptance is the production policy; refuse-non-baseline remains the conservative alternative', () => {
+  // Known-good baseline: accepted under every policy.
+  assert.equal(applyPiPolicy(classifyPiVersion('0.83.0'), 'probe-candidates').ok, true);
   assert.equal(applyPiPolicy(classifyPiVersion('0.83.0'), 'refuse-non-baseline').ok, true);
-  assert.equal(applyPiPolicy(classifyPiVersion(null), 'refuse-non-baseline').ok, false);
+  // Candidate: accepted by the production policy (probe runs later in the
+  // install flow and must PASS); refused by the conservative policy.
+  const candidate = classifyPiVersion('0.84.1');
+  assert.equal(candidate.lane, 'candidate');
+  assert.equal(applyPiPolicy(candidate, 'probe-candidates').ok, true, 'candidate proceeds to the required compatibility probe');
+  const refused = applyPiPolicy(candidate, 'refuse-non-baseline');
+  assert.equal(refused.ok, false);
+  // Below minimum and malformed: refused under every policy.
+  assert.equal(applyPiPolicy(classifyPiVersion('0.82.9'), 'probe-candidates').ok, false);
+  assert.equal(applyPiPolicy(classifyPiVersion('garbage'), 'probe-candidates').ok, false);
+  // Missing: refused when pi-guard is selected.
+  assert.equal(applyPiPolicy(classifyPiVersion(null), 'probe-candidates').ok, false);
 });
 
 test('preflight: root/sudo is refused (SIR-PS3-007); non-root and uid-less hosts pass', () => {

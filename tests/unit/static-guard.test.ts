@@ -57,6 +57,7 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/persistence/writer.ts': ['mkdirSync', 'openSync', 'closeSync', 'writeSync', 'fsyncSync', 'renameSync', 'unlinkSync', 'fchmodSync'],
   'src/persistence/lock.ts': ['openSync', 'closeSync', 'writeSync', 'unlinkSync'],
   'src/host/environment.ts': ['realpathSync'],
+  'src/compat/pi-guard-probe.ts': ['existsSync', 'realpathSync'],
   'src/config/json.ts': ['openSync', 'closeSync', 'readSync', 'fstatSync'],
   // PS-3 installer boundary (ordinary local operator package management):
   'src/installer/preflight.ts': ['mkdirSync'],
@@ -97,7 +98,10 @@ test('ps2/ps3/ps4 static guard: subprocess execution exists only inside the shar
 test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the process boundary', () => {
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts') continue;
+    // The pi-guard compatibility probe is a process boundary: its CLI main
+    // (spawned by the installer/doctor/CI through the shared runner) reads
+    // its env contract directly, exactly like the runner itself.
+    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts' || rel(file) === 'src/compat/pi-guard-probe.ts') continue;
     assert.equal(content.includes('process.env'), false, `${rel(file)} must not read the environment directly`);
   }
 });

@@ -174,7 +174,7 @@ test('installer: corrupted artifact fails closed', async () => {
   }
 });
 
-test('installer: non-baseline Pi version is refused with the contract explanation (0.84.1)', async () => {
+test('installer: non-baseline Pi version (candidate) is refused when its integration surface cannot be located (0.84.1)', async () => {
   const env = makeEnv();
   try {
     await gatewayArtifact(env);
@@ -182,11 +182,69 @@ test('installer: non-baseline Pi version is refused with the contract explanatio
     const runEnv = fullInstallEnv(env, '0.84.1');
     const run = await runInstaller(installArgs(env), runEnv);
     assert.equal(run.code, 2, run.stdout + run.stderr);
-    assert.ok(run.stdout.includes('0.83.0 is the verified baseline'), run.stdout);
     assert.ok(run.stdout.includes('REFUSED'), run.stdout);
+    // 0.84.1 is now a CANDIDATE (>= minimum 0.83.0): the fixture pi has
+    // no extension loader, so the required compatibility probe cannot
+    // run — fail closed, never a silent acceptance.
+    assert.ok(run.stdout.includes('extension loader could not be located'), run.stdout);
     // The flow refuses BEFORE creating layout dirs (pi check precedes writability).
     assert.equal(existsSync(resolveLayout(env).packagesDir), false, 'nothing installed on Pi policy refusal');
     assert.equal(existsSync(resolveLayout(env).installReceiptPath), false);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: Pi candidate probe FAIL fails closed with no Pi mutation; probe PASS completes with the probe note', async () => {
+  const env = makeEnv();
+  try {
+    await gatewayArtifact(env);
+    await piGuardArtifact(env);
+    // The fixture pi lives at <env>/fixture-bin/pi, so the resolved
+    // loader path is <env>/dist/core/extensions/loader.js. Provide a fake
+    // loader module there so the committed probe can run.
+    const loaderDir = join(env, 'dist', 'core', 'extensions');
+    mkdirSync(loaderDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(env, 'package.json'), '{"type":"module"}\n');
+    writeFileSync(join(loaderDir, 'loader.js'), `export async function loadExtensions(paths, home) {
+  if (process.env.FIXTURE_PROBE_FAIL === '1') return { extensions: [], errors: ['fixture: integration surface broken'] };
+  return {
+    extensions: [{
+      path: paths[0],
+      commands: new Map([['guard', { name: 'guard' }]]),
+      handlers: new Map([['session_start', []], ['session_shutdown', []], ['before_agent_start', []], ['tool_call', []]]),
+      tools: new Map(),
+    }],
+    errors: [],
+  };
+}
+`, { mode: 0o600 });
+
+    // Probe FAIL → the install FAILS closed before any `pi install`
+    // mutation; the activated package dir is rolled back.
+    const piState = join(env, 'pi-state.txt');
+    const base = fullInstallEnv(env, '0.84.1', piState);
+    const failRun = await runInstaller(installArgs(env), {
+      ...base,
+      extraEnv: { ...base.extraEnv, FIXTURE_PROBE_FAIL: '1' },
+    });
+    assert.ok(failRun.stdout.includes('FAILED'), failRun.stdout + failRun.stderr);
+    assert.ok(failRun.stdout.includes('compatibility probe FAILED'), failRun.stdout);
+    assert.equal(existsSync(join(resolveLayout(env).packagesDir, 'pi-guard@0.1.2')), false, 'activated pi-guard dir rolled back');
+    assert.equal(existsSync(resolveLayout(env).installReceiptPath), false, 'no receipt on failed install');
+
+    // Probe PASS → install proceeds to COMPLETE with the probe note.
+    const passRun = await runInstaller(installArgs(env), {
+      ...base,
+      extraEnv: { ...base.extraEnv },
+    });
+    assert.ok(passRun.stdout.includes('COMPLETE'), passRun.stdout + passRun.stderr);
+    assert.equal(existsSync(resolveLayout(env).installReceiptPath), true, 'receipt written');
+    const receipt = JSON.parse(readFileSync(resolveLayout(env).installReceiptPath, 'utf8'));
+    assert.ok(
+      (receipt.notes ?? []).some((n: string) => n.includes('compatibility probe PASSED')),
+      `receipt notes must record the candidate probe PASS: ${JSON.stringify(receipt.notes)}`,
+    );
   } finally {
     cleanupEnv(env);
   }

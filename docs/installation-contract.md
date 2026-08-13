@@ -38,25 +38,42 @@ required flags; no silent defaults in batch mode for components 1–2.
   (`pi-shuttle-<version>.json`, see product-contract §6) and ONLY artifacts
   listed there.
 - Every artifact is verified against its SHA-256 pin before use.
-- Component versions are exact: gateway `0.1.0` (package + closure commit),
-  pi-guard `0.1.2`, node `22.23.2`, git `2.45.4`, gateway dependencies
+- Installed component versions are exact: gateway `0.1.0` (package +
+  closure commit), pi-guard `0.1.2`, gateway dependencies
   `@modelcontextprotocol/server@2.0.0`, `ajv@8.20.0`, `zod@4.4.3`.
-- No `latest`, no ranges, no "if newer is available" behavior. The installer
-  never installs arbitrary Node/Git/Pi versions.
+- Runtime environment requirements (probed from the environment, never
+  installed by the installer): Node minimum `>=22.19.0` with `22.23.2` as
+  the validated deterministic CI baseline (reported, never an equality
+  gate; native arm64 remains mandatory on darwin-arm64); Git minimum
+  `>=2.30.0` with `2.45.4` as the validated deterministic CI baseline
+  (the Gateway additionally enforces its own minimum plus binary
+  fingerprint/ownership checks, fail-closed, unchanged); Pi minimum
+  candidate `>=0.83.0` with `0.83.0` as the known-good baseline — a
+  non-baseline candidate requires the committed pi-guard compatibility
+  probe to PASS.
+- No `latest`, no floating versions, no "if newer is available" behavior.
+  The installer never installs arbitrary Node/Git/Pi versions; a runtime
+  version is accepted only through the minimum/probe policy of §4, never
+  silently.
 
 ## 4. Preflight and refusal boundaries
 
 - Platform/architecture: Linux x86_64 → supported; macOS arm64 → supported
   lane (pending PS-6 evidence, enforced by manifest gate); anything else →
   **refuse with a clear message** (do not claim support).
-- Node: exact lane `22.23.2` verified; other versions → refuse with the
-  supported-lane message (engines `>=22.0.0` is a package floor, not a
-  support claim).
-- Git: `2.45.4` verified by version probe (discovered via PATH, never
-  hardcoded `/usr/bin/git`).
-- Pi: required when pi-guard is selected. Pi `0.83.0` = supported baseline.
-  Pi `0.84.1` → **refuse with explanation** ("0.83.0 is the verified
-  baseline; 0.84.x is not a claimed lane"), not silent acceptance.
+- Node: minimum runtime `22.19.0`; versions at/above the minimum are
+  version-compatible. `22.23.2` is the validated CI baseline (reported,
+  never an equality gate). Malformed/unreadable versions fail closed.
+  (engines `>=22.0.0` is a package floor, not a support claim.)
+- Git: minimum runtime `2.30.0` verified by version probe (discovered via
+  PATH, never hardcoded `/usr/bin/git`); `2.45.4` is the validated CI
+  baseline. The Gateway additionally enforces its own minimum plus binary
+  fingerprint/ownership checks (fail-closed, unchanged).
+- Pi: required when pi-guard is selected. Pi `0.83.0` = known-good baseline.
+  Candidates `>= 0.83.0` require the committed pi-guard compatibility
+  probe to PASS before acceptance (install and doctor); a failed probe,
+  an unlocatable probe surface, or a version below `0.83.0` → **refuse
+  with explanation**, not silent acceptance.
 - Network/disk: enough space for two packages + node_modules; failure
   boundaries below.
 - The installer refuses to run with `sudo`/root for user-content

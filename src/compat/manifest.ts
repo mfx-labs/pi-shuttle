@@ -28,8 +28,18 @@ export const PI_GUARD_VERSION = '0.1.2';
 export const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
 export const PI_COMPATIBILITY_BASELINE = '0.83.0';
 export const SUPPORTED_PI_LANE = 'pi-0.83.0-extension-api-v1';
+
+// PS-6R runtime compatibility: the exact versions below are the VALIDATED
+// CI/evidence baselines (release evidence; reported by doctor/help). They
+// are NOT runtime equality gates. The RUNTIME REQUIREMENTS are the
+// *_RUNTIME_MINIMUM constants, enforced as minimum-version + capability
+// checks by the shared compatibility layer (compat/versions.ts + the
+// pi-guard compatibility probe). Human-approved policy (PS-6R).
 export const NODE_LANE_VERSION = '22.23.2';
 export const GIT_LANE_VERSION = '2.45.4';
+export const NODE_RUNTIME_MINIMUM = '22.19.0';
+export const GIT_RUNTIME_MINIMUM = '2.30.0';
+export const PI_RUNTIME_MINIMUM = '0.83.0';
 export const CONFIGURATION_VERSION = '2';
 export const CONFIG_FORMAT_VERSION = 1;
 
