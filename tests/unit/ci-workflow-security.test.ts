@@ -112,14 +112,14 @@ test('workflow security: component checkouts are exact public SHAs with asserted
   assert.ok(text.includes(`GATEWAY_COMMIT: ${GATEWAY_COMMIT}`), 'Gateway pin is a repository-owned workflow constant');
   assert.ok(text.includes(`PI_GUARD_COMMIT: ${PI_GUARD_COMMIT}`), 'pi-guard pin is a repository-owned workflow constant');
   // Independent HEAD assertion for both components (fail closed).
-  assert.ok(text.includes('git -C "$RUNNER_TEMP/gateway" rev-parse HEAD'), 'Gateway checked-out HEAD asserted');
-  assert.ok(text.includes('git -C "$RUNNER_TEMP/pi-guard" rev-parse HEAD'), 'pi-guard checked-out HEAD asserted');
+  assert.ok(text.includes('git -C "${{ github.workspace }}/gateway" rev-parse HEAD'), 'Gateway checked-out HEAD asserted');
+  assert.ok(text.includes('git -C "${{ github.workspace }}/pi-guard" rev-parse HEAD'), 'pi-guard checked-out HEAD asserted');
   assert.ok(text.includes('test "$GW_HEAD" = "$GATEWAY_COMMIT"'), 'Gateway HEAD compared to the exact pin');
   assert.ok(text.includes('test "$PG_HEAD" = "$PI_GUARD_COMMIT"'), 'pi-guard HEAD compared to the exact pin');
   // Fixtures built on the runner through the committed helper (no hosting).
   assert.ok(text.includes('bash scripts/prepare-fixtures.sh'), 'fixtures built through the committed helper');
-  assert.ok(text.includes('--gateway-checkout "$RUNNER_TEMP/gateway"'), 'Gateway checkout passed to the fixture builder');
-  assert.ok(text.includes('--pi-guard-checkout "$RUNNER_TEMP/pi-guard"'), 'pi-guard checkout passed to the fixture builder');
+  assert.ok(text.includes('--gateway-checkout "${{ github.workspace }}/gateway"'), 'Gateway checkout passed to the fixture builder');
+  assert.ok(text.includes('--pi-guard-checkout "${{ github.workspace }}/pi-guard"'), 'pi-guard checkout passed to the fixture builder');
 });
 
 test('workflow security: every referenced helper script exists', () => {

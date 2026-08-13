@@ -163,12 +163,15 @@ jobs:
 
       # Exact public component checkouts — full-SHA-pinned refs, never
       # branches/tags as authority. Public repositories: no credentials.
+      # Checked out under the workspace (actions/checkout v4 requires the
+      # destination inside $GITHUB_WORKSPACE); fixture output stays in
+      # runner.temp.
       - name: Checkout Gateway exact commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: mfx-labs/project-gateway
           ref: 98d1b204a864596bda91bec1104b8a8d5e89e1cd
-          path: ${{ runner.temp }}/gateway
+          path: gateway
           persist-credentials: false
 
       - name: Checkout pi-guard exact commit
@@ -176,7 +179,7 @@ jobs:
         with:
           repository: mfx-labs/pi-guard
           ref: 7a7580cc4cbd7926797564c72269394fc29a860a
-          path: ${{ runner.temp }}/pi-guard
+          path: pi-guard
           persist-credentials: false
 
       # Independent exact-commit assertion: git rev-parse HEAD must equal
@@ -184,8 +187,8 @@ jobs:
       - name: Assert exact component HEADs
         run: |
           set -euo pipefail
-          GW_HEAD="$(git -C "$RUNNER_TEMP/gateway" rev-parse HEAD)"
-          PG_HEAD="$(git -C "$RUNNER_TEMP/pi-guard" rev-parse HEAD)"
+          GW_HEAD="$(git -C "${{ github.workspace }}/gateway" rev-parse HEAD)"
+          PG_HEAD="$(git -C "${{ github.workspace }}/pi-guard" rev-parse HEAD)"
           test "$GW_HEAD" = "$GATEWAY_COMMIT" || { echo "gateway HEAD mismatch: expected $GATEWAY_COMMIT got $GW_HEAD" >&2; exit 1; }
           test "$PG_HEAD" = "$PI_GUARD_COMMIT" || { echo "pi-guard HEAD mismatch: expected $PI_GUARD_COMMIT got $PG_HEAD" >&2; exit 1; }
           echo "gateway HEAD == $GW_HEAD (exact public pin)"
@@ -199,8 +202,8 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/prepare-fixtures.sh \
-            --gateway-checkout "$RUNNER_TEMP/gateway" \
-            --pi-guard-checkout "$RUNNER_TEMP/pi-guard" \
+            --gateway-checkout "${{ github.workspace }}/gateway" \
+            --pi-guard-checkout "${{ github.workspace }}/pi-guard" \
             --out "$RUNNER_TEMP/fixtures"
           test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
           test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
