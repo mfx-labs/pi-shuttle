@@ -7,8 +7,8 @@
 # executable/package checks, exact Git 2.45.4 provisioning (digest-pinned
 # kernel.org source, built version asserted), volume case-sensitivity
 # record, and the real-stack subsection built on the runner from the
-# EXACT PUBLIC component source commits (mfx-labs/project-gateway @
-# 98d1b204a864596bda91bec1104b8a8d5e89e1cd, mfx-labs/pi-guard @
+# EXACT component source commits (mfx-labs/project-gateway @
+# 28f1d3a12382bc145376c8d8a2d87d89495785ec (PS-6R baseline), mfx-labs/pi-guard @
 # 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2) via the committed
 # scripts/prepare-fixtures.sh boundary — no external fixture hosting, no
 # fixture_source input, no curl fixture download, no secrets (both
@@ -31,9 +31,10 @@ permissions:
 env:
   # Repository-owned exact component pins (PS-6 public multi-repo lane).
   # Gateway: product-contract §6 — "gatewayCommit pins the exact source
-  # closure for the packaged artifact" (public mfx-labs/project-gateway).
+  # closure for the packaged artifact" (mfx-labs/project-gateway, PS-6R
+  # baseline).
   # pi-guard: v0.1.2 exact commit.
-  GATEWAY_COMMIT: 98d1b204a864596bda91bec1104b8a8d5e89e1cd
+  GATEWAY_COMMIT: 28f1d3a12382bc145376c8d8a2d87d89495785ec
   PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
@@ -170,7 +171,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: mfx-labs/project-gateway
-          ref: 98d1b204a864596bda91bec1104b8a8d5e89e1cd
+          ref: 28f1d3a12382bc145376c8d8a2d87d89495785ec
           path: gateway
           persist-credentials: false
 

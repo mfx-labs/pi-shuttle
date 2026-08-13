@@ -24,10 +24,10 @@ test('manifest: exact approved pins are preserved', () => {
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, PI_SHUTTLE_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, '0.1.0');
   assert.equal(COMPATIBILITY_MANIFEST.gateway, '0.1.0');
-  // Gateway committed baseline: the exact PUBLIC source closure (PS-6
-  // public multi-repo lane; mfx-labs/project-gateway main).
+  // Gateway committed baseline: the exact source closure (PS-6R
+  // baseline; mfx-labs/project-gateway).
   assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, GATEWAY_PS1_BASELINE_COMMIT);
-  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '98d1b204a864596bda91bec1104b8a8d5e89e1cd');
+  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '28f1d3a12382bc145376c8d8a2d87d89495785ec');
   // pi-guard verified release.
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, PI_GUARD_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, '0.1.2');
@@ -73,7 +73,7 @@ test('manifest: the authoritative public Gateway pin is exact and repository-own
   // Lane B workflow checks out — one 40-hex full SHA, no branch/tag/floating
   // ref, identical across every authoritative location (product-contract §6:
   // "gatewayCommit pins the exact source closure for the packaged artifact").
-  const PUBLIC_GATEWAY_COMMIT = '98d1b204a864596bda91bec1104b8a8d5e89e1cd';
+  const PUBLIC_GATEWAY_COMMIT = '28f1d3a12382bc145376c8d8a2d87d89495785ec';
   assert.match(PUBLIC_GATEWAY_COMMIT, /^[0-9a-f]{40}$/, 'pin must be a full 40-hex SHA');
   assert.equal(GATEWAY_PS1_BASELINE_COMMIT, PUBLIC_GATEWAY_COMMIT, 'manifest pin == exact public Gateway commit');
   assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, PUBLIC_GATEWAY_COMMIT, 'manifest exposes the same exact pin');

@@ -101,7 +101,7 @@ test('workflow security: no workflow_dispatch inputs, no external fixture transp
 
 test('workflow security: component checkouts are exact public SHAs with asserted HEADs — PS-6 public multi-repo lane', () => {
   const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
-  const GATEWAY_COMMIT = '98d1b204a864596bda91bec1104b8a8d5e89e1cd';
+  const GATEWAY_COMMIT = '28f1d3a12382bc145376c8d8a2d87d89495785ec';
   const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
   // Exact full-SHA component checkouts (never branches/tags as authority).
   assert.ok(text.includes(`repository: mfx-labs/project-gateway`), 'Gateway checked out from its public repository');
