@@ -180,6 +180,9 @@ jobs:
           repository: mfx-labs/pi-guard
           ref: 7a7580cc4cbd7926797564c72269394fc29a860a
           path: pi-guard
+          # Full fetch so the v0.1.2 tag object is present and
+          # prepare-fixtures.sh can assert the tag AT the pinned commit.
+          fetch-depth: 0
           persist-credentials: false
 
       # Independent exact-commit assertion: git rev-parse HEAD must equal
