@@ -293,3 +293,141 @@ exists to reference).
   needed), then record run ID/job inventory/results in §12.5.
 
 `PS-6 LANE B REAL-STACK — FIXTURE HOSTING REQUIRED`
+
+---
+
+## 13. PS-6 public multi-repo continuation — real-stack evidence (gate: `PS-6 — PUBLIC MULTI-REPO LANE B COMPOSITION`)
+
+### 13.1 Gateway publication fact and governing pin decision
+
+The Gateway repository `mfx-labs/project-gateway` is now PUBLIC, main ==
+`98d1b204a864596bda91bec1104b8a8d5e89e1cd`. Per the gate's governing-rule
+resolution (product-contract §6: "`gatewayCommit` pins the exact source
+closure for the packaged artifact" — semantic A), the pi-shuttle
+authoritative Gateway pin was updated from the pre-public
+`1a454b61241ca23a638c3083e2e7d28e28f86b18` to the exact public source
+commit `98d1b204a864596bda91bec1104b8a8d5e89e1cd` in
+`src/compat/manifest.ts` (`GATEWAY_PS1_BASELINE_COMMIT`) and in
+`scripts/prepare-fixtures.sh`. No Gateway/pi-guard source change; pi-guard
+commit/tag `7a7580cc…` = `v0.1.2` unchanged; Pi policy unchanged 0.83.0;
+macOS Intel remains unsupported.
+
+### 13.2 New pi-shuttle commits (normal push, no force)
+
+| SHA | Purpose |
+|---|---|
+| `dfe3c40280cca4c553aaeb28220c975fad3c454d` | correction: pins, multi-repo Lane B, helper fixes, rereview report, preserved §12 evidence |
+| `83bf2bc0d60d87f6b007123c5338f40285f0845f` | correction follow-up: component checkout `path` under workspace (actions/checkout v4 rejects `runner.temp`) |
+| `6b733b724e97544d5593fedcf975f03020e580f9` | correction follow-up: pi-guard checkout `fetch-depth: 0` so the v0.1.2 tag object is assertable |
+| `afb609b0797e7f83f7956c92314dd8b596a149f6` | correction follow-up: `npm ci` in the real-stack job (per-job workspace) |
+
+Final remote master == `afb609b0797e7f83f7956c92314dd8b596a149f6`.
+(§12's earlier "fixture hosting required" state is superseded: temporary
+hosting is no longer needed now that the components are public. The
+historical record of the blocked state above is preserved.)
+
+### 13.3 Remote run IDs (commit `afb609b`, push event)
+
+| Lane | Run ID | Result |
+|---|---|---|
+| A — Linux x86_64 regression | `31665543829` | success (44s) |
+| B — macOS arm64 evidence | `31665543802` | success (3m9s) |
+| C — macOS Intel compatibility | `31665543851` | success (53s; Intel UNSUPPORTED semantic intact) |
+
+Earlier correction-execution runs (same correction subject, prior SHAs):
+`31664774964` (checkout-path failure), `31665228964` (tag-missing
+failure), `31664994934` (fixture-gate passed; npm-ci failure), recorded as
+the remote-driven correction evidence. Zero-job validation failure: none —
+all workflows validated and executed jobs.
+
+### 13.4 Lane B job inventory (run `31665543802`)
+
+- Job `Build + tests (darwin arm64)` (ID `94339198558`) — 1m47s:
+  arm64 runner assertion, exact Node 22.23.2 darwin-arm64 (arch
+  ASSERTED), `npm ci`, build, typecheck, full suite 217 pass / 0 fail
+  (3 truthful non-darwin skips absent on darwin; PS6-MAC-001
+  duplicate-object tests included), **APFS evidence: PASS — 3 evidence
+  tests executed and passed (case variant, Unicode NFC/NFD, symlink
+  alias; one filesystem object ⇒ at most one registration) on darwin**,
+  npm-pack direct-exec evidence, digest-pinned Git 2.45.4 build +
+  exact version assertion, volume case-sensitivity record, clean-tree.
+- Job `Real-stack integration (public multi-repo)` (ID `94339500407`) —
+  1m13s: exact public component checkouts, HEAD assertions, fixture
+  build, real installer → lifecycle → MCP → pi/pi-guard, GREEN.
+
+### 13.5 Exact component checkout SHAs (asserted on the runner)
+
+- Gateway: `git rev-parse HEAD` == `98d1b204a864596bda91bec1104b8a8d5e89e1cd` (public pin).
+- pi-guard: `git rev-parse HEAD` == `7a7580cc4cbd7926797564c72269394fc29a860a` (v0.1.2 tag asserted at the pinned commit).
+
+### 13.6 Generated fixture digests (run `31665543802`; deterministic)
+
+| Component | Source commit | Artifact SHA-256 |
+|---|---|---|
+| Gateway | `98d1b204…` | `e41a3530face0f32fe78779363b4affb699a35b5d461a5dae7dac67ef9d7c1c9` |
+| pi-guard | `7a7580cc…` = v0.1.2 | `057f1b636328e8c77857a4b590d051fcc52c0c9b015ca5dd1a773c21d7d24d01` |
+
+The Gateway digest differs from the historical `e211403b…` (built from
+the pre-public `1a454b61…`) because the public MIT/repository metadata
+changed package.json bytes — expected, NOT a defect. The pi-guard digest
+is byte-identical to the PS-5/§12.1 historical record. Both digests
+matched the values produced in the local pre-push rehearsal on a
+different host — deterministic packaging proven. Provenance chain proven
+on the runner: exact public source → `npm ci`/build/pack →
+fixture-manifest.json (commits == repository-owned pins, asserted) →
+SHA-256 verified → installer `--expect-*-sha256` verified the same
+bytes (`digestVerified: true`).
+
+### 13.7 Real-stack results (run `31665543802`, job `94339500407`)
+
+- Installer run 1 → truthful PARTIAL (dependency materialization pending);
+  PS5-LINUX-003 exact-pin materialization
+  (`@modelcontextprotocol/server@2.0.0`, `ajv@8.20.0`, `zod@4.4.3`);
+  run 2 → **COMPLETE**, receipt: gateway + pi-guard both
+  `installed-verified`, both `digestVerified: true`; pi 0.83.0 lane
+  (isolated, no real user state); installed Gateway corresponds to the
+  exact pinned public commit (receipt `commit` ==
+  `98d1b204a864596bda91bec1104b8a8d5e89e1cd`).
+- pi-guard: exact-source `pi list` confirmation (exact absolute source
+  line, no substring); pi-guard extension load via pi 0.83.0's own
+  loader: `load errors: NONE`, `registered commands: ['guard']`.
+- Lifecycle on the installed executable: add → list → exact re-add
+  (verification-replay) → **doctor exit 0** → remove (deregister-only)
+  → re-add (verification-replay) — trusted store survives; GREEN.
+- Real MCP through `pi-shuttle start` (primary product path):
+  initialize, server identity `@project-gateway/artifact-core@0.1.0`,
+  **exactly 9/9 public tools**, protocol-clean stdout, clean EOF,
+  exit 0.
+- No source/user-state mutation: isolated HOME under `runner.temp`,
+  isolated Pi lane, clean scratch clones for packaging.
+
+### 13.8 Corrections surfaced by actual remote execution
+
+The real-stack path had never executed before (fixture hosting was
+unavailable); first remote executions surfaced four mechanical defects,
+each fixed in a same-subject correction commit and re-pushed normally:
+
+1. `actions/checkout` v4 rejects a `path` outside `$GITHUB_WORKSPACE`
+   → component checkouts moved under the workspace.
+2. SHA-ref checkout with default `fetch-depth: 1` omits tag objects
+   → pi-guard checkout uses `fetch-depth: 0` so the v0.1.2 tag is
+   assertable by prepare-fixtures.sh.
+3. The real-stack job has its own workspace → `npm ci` added before
+   the build.
+4. (Local rehearsal, same class) `pi list` prints the resolved absolute
+   source line indented → whitespace-tolerant exact-line match; the
+   CLI column-aligns `state:` values → whitespace-tolerant grep; the
+   MCP probe sent an id-bearing notification colliding with the next
+   request id → notification now carries no id (JSON-RPC-correct).
+
+All were workflow/helper defects in pi-shuttle; no product or component
+source change was involved.
+
+### 13.9 Final remote CI verdict
+
+Lane A (Linux x86_64 regression) GREEN; Lane B self-contained
+(build/test/APFS/Node/Git) GREEN; Lane B real-stack (public multi-repo)
+GREEN; Lane B APFS strict evidence PASS; Lane C GREEN (macOS Intel
+UNSUPPORTED as designed).
+
+`PS-6 REMOTE CI — ACCEPTED`
