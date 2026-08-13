@@ -25,7 +25,7 @@ jobs:
     steps:
       # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
       - name: Checkout
-        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 

@@ -1,10 +1,10 @@
 /**
  * PS-6 Lane B fixture-source validation — adversarial checks (SIR-PS6-002
- * correction). The workflow passes the workflow_dispatch input through
- * workflow env plumbing (data, never shell syntax); the committed
- * validation script must reject every shell-injection shape BEFORE any
- * curl. This test exercises the script's built-in adversarial self-test
- * and a few direct cases through the same script.
+ * correction). The workflow passes the workflow_dispatch input through the
+ * narrow job-level env boundary (data, never shell syntax; PS6-CI-003);
+ * the committed validation script must reject every shell-injection shape
+ * BEFORE any curl. This test exercises the script's built-in adversarial
+ * self-test and a few direct cases through the same script.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';

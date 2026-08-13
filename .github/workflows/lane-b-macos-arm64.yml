@@ -12,8 +12,10 @@
 # lifecycle → real Gateway MCP → pi 0.83.0 + pi-guard extension load).
 # Without a configured fixture source the real-stack subsection reports
 # `fixture-source not configured` and is skipped — it is never marked
-# PASS. The fixture_source input is passed through workflow env plumbing
-# (data, never shell syntax) and strictly validated before any curl.
+# PASS. The fixture_source input crosses only the narrow job-level env
+# boundary of the consuming jobs (data, never shell syntax) and is
+# strictly validated before any curl. The real-stack gate requires an
+# explicit workflow_dispatch event — a normal push/PR never activates it.
 name: Lane B — macOS arm64 evidence
 
 on:
@@ -35,11 +37,6 @@ on:
 permissions:
   contents: read
 
-env:
-  # SIR-PS6-002: the dispatch-controlled input crosses into jobs/steps as
-  # an ENVIRONMENT VARIABLE (data), never as interpolated shell syntax.
-  FIXTURE_SOURCE: ${{ inputs.fixture_source }}
-
 jobs:
   build-test:
     name: Build + tests (darwin arm64)
@@ -47,7 +44,7 @@ jobs:
     steps:
       # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
       - name: Checkout
-        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
@@ -129,17 +126,23 @@ jobs:
         run: git diff --check
 
   # ── Fixture-gated real-stack subsection (Lane B evidence) ────────────────
-  # Runs ONLY when an exact fixture source is configured (workflow_dispatch
-  # input). Self-contained evidence above is unaffected either way. The
-  # skipped state is reported truthfully and is never PASS.
+  # Runs ONLY on an explicit workflow_dispatch event WITH a non-empty
+  # validated fixture source (PS6-CI-004): push/PR events and empty-input
+  # dispatches can never activate the fixture path (undefined/default
+  # input semantics must never enable it). Self-contained evidence above
+  # is unaffected either way. The skipped state is reported truthfully
+  # and is never PASS. The input crosses the job-level env boundary as
+  # DATA (SIR-PS6-002) and is validated before any curl.
   real-stack:
     name: Real-stack integration (fixture-gated)
     runs-on: macos-15
     needs: build-test
-    if: ${{ inputs.fixture_source != '' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture_source != '' }}
+    env:
+      FIXTURE_SOURCE: ${{ inputs.fixture_source }}
     steps:
       - name: Checkout
-        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
 
@@ -204,13 +207,13 @@ jobs:
   fixture-gate-report:
     name: Fixture-source gate report
     runs-on: ubuntu-24.04
-    needs: build-test
+    needs: [build-test, real-stack]
     if: always()
     steps:
       - name: Report real-stack subsection state
         run: |
-          if [ -z "${FIXTURE_SOURCE:-}" ]; then
-            echo "fixture-source not configured — real-stack integration subsection skipped (self-contained build/platform/APFS/unit evidence above ran and is unaffected)" >> "$GITHUB_STEP_SUMMARY"
+          if [ "${{ needs.real-stack.result }}" = "skipped" ]; then
+            echo "fixture-source not configured — real-stack integration subsection NOT EXECUTED (self-contained build/platform/APFS/unit evidence above ran and is unaffected)" >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "fixture-source configured — real-stack integration subsection executed in the real-stack job" >> "$GITHUB_STEP_SUMMARY"
+            echo "fixture-source configured — real-stack integration subsection executed in the real-stack job (result: ${{ needs.real-stack.result }})" >> "$GITHUB_STEP_SUMMARY"
           fi

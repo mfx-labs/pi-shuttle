@@ -2,9 +2,10 @@
 #
 # PS-6 Lane B fixture-source validation (test/CI evidence only; SIR-PS6-002
 # correction). The workflow passes the workflow_dispatch input through the
-# workflow `env:` plumbing so it is DATA, never shell syntax; this script
-# strictly validates the value BEFORE any curl invocation and fails closed
-# on anything outside the closed URL policy:
+# narrow job-level `env:` boundary of the consuming job (PS6-CI-003) so it
+# is DATA, never shell syntax; this script strictly validates the value
+# BEFORE any curl invocation and fails closed on anything outside the
+# closed URL policy:
 #
 #   - must start with exactly `https://`;
 #   - characters limited to the closed URL-safe set

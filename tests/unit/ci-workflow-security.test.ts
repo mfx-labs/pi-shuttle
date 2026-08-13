@@ -1,11 +1,18 @@
 /**
- * PS-6 workflow static security checks (SIR-PS6-002/003/007 corrections).
- * These are genuine invariants only — no incidental line-count pins:
+ * PS-6 workflow static security checks (SIR-PS6-002/003/007 + PS6-CI-002/
+ * 003/004 corrections). These are genuine invariants only — no incidental
+ * line-count pins:
  *
  *  - `permissions: contents: read` on every workflow;
- *  - every `uses:` pinned to a FULL commit SHA (40 hex) with a comment
- *    naming the upstream tag; no floating refs;
+ *  - every remote `uses:` is `owner/repository@FULL_40_HEX_SHA` (exactly
+ *    one `@`; the left side is a valid action identity; the right side is
+ *    exactly 40 hex; no floating branch/tag ref; a BARE SHA is invalid);
  *  - no sudo, no token write, no publication/release/deployment steps;
+ *  - no workflow-level `env:` may depend on `inputs.*` (PS6-CI-003): the
+ *    dispatch input crosses only the narrow job-level env boundary;
+ *  - the real-stack gate requires `github.event_name == 'workflow_dispatch'`
+ *    explicitly (PS6-CI-004) — push/PR and empty-input dispatch can never
+ *    activate the fixture path;
  *  - no workflow_dispatch input interpolated into `run:` shell text
  *    (fixture_source crosses the boundary as env data and is validated
  *    before any curl);
@@ -18,13 +25,32 @@ import { join } from 'node:path';
 
 const REPO = join(import.meta.dirname, '..', '..', '..');
 const WORKFLOWS = join(REPO, '.github', 'workflows');
-const SHA_RE = /^[0-9a-f]{40}$/;
+const HEX40_RE = /^[0-9a-fA-F]{40}$/;
+const REMOTE_ACTION_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+@[0-9a-fA-F]{40}$/;
+
+/**
+ * Static remote-action-ref invariant (PS6-CI-002): the ONLY accepted form
+ * is `owner/repository@FULL_40_HEX_SHA` — exactly one `@`, a valid
+ * owner/repository identity on the left, exactly 40 hex on the right.
+ * A bare SHA, a floating tag/branch, a short SHA, or malformed `@`
+ * structure all FAIL. Local action references (if any) are handled
+ * separately and never forced through this remote-action rule.
+ */
+export function isValidRemoteActionRef(ref: string): boolean {
+  if (!REMOTE_ACTION_RE.test(ref)) return false;
+  const at = ref.split('@');
+  if (at.length !== 2) return false; // exactly one '@' separating identity from ref
+  const [identity, sha] = at as [string, string];
+  if (identity.length === 0 || !identity.includes('/')) return false;
+  if (sha.length === 0 || !HEX40_RE.test(sha)) return false;
+  return true;
+}
 
 function workflowFiles(): string[] {
   return readdirSync(WORKFLOWS).filter((n) => n.endsWith('.yml')).sort();
 }
 
-test('workflow security: every workflow pins permissions, full-SHA actions, and no privileged/publication steps', () => {
+test('workflow security: every workflow pins permissions, owner/repo@full-SHA actions, and no privileged/publication steps', () => {
   const files = workflowFiles();
   assert.equal(files.length, 3, 'exactly the three PS-6 lane workflows');
   for (const name of files) {
@@ -34,8 +60,7 @@ test('workflow security: every workflow pins permissions, full-SHA actions, and 
     assert.ok(uses.length >= 1, `${name}: at least one action`);
     for (const line of uses) {
       const ref = line.trim().split(/\s+/)[1]!;
-      assert.match(ref, SHA_RE, `${name}: action pinned by full commit SHA, got ${ref}`);
-      assert.ok(!ref.includes('@'), `${name}: no floating ref syntax`);
+      assert.equal(isValidRemoteActionRef(ref), true, `${name}: remote action must be owner/repo@40-hex, got ${ref}`);
     }
     assert.ok(!text.includes('@v4'), `${name}: no floating major tag`);
     assert.ok(!text.includes('@main'), `${name}: no branch ref`);
@@ -52,6 +77,48 @@ test('workflow security: every workflow pins permissions, full-SHA actions, and 
     }
     assert.ok(!text.includes('github.com/git/git/archive'), `${name}: no floating git tag tarball URL (digest-pinned kernel.org source only)`);
   }
+});
+
+test('workflow security: remote action refs require owner/repo@40-hex — PS6-CI-002 regression cases', () => {
+  const SHA40 = '11bd71901bbe5b1630ceea73d27597364c9af683';
+  assert.equal(isValidRemoteActionRef(SHA40), false, 'bare SHA → FAIL');
+  assert.equal(isValidRemoteActionRef(`actions/checkout@${SHA40}`), true, 'actions/checkout@<40-sha> → PASS');
+  assert.equal(isValidRemoteActionRef('actions/checkout@v4'), false, 'floating tag → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@main'), false, 'floating branch → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683x'), false, 'non-hex 40-char ref → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@11bd7190'), false, 'short SHA → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683@extra'), false, 'multiple @ → FAIL');
+  assert.equal(isValidRemoteActionRef('checkout@11bd71901bbe5b1630ceea73d27597364c9af683'), false, 'missing owner/repository → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@'), false, 'empty ref → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout'), false, 'no @ → FAIL');
+  assert.equal(isValidRemoteActionRef('@11bd71901bbe5b1630ceea73d27597364c9af683'), false, 'empty identity → FAIL');
+  assert.equal(isValidRemoteActionRef('actions/checkout@@11bd71901bbe5b1630ceea73d27597364c9af683'), false, 'empty ref between @ → FAIL');
+});
+
+test('workflow security: no workflow-level env depends on inputs.* — PS6-CI-003 regression cases', () => {
+  const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
+  // Workflow-level env values are indented exactly 2 spaces; the inputs
+  // context is invalid there. The fixture source may only appear at the
+  // narrow job-level env boundary of the consuming jobs.
+  const workflowLevelInputs = text.split('\n').filter((l) => /^  [A-Z_]+: \$\{\{ inputs\./.test(l));
+  assert.deepEqual(workflowLevelInputs, [], 'no workflow-level env may reference inputs.* (PS6-CI-003)');
+  // The narrow job-level boundary exists (real-stack job, 6-space value).
+  assert.ok(text.includes('      FIXTURE_SOURCE: ${{ inputs.fixture_source }}'), 'job-level env carries fixture_source at the narrow consuming boundary');
+  // And it is consumed as DATA: argv-safe curl + strict validation before fetch.
+  assert.ok(text.includes('bash scripts/ci-validate-fixture-source.sh "$FIXTURE_SOURCE"'), 'fixture source validated before fetch (SIR-PS6-002)');
+  assert.ok(text.includes('curl -fsSL -- "$FIXTURE_SOURCE"'), 'argv-safe curl boundary (no shell interpolation)');
+});
+
+test('workflow security: real-stack requires an explicit workflow_dispatch event — PS6-CI-004 regression cases', () => {
+  const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
+  assert.ok(
+    text.includes("if: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture_source != '' }}"),
+    'real-stack gate must require workflow_dispatch explicitly AND a non-empty fixture source',
+  );
+  // The report job derives the state from the real-stack job result (never
+  // from workflow-level env or inputs on non-dispatch events).
+  assert.ok(text.includes('needs: [build-test, real-stack]'), 'report job observes the real-stack job result');
+  assert.ok(text.includes('needs.real-stack.result'), 'report job uses needs.real-stack.result');
 });
 
 test('workflow security: every referenced helper script exists', () => {
