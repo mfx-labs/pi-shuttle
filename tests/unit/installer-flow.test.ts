@@ -51,7 +51,7 @@ test('installer: COMPLETE install of both components (batch)', async () => {
     assert.equal(receipt.receipt.components.gateway.status, 'installed-verified');
     assert.equal(receipt.receipt.components.gateway.smoke, 'passed');
     assert.equal(receipt.receipt.components.gateway.version, '0.1.0');
-    assert.equal(receipt.receipt.components.gateway.commit, '7f3b4afdb43704e7dac82da7b086d8367347c641');
+    assert.equal(receipt.receipt.components.gateway.commit, '1a454b61241ca23a638c3083e2e7d28e28f86b18');
     assert.match(receipt.receipt.components.gateway.artifactSha256, SHA_RE);
     assert.equal(receipt.receipt.components.piGuard.status, 'installed-verified');
     assert.equal(receipt.receipt.components.piGuard.verifiedBy, 'pi-list');

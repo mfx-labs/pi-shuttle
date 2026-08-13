@@ -266,7 +266,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     const gatewayTarget = join(layout.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, GATEWAY_PACKAGE_VERSION));
     attempt.rollbackCandidates.push({ path: gatewayTarget, preExisting: existsSync(gatewayTarget) });
     const gateway = await installGatewayComponent({
-      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectGatewaySha256 },
+      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectGatewaySha256, platform: env.platform, pathEnv: env.pathEnv },
       expectedVersion: GATEWAY_PACKAGE_VERSION,
       expectedCommit: GATEWAY_PS1_BASELINE_COMMIT,
       tarExecutable: tar,
@@ -311,7 +311,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     const piGuardTarget = join(layout.packagesDir, componentDirName(PI_GUARD_PACKAGE_NAME, PI_GUARD_VERSION));
     attempt.rollbackCandidates.push({ path: piGuardTarget, preExisting: existsSync(piGuardTarget) });
     const piGuard = await installPiGuardComponent({
-      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectPiGuardSha256 },
+      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectPiGuardSha256, platform: env.platform, pathEnv: env.pathEnv },
       expectedVersion: PI_GUARD_VERSION,
       expectedCommit: PI_GUARD_COMMIT,
       piExecutable,

@@ -20,9 +20,10 @@ test('manifest: exact approved pins are preserved', () => {
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, PI_SHUTTLE_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, '0.1.0');
   assert.equal(COMPATIBILITY_MANIFEST.gateway, '0.1.0');
-  // Gateway PS-1 baseline (gate-mandated fact).
+  // Gateway committed baseline (PS-6 coordinated pin — see L2 of the
+  // focused correction gate).
   assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, GATEWAY_PS1_BASELINE_COMMIT);
-  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '7f3b4afdb43704e7dac82da7b086d8367347c641');
+  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '1a454b61241ca23a638c3083e2e7d28e28f86b18');
   // pi-guard verified release.
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, PI_GUARD_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, '0.1.2');
@@ -42,10 +43,11 @@ test('manifest: exact approved pins are preserved', () => {
   });
 });
 
-test('manifest: lane claims are evidence-bound — darwin is gated, never supported', () => {
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE]);
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false, 'macOS arm64 must not be claimed without PS-6 evidence');
+test('manifest: lane claims are evidence-bound — darwin arm64 supported, darwin x64 never', () => {
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE]);
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], []);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), true, 'macOS arm64 is the PS-6 promoted first-class lane');
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes('darwin-x64'), false, 'macOS Intel is never a claimed lane');
 });
 
 test('manifest: artifact digests are truthfully deferred, not invented', () => {

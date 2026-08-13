@@ -1,0 +1,105 @@
+# PS-6 Lane C — macOS Intel compatibility/focused evidence ONLY (LOCAL
+# ONLY in this gate; remote execution is the external human-gated action).
+#
+# Purpose: compatibility/focused evidence — build, package, static
+# portability, selected unit tests, and the installer/doctor REFUSAL
+# honesty checks (darwin-x64 → UNSUPPORTED, exit 2, no receipt; doctor →
+# unsupported, exit 2). This lane CREATES NO SUPPORT CLAIM: macOS Intel is
+# not a supported v0.1.0 lane, and no installer/product runtime step beyond
+# refusal honesty is executed or advertised here.
+name: Lane C — macOS Intel compatibility only
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compat-evidence:
+    name: Build/package/refusal honesty (darwin x64)
+    runs-on: macos-15-intel # explicit Intel (x86_64) image — compatibility lane only
+    steps:
+      # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
+      - name: Checkout
+        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Record runner architecture (Intel x64 evidence)
+        run: |
+          uname -m
+          node -p "process.platform + ' ' + process.arch"
+
+      # Exact Node 22.23.2 darwin-x64 (compatibility evidence lane; the
+      # darwin-arm64 lane's arch requirement does not apply here because
+      # this lane is not claimed).
+      - name: Provision exact Node 22.23.2 (darwin-x64)
+        run: |
+          set -euo pipefail
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz
+          echo "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026  node-v22.23.2-darwin-x64.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xzf node-v22.23.2-darwin-x64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          rm node-v22.23.2-darwin-x64.tar.gz
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+
+      - name: Deterministic dependency install (lockfile)
+        run: npm ci
+
+      - name: Build + typecheck (static portability)
+        run: |
+          npm run build
+          npm run typecheck
+
+      - name: Compile test surface
+        run: ./node_modules/.bin/tsc -p tsconfig.tests.json
+
+      # Selected unit tests: the platform-independent core (identity,
+      # registry, persistence, config) plus the platform-refusal pins.
+      # The darwin-only APFS tests skip truthfully here; the full suite
+      # is not required for a compatibility-only lane.
+      - name: Selected unit tests
+        run: node --test dist-test/tests/unit/manifest.test.js dist-test/tests/unit/host.test.js dist-test/tests/unit/registry.test.js dist-test/tests/unit/persistence.test.js dist-test/tests/unit/config.test.js dist-test/tests/unit/installer-preflight.test.js dist-test/tests/unit/apfs-path-evidence.test.js
+
+      - name: npm-pack static package evidence
+        run: |
+          set -euo pipefail
+          TGZ="$(npm pack --silent)"
+          mkdir -p "$RUNNER_TEMP/packcheck"
+          tar -xzf "$TGZ" -C "$RUNNER_TEMP/packcheck"
+          test -f "$RUNNER_TEMP/packcheck/package/dist/cli.js"
+          echo "package shape verified on darwin x64 (static portability only)"
+
+      # Refusal honesty: darwin-x64 must be refused with exit 2 and no
+      # receipt — never reported supported.
+      - name: Installer refusal honesty (darwin-x64 → UNSUPPORTED, exit 2, no receipt)
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/refusal-home"
+          mkdir -p "$ISOLATED"
+          set +e
+          HOME="$ISOLATED" bash install.sh --batch --gateway yes --pi-guard yes \
+            --artifact-dir "$RUNNER_TEMP/nonexistent" > "$RUNNER_TEMP/refusal.log" 2>&1
+          EXIT=$?
+          set -e
+          cat "$RUNNER_TEMP/refusal.log"
+          test "$EXIT" -eq 2
+          grep -q "UNSUPPORTED" "$RUNNER_TEMP/refusal.log"
+          test ! -f "$ISOLATED/.local/state/pi-shuttle/install.json"
+          echo "darwin-x64 refused (exit 2, no receipt) — honest refusal, no support claim" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Doctor refusal honesty (darwin-x64 → unsupported, exit 2)
+        run: |
+          set -euo pipefail
+          ISOLATED="$RUNNER_TEMP/refusal-home"
+          set +e
+          HOME="$ISOLATED" ./dist/cli.js doctor > "$RUNNER_TEMP/doctor.log" 2>&1
+          EXIT=$?
+          set -e
+          grep -q "platform: unsupported" "$RUNNER_TEMP/doctor.log"
+          test "$EXIT" -eq 2
+          echo "doctor reports darwin-x64 unsupported (exit 2) — compatibility-only evidence" >> "$GITHUB_STEP_SUMMARY"

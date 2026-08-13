@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+#
+# PS-6 Lane B real-stack evidence orchestrator (CI test/evidence ONLY).
+#
+# Runs the REAL installed product stack against SHA-pinned package fixtures
+# on the darwin arm64 lane: batch installer → Gateway dependency
+# materialization (PS5-LINUX-003 release-pipeline step, encoded) → COMPLETE
+# receipt → project add/list/doctor/re-add/remove → pi 0.83.0 lane +
+# pi-guard install + exact `pi list` verification + extension-load probe →
+# real `pi-shuttle start` MCP handshake probe → volume/arch facts record.
+#
+# This script is invoked ONLY when a fixture source is configured (the CI
+# fixture-source gate); without fixtures the real-stack subsection reports
+# `fixture-source not configured` and is skipped — never marked PASS.
+#
+# Env requirements (provisioned by the workflow):
+#   FIXTURE_DIR   prepared fixtures + fixture-manifest.json
+#   WORK_ROOT     disposable workspace root
+#   PSHUTTLE_REPO pi-shuttle repository root (install.sh + dist)
+#   PI_LANE_BIN   isolated pi 0.83.0 bin dir (lane/node_modules/.bin)
+#   PI_LOADER     pi 0.83.0 extension loader.js (absolute)
+#   GIT_2454      absolute path to the exact git 2.45.4 binary
+#   NODE_BIN      absolute path to the exact node 22.23.2 executable
+set -euo pipefail
+
+for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE_BIN; do
+  if [ -z "${!v:-}" ]; then echo "real-stack: $v is required" >&2; exit 2; fi
+done
+
+NODE_DIR="$(dirname "$NODE_BIN")"
+export HOME="$WORK_ROOT/home"
+export PATH="$PI_LANE_BIN:$NODE_DIR:$PATH"
+export NODE_BIN
+
+echo "real-stack: lane facts — node=$("$NODE_BIN" -p "process.platform + ' ' + process.arch") nodeVersion=$("$NODE_BIN" --version) git=$("$GIT_2454" --version) pi=$("$PI_LANE_BIN/pi" --version 2>/dev/null || echo missing)"
+
+# 1. Fixture verification against the fixture manifest (fail closed).
+GATEWAY_SHA="$(node -e "console.log(require('$FIXTURE_DIR/fixture-manifest.json').gateway.sha256)")"
+PI_GUARD_SHA="$(node -e "console.log(require('$FIXTURE_DIR/fixture-manifest.json').piGuard.sha256)")"
+echo "$GATEWAY_SHA  $FIXTURE_DIR/project-gateway-artifact-core-0.1.0.tgz" | shasum -a 256 -c - >/dev/null
+echo "$PI_GUARD_SHA  $FIXTURE_DIR/pi-guard-0.1.2.tgz" | shasum -a 256 -c - >/dev/null
+echo "real-stack: fixture digests verified against fixture-manifest.json"
+
+mkdir -p "$HOME" "$WORK_ROOT/projects"
+chmod 700 "$HOME"
+
+# 2. Project fixture (a real git repository via the exact pinned git).
+PROJECT="$WORK_ROOT/projects/alpha"
+mkdir -p "$PROJECT"
+printf '# alpha\n' > "$PROJECT/README.md"
+( cd "$PROJECT" && "$GIT_2454" init -q && "$GIT_2454" add README.md && "$GIT_2454" -c user.name=ps6 -c user.email=ps6@local commit -qm init )
+
+# 3. Batch installer (run 1 → truthful PARTIAL: dependency materialization pending).
+set +e
+bash "$PSHUTTLE_REPO/install.sh" --batch --gateway yes --pi-guard yes \
+  --artifact-dir "$FIXTURE_DIR" \
+  --expect-gateway-sha256 "$GATEWAY_SHA" \
+  --expect-pi-guard-sha256 "$PI_GUARD_SHA" > "$WORK_ROOT/install-run1.log" 2>&1
+RUN1=$?
+set -e
+echo "real-stack: installer run 1 exit $RUN1 (PARTIAL expected pre-materialization)"
+grep -q "PARTIAL" "$WORK_ROOT/install-run1.log" || { echo "real-stack: run 1 was not PARTIAL:"; cat "$WORK_ROOT/install-run1.log"; exit 1; }
+
+# 4. Gateway dependency materialization (exact contract pins; PS5-LINUX-003).
+GATEWAY_PKG="$HOME/.local/share/pi-shuttle/packages/project-gateway-artifact-core@0.1.0"
+"$NODE_DIR/npm" install --no-save --omit=dev --prefix "$GATEWAY_PKG" \
+  @modelcontextprotocol/server@2.0.0 ajv@8.20.0 zod@4.4.3 > "$WORK_ROOT/materialize.log" 2>&1
+echo "real-stack: gateway dependencies materialized (exact pins)"
+
+# 5. Installer run 2 → COMPLETE.
+bash "$PSHUTTLE_REPO/install.sh" --batch --gateway yes --pi-guard yes \
+  --artifact-dir "$FIXTURE_DIR" \
+  --expect-gateway-sha256 "$GATEWAY_SHA" \
+  --expect-pi-guard-sha256 "$PI_GUARD_SHA" > "$WORK_ROOT/install-run2.log" 2>&1
+grep -q "COMPLETE" "$WORK_ROOT/install-run2.log" || { echo "real-stack: run 2 was not COMPLETE:"; cat "$WORK_ROOT/install-run2.log"; exit 1; }
+echo "real-stack: installer COMPLETE (receipt: gateway + pi-guard installed-verified, digestVerified)"
+
+PSHUTTLE="$HOME/.local/bin/pi-shuttle"
+PI_GUARD_PKG="$HOME/.local/share/pi-shuttle/packages/pi-guard@0.1.2"
+
+# 6. pi-guard exact-source verification through `pi list`.
+"$PI_LANE_BIN/pi" list | grep -Fqx "$PI_GUARD_PKG" || {
+  echo "real-stack: exact pi-guard source not confirmed in pi list"; "$PI_LANE_BIN/pi" list; exit 1; }
+echo "real-stack: pi list confirms the exact pi-guard source"
+
+# 7. pi-guard extension-load probe (pi 0.83.0's own loader).
+PI_GUARD_ENTRY="$PI_GUARD_PKG/extensions/pi-guard/index.ts"
+PI_LOADER="$PI_LOADER" PI_GUARD_ENTRY="$PI_GUARD_ENTRY" HOME="$HOME" "$NODE_BIN" "$PSHUTTLE_REPO/scripts/pi-extension-load-probe.mjs"
+
+# 8. Project lifecycle on the real installed stack.
+"$PSHUTTLE" project add "$PROJECT" > "$WORK_ROOT/add1.log" 2>&1
+grep -q "state: initialized" "$WORK_ROOT/add1.log" || { cat "$WORK_ROOT/add1.log"; exit 1; }
+"$PSHUTTLE" project list | grep -q "pgw:w:" || exit 1
+"$PSHUTTLE" project add "$PROJECT" > "$WORK_ROOT/add2.log" 2>&1
+grep -q "verification-replay" "$WORK_ROOT/add2.log" || { cat "$WORK_ROOT/add2.log"; exit 1; }
+"$PSHUTTLE" doctor > "$WORK_ROOT/doctor.log" 2>&1 || { echo "real-stack: doctor exit nonzero:"; cat "$WORK_ROOT/doctor.log"; exit 1; }
+grep -q "platform: supported" "$WORK_ROOT/doctor.log" || { cat "$WORK_ROOT/doctor.log"; exit 1; }
+WORKSPACE_ID="$(grep -o 'pgw:w:[0-9a-f]\{32\}' "$WORK_ROOT/add1.log" | head -1)"
+"$PSHUTTLE" project remove "$WORKSPACE_ID" > "$WORK_ROOT/remove.log" 2>&1
+grep -q "deregistered" "$WORK_ROOT/remove.log" || { cat "$WORK_ROOT/remove.log"; exit 1; }
+"$PSHUTTLE" project add "$PROJECT" > "$WORK_ROOT/add3.log" 2>&1
+grep -q "verification-replay" "$WORK_ROOT/add3.log" || { cat "$WORK_ROOT/add3.log"; exit 1; }
+echo "real-stack: lifecycle green (add → list → exact re-add → doctor → remove → re-add)"
+
+# 9. Real MCP handshake through `pi-shuttle start` (nine-tool surface).
+HOME="$HOME" PATH="$PATH" PSHUTTLE="$PSHUTTLE" "$NODE_BIN" "$PSHUTTLE_REPO/scripts/mcp-handshake-probe.mjs"
+
+# 10. Volume/arch facts record (Lane B evidence).
+echo "real-stack: volume case-sensitivity record:"
+if command -v diskutil >/dev/null 2>&1; then
+  diskutil info / 2>/dev/null | grep -iE "file system personality|case-sensitive" || echo "(diskutil info unavailable)"
+else
+  echo "(not darwin — volume facts recorded by the runner context)"
+fi
+echo "real-stack: LANE B REAL-STACK EVIDENCE — GREEN"

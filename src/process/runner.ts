@@ -46,9 +46,10 @@ export interface RunOptions {
 }
 
 /** Resolve an executable NAME (no slashes) through PATH. Never uses a shell. */
-export function resolveExecutable(name: string, env: NodeJS.ProcessEnv = process.env): string | null {
+export function resolveExecutable(name: string, env?: NodeJS.ProcessEnv): string | null {
   if (name.includes('/')) return null;
-  const pathVar = env.PATH;
+  const effective = env ?? process.env;
+  const pathVar = effective.PATH;
   if (pathVar === undefined || pathVar.length === 0) return null;
   for (const dir of pathVar.split(':')) {
     if (dir.length === 0) continue;

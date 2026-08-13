@@ -32,7 +32,12 @@ npm run build
   `<artifact-dir>/` (release artifacts and the public installer URL are
   pending publication); the receipt is written to
   `~/.local/state/pi-shuttle/install.json`.
-- Supported lane: Linux x86_64 only. macOS arm64 stays gated (PS-6).
+- Supported lanes (manifest-bound): Linux x86_64 and macOS arm64 / Apple
+  Silicon (PS-6 promoted). macOS Intel (darwin-x64) and Windows remain
+  unsupported (installer refuses; doctor exit 2). CI workflow files exist
+  under `.github/workflows/` (local only; remote execution is a separate
+  human-gated action), and physical macOS UAT (Lane D) remains release
+  evidence.
 
 ## Operator CLI (PS-4)
 

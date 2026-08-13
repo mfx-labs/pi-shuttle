@@ -1,0 +1,73 @@
+# PS-6 Lane A — Linux x86_64 regression (LOCAL ONLY in this gate; remote
+# execution is the external human-gated action. Do not push, do not claim
+# remote results.)
+#
+# Purpose: regression confidence against the validated first-class Linux
+# x86_64 lane: exact Node 22.23.2 evidence lane, deterministic install,
+# build, typecheck, full self-contained test suite (fixtures only — no
+# secrets, no external artifacts), and the PS5-LINUX-001 npm-pack
+# executable regression. The full manual PS-5 E2E is NOT re-run here.
+name: Lane A — Linux x86_64 regression
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    name: Build + tests (linux x64)
+    runs-on: ubuntu-24.04
+    steps:
+      # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
+      - name: Checkout
+        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      # Exact validated evidence lane: Node v22.23.2 from the official
+      # nodejs.org distribution, SHA-256 pinned (SHASUMS256.txt, v22.23.2).
+      # The runner's preinstalled node is never trusted for the evidence
+      # lane. No floating component refs.
+      - name: Provision exact Node 22.23.2 (linux-x64)
+        run: |
+          set -euo pipefail
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-linux-x64.tar.xz
+          echo "d60acfe00a2932254bb0ad20e01b0d74397a0875595de719654b214f4b03f307  node-v22.23.2-linux-x64.tar.xz" | sha256sum -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xJf node-v22.23.2-linux-x64.tar.xz -C "$RUNNER_TEMP/node" --strip-components=1
+          rm node-v22.23.2-linux-x64.tar.xz
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+          node --version
+          node -p "process.platform + ' ' + process.arch"
+
+      - name: Deterministic dependency install (lockfile)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Full self-contained test suite
+        run: npm test
+
+      # PS5-LINUX-001 executable regression, release-shaped: the npm-pack
+      # artifact must carry dist/cli.js 0755 and execute directly.
+      - name: npm-pack executable regression
+        run: |
+          set -euo pipefail
+          TGZ="$(npm pack --silent)"
+          mkdir -p "$RUNNER_TEMP/packcheck"
+          tar -xzf "$TGZ" -C "$RUNNER_TEMP/packcheck"
+          "$RUNNER_TEMP/packcheck/package/dist/cli.js" --version
+          "$RUNNER_TEMP/packcheck/package/dist/cli.js" --help >/dev/null
+          echo "packed dist/cli.js executes directly (0755 + shebang verified by the build normalizer)"
+
+      - name: Clean-tree sanity
+        run: git diff --check

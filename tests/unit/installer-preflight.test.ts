@@ -13,13 +13,14 @@ import { resolveLayout } from '../../src/host/environment.js';
 
 const LINUX = { home: '/tmp/x', platform: 'linux', arch: 'x64' };
 
-test('preflight: platform lane classification is Linux x64 only', () => {
+test('preflight: platform lane classification — linux x64 and darwin arm64 supported; darwin x64/windows refused', () => {
   assert.equal(checkPlatformLane(LINUX).ok, true);
   const mac = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'arm64' });
-  assert.equal(mac.ok, false, 'macOS arm64 must not be claimed in PS-3');
-  if (!mac.ok) assert.ok(mac.message.includes('gated pending PS-6'), mac.message);
+  assert.equal(mac.ok, true, 'macOS arm64 is the PS-6 promoted first-class lane');
+  const intel = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' });
+  assert.equal(intel.ok, false, 'macOS Intel is never claimed');
+  if (!intel.ok) assert.ok(intel.message.includes('supported lanes'), intel.message);
   assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'win32', arch: 'x64' }).ok, false);
-  assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' }).ok, false, 'macOS Intel is never claimed');
 });
 
 test('preflight: node lane is the exact validated version', () => {

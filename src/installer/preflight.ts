@@ -20,17 +20,16 @@ import { mkdirSync } from 'node:fs';
 
 export type PreflightVerdict = { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Platform/architecture lane claim (Linux x86_64 only; macOS stays gated). */
+/** Platform/architecture lane claim (Linux x86_64 + darwin arm64; others refused). */
 export function checkPlatformLane(env: HostEnvironment): PreflightVerdict {
   const lane = hostLane(env.platform, env.arch);
   if (COMPATIBILITY_MANIFEST.supportedLanes.includes(lane)) {
     return { ok: true };
   }
-  const gated = COMPATIBILITY_MANIFEST.gatedLanes.includes(lane);
   return {
     ok: false,
     code: 'ERR-PS3-UNSUPPORTED-PLATFORM',
-    message: `platform ${env.platform} ${env.arch} (lane ${lane}) is not a claimed supported lane; the only supported lane is ${COMPATIBILITY_MANIFEST.supportedLanes.join(', ')}${gated ? ' (macOS arm64 is gated pending PS-6 evidence)' : ''}`,
+    message: `platform ${env.platform} ${env.arch} (lane ${lane}) is not a claimed supported lane; supported lanes: ${COMPATIBILITY_MANIFEST.supportedLanes.join(', ')}`,
   };
 }
 

@@ -7,13 +7,15 @@
  * semver ranges, no unverified Pi 0.84.x claims.
  *
  * Pins preserved from the approved contract + later gate facts:
- *   gateway PS-1 baseline commit 7f3b4afdb43704e7dac82da7b086d8367347c641
+ *   gateway committed baseline 1a454b61241ca23a638c3083e2e7d28e28f86b18
+ *     (PS-6 "feat: add darwin arm64 Gateway host lane"; parent
+ *     7f3b4afdb43704e7dac82da7b086d8367347c641 — the PS-1 baseline)
  *   pi-guard v0.1.2 (commit 7a7580cc4cbd7926797564c72269394fc29a860a)
  *   Pi compatibility baseline 0.83.0 (SUPPORTED_PI_LANE)
  */
 export const PI_SHUTTLE_VERSION = '0.1.0';
 export const GATEWAY_PACKAGE_VERSION = '0.1.0';
-export const GATEWAY_PS1_BASELINE_COMMIT = '7f3b4afdb43704e7dac82da7b086d8367347c641';
+export const GATEWAY_PS1_BASELINE_COMMIT = '1a454b61241ca23a638c3083e2e7d28e28f86b18';
 export const GATEWAY_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@modelcontextprotocol/server': '2.0.0',
   'ajv': '8.20.0',
@@ -30,7 +32,7 @@ export const CONFIG_FORMAT_VERSION = 1;
 
 /** Gateway host lanes (inherited constants; the Gateway owns their semantics). */
 export const LINUX_HOST_LANE = 'linux-x86_64-posix-utf8-node22';
-/** Proposed PS-6 lane. GATED, NOT claimed: no evidence exists in this gate. */
+/** darwin arm64 lane (PS-6, Gateway ADR-042): accepted first-class lane. */
 export const DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22';
 
 /** The closed compatibility-manifest shape (product-contract §6). */
@@ -50,9 +52,9 @@ export interface CompatibilityManifest {
   readonly gatewayDependencies: Readonly<Record<string, string>>;
   readonly configurationVersion: string;
   readonly configFormatVersion: number;
-  /** Host lanes claimed as supported (evidence-bound; Linux only in PS-2). */
+  /** Host lanes claimed as supported (evidence-bound). */
   readonly supportedLanes: readonly string[];
-  /** Host lanes targeted but NOT claimed (PS-6 evidence required). */
+  /** Host lanes targeted but NOT claimed (empty: no gated lanes remain after the PS-6 promotion). */
   readonly gatedLanes: readonly string[];
 }
 
@@ -71,6 +73,6 @@ export const COMPATIBILITY_MANIFEST: CompatibilityManifest = Object.freeze({
   gatewayDependencies: Object.freeze({ ...GATEWAY_DEPENDENCIES }),
   configurationVersion: CONFIGURATION_VERSION,
   configFormatVersion: CONFIG_FORMAT_VERSION,
-  supportedLanes: Object.freeze([LINUX_HOST_LANE]),
-  gatedLanes: Object.freeze([DARWIN_ARM64_HOST_LANE]),
+  supportedLanes: Object.freeze([LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE]),
+  gatedLanes: Object.freeze([]),
 });

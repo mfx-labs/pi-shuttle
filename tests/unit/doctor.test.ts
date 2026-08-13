@@ -299,15 +299,92 @@ test('doctor: stale coordination lock artifacts are detected with recovery guida
   }
 });
 
-test('doctor: unsupported platform exits 2 (fail closed); gated macOS is not claimed', async () => {
+test('doctor: darwin arm64 platform is supported (PS-6 promoted lane); darwin x64 fails closed exit 2', async () => {
   const { env, ctx } = healthyContext();
   try {
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' } });
     assert.equal(darwin.ok, true);
     if (!darwin.ok) return;
-    assert.equal(darwin.exitCode, 2);
-    assert.equal(verdicts(darwin.report)['platform'], 'unsupported');
-    assert.ok(darwin.report.checks.find((c) => c.id === 'platform')!.detail.includes('gated'), 'the gated lane must not be claimed');
+    assert.equal(verdicts(darwin.report)['platform'], 'supported', 'macOS arm64 is a first-class claimed lane');
+    const intel = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'x64' } });
+    assert.equal(intel.ok, true);
+    if (!intel.ok) return;
+    assert.equal(intel.exitCode, 2);
+    assert.equal(verdicts(intel.report)['platform'], 'unsupported');
+    assert.ok(intel.report.checks.find((c) => c.id === 'platform')!.detail.includes('darwin-x64'), 'Intel lane is reported as unclaimed');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+// ─── PS-6 darwin Node architecture probe ──────────────────────────────────
+
+/** Fake node executable with a deterministic `--version` / `-p process.arch` surface. */
+function writeFakeNode(binDir: string, arch: string | null): string {
+  const node = join(binDir, 'node');
+  const lines = [
+    '#!/usr/bin/env bash',
+    'if [ "$1" = "--version" ]; then echo "v22.23.2"; exit 0; fi',
+    arch === null
+      ? 'if [ "$1" = "-p" ] && [ "$2" = "process.arch" ]; then exit 1; fi'
+      : `if [ "$1" = "-p" ] && [ "$2" = "process.arch" ]; then echo "${arch}"; exit 0; fi`,
+    'exit 1',
+    '',
+  ];
+  writeFileSync(node, lines.join('\n'), { mode: 0o700 });
+  return node;
+}
+
+test('doctor: darwin-arm64 lane — native arm64 Node is supported', async () => {
+  const { env, ctx } = healthyContext();
+  try {
+    const node = writeFakeNode(env, 'arm64');
+    const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
+    assert.equal(darwin.ok, true);
+    if (!darwin.ok) return;
+    assert.equal(verdicts(darwin.report)['node'], 'supported');
+    assert.ok(darwin.report.checks.find((c) => c.id === 'node')!.detail.includes('arm64'), 'the arch fact must be part of the supported claim');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('doctor: darwin-arm64 lane — Rosetta/x64 Node is unsupported (fail closed)', async () => {
+  const { env, ctx } = healthyContext();
+  try {
+    const node = writeFakeNode(env, 'x64');
+    const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
+    assert.equal(darwin.ok, true);
+    if (!darwin.ok) return;
+    assert.equal(verdicts(darwin.report)['node'], 'unsupported');
+    assert.equal(darwin.exitCode, 2, 'an unsupported node arch on the darwin-arm64 lane fails closed');
+    assert.ok(darwin.report.checks.find((c) => c.id === 'node')!.detail.includes('Rosetta'), 'the detail must name the Rosetta/x64 reason');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('doctor: darwin-arm64 lane — unobservable architecture probe is installed-but-unverified (truthful)', async () => {
+  const { env, ctx } = healthyContext();
+  try {
+    const node = writeFakeNode(env, null);
+    const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
+    assert.equal(darwin.ok, true);
+    if (!darwin.ok) return;
+    assert.equal(verdicts(darwin.report)['node'], 'installed but unverified');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('doctor: Linux behavior is unaffected by the darwin arch probe (no arch probe on linux)', async () => {
+  const { env, ctx } = healthyContext();
+  try {
+    const node = writeFakeNode(env, 'x64'); // would fail the darwin lane
+    const linux = await runDoctor({ ...ctx, env: { home: env, platform: 'linux', arch: 'x64' }, nodeExecutable: node });
+    assert.equal(linux.ok, true);
+    if (!linux.ok) return;
+    assert.equal(verdicts(linux.report)['node'], 'supported', 'the linux lane never requires the architecture probe');
   } finally {
     cleanupEnv(env);
   }

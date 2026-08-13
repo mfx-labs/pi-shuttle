@@ -1,0 +1,216 @@
+# PS-6 Lane B — macOS arm64 first-class evidence (LOCAL ONLY in this gate;
+# remote execution is the external human-gated action. Do not push, do not
+# claim remote results.)
+#
+# Purpose: first-class darwin arm64 support evidence: exact Node 22.23.2
+# arm64 (architecture ASSERTED), deterministic install, build, typecheck,
+# full test suite, the dedicated mandatory APFS evidence invocation (skips
+# make the evidence job RED, never a silent green), direct
+# executable/package checks, exact Git 2.45.4 provisioning (digest-pinned
+# kernel.org source, built version asserted), volume case-sensitivity
+# record, and the fixture-gated real-stack subsection (installer →
+# lifecycle → real Gateway MCP → pi 0.83.0 + pi-guard extension load).
+# Without a configured fixture source the real-stack subsection reports
+# `fixture-source not configured` and is skipped — it is never marked
+# PASS. The fixture_source input is passed through workflow env plumbing
+# (data, never shell syntax) and strictly validated before any curl.
+name: Lane B — macOS arm64 evidence
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      # Fixture source for the real-stack subsection: a URL to a tarball
+      # prepared by scripts/prepare-fixtures.sh (fixture tgz pair +
+      # fixture-manifest.json). Test/CI acquisition only — never the
+      # production installer. Empty = subsection skipped truthfully.
+      fixture_source:
+        description: URL of the prepared fixtures tarball (or empty)
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  # SIR-PS6-002: the dispatch-controlled input crosses into jobs/steps as
+  # an ENVIRONMENT VARIABLE (data), never as interpolated shell syntax.
+  FIXTURE_SOURCE: ${{ inputs.fixture_source }}
+
+jobs:
+  build-test:
+    name: Build + tests (darwin arm64)
+    runs-on: macos-15 # GA Apple Silicon (arm64) hosted image; Intel is the explicit macos-15-intel label
+    steps:
+      # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
+      - name: Checkout
+        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Verify runner architecture is arm64 (Apple Silicon)
+        run: |
+          uname -m
+          test "$(uname -m)" = "arm64"
+
+      # Exact validated evidence lane: Node v22.23.2 darwin-arm64 from the
+      # official nodejs.org distribution, SHA-256 pinned. A Rosetta/x64 node
+      # must never satisfy the darwin-arm64 lane.
+      - name: Provision exact Node 22.23.2 (darwin-arm64)
+        run: |
+          set -euo pipefail
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz
+          echo "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6  node-v22.23.2-darwin-arm64.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xzf node-v22.23.2-darwin-arm64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          rm node-v22.23.2-darwin-arm64.tar.gz
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+          node --version
+          # SIR-PS6-007: the architecture is ASSERTED, not merely printed —
+          # anything other than arm64 fails this job.
+          test "$(node -p process.arch)" = "arm64"
+          echo "node-arch=arm64" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Deterministic dependency install (lockfile)
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Full suite incl. the PS-6 APFS evidence tests (case variant,
+      # Unicode NFC/NFD, symlink alias) — real default-APFS assertions on
+      # this runner; case-sensitive-volume skips are truthful, never
+      # product failures.
+      - name: Full test suite (incl. APFS path evidence)
+        run: npm test
+
+      # SIR-PS6-004: mandatory Lane B APFS evidence — a DEDICATED
+      # invocation that distinguishes PASS from NOT EXECUTED/SKIPPED.
+      # Any skip makes this evidence job RED: first-class support evidence
+      # never silently converts a missing APFS evidence test into green.
+      - name: Lane B APFS evidence (mandatory — no silent skip)
+        run: |
+          ./node_modules/.bin/tsc -p tsconfig.tests.json
+          node scripts/ci-apfs-evidence-strict.mjs
+
+      - name: npm-pack executable + direct exec evidence
+        run: |
+          set -euo pipefail
+          TGZ="$(npm pack --silent)"
+          mkdir -p "$RUNNER_TEMP/packcheck"
+          tar -xzf "$TGZ" -C "$RUNNER_TEMP/packcheck"
+          "$RUNNER_TEMP/packcheck/package/dist/cli.js" --version
+          "$RUNNER_TEMP/packcheck/package/dist/cli.js" --help >/dev/null
+          echo "packed dist/cli.js executes directly on darwin arm64"
+
+      # Exact Git 2.45.4 (SIR-PS6-003): ONE digest-pinned kernel.org source
+      # artifact, user/workspace-scope source build (no sudo, no system Git
+      # replacement), built version asserted exactly. Stock /usr/bin/git
+      # (Apple CLT) is never sufficient for the Gateway runtime.
+      - name: Provision exact Git 2.45.4 (digest-pinned, user scope, version asserted)
+        run: |
+          set -euo pipefail
+          GIT_BIN="$(bash scripts/ci-provision-git-2454.sh "$RUNNER_TEMP/git-work" "$RUNNER_TEMP/git-2.45.4" | tail -1)"
+          test "$("$GIT_BIN" --version)" = "git version 2.45.4"
+          echo "$(dirname "$GIT_BIN")" >> "$GITHUB_PATH"
+
+      - name: Volume case-sensitivity record (APFS evidence)
+        run: |
+          diskutil info / 2>/dev/null | grep -iE "file system personality|case-sensitive" || true
+          echo "volume-facts recorded (default APFS expected case-insensitive)"
+
+      - name: Clean-tree sanity
+        run: git diff --check
+
+  # ── Fixture-gated real-stack subsection (Lane B evidence) ────────────────
+  # Runs ONLY when an exact fixture source is configured (workflow_dispatch
+  # input). Self-contained evidence above is unaffected either way. The
+  # skipped state is reported truthfully and is never PASS.
+  real-stack:
+    name: Real-stack integration (fixture-gated)
+    runs-on: macos-15
+    needs: build-test
+    if: ${{ inputs.fixture_source != '' }}
+    steps:
+      - name: Checkout
+        uses: 11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+
+      - name: Provision exact Node 22.23.2 (darwin-arm64)
+        run: |
+          set -euo pipefail
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz
+          echo "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6  node-v22.23.2-darwin-arm64.tar.gz" | shasum -a 256 -c -
+          mkdir -p "$RUNNER_TEMP/node"
+          tar -xzf node-v22.23.2-darwin-arm64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
+          test "$(node -p process.arch)" = "arm64"
+
+      - name: Provision exact Git 2.45.4 (digest-pinned, user scope, version asserted)
+        run: |
+          set -euo pipefail
+          GIT_BIN="$(bash scripts/ci-provision-git-2454.sh "$RUNNER_TEMP/git-work" "$RUNNER_TEMP/git-2.45.4" | tail -1)"
+          test "$("$GIT_BIN" --version)" = "git version 2.45.4"
+          echo "$(dirname "$GIT_BIN")" >> "$GITHUB_PATH"
+
+      - name: Isolated Pi 0.83.0 lane (no real user Pi state)
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/pi-lane"
+          cd "$RUNNER_TEMP/pi-lane"
+          npm init -y >/dev/null
+          npm install --no-save @earendil-works/pi-coding-agent@0.83.0 >/dev/null
+          "$RUNNER_TEMP/pi-lane/node_modules/.bin/pi" --version
+          test -f "$RUNNER_TEMP/pi-lane/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js"
+
+      # SIR-PS6-002: the fixture source arrives as the FIXTURE_SOURCE
+      # environment variable (data, never shell syntax), is strictly
+      # validated BEFORE any curl, and is fetched argv-safe (`curl --`).
+      - name: Validate fixture source (data + closed URL policy)
+        run: bash scripts/ci-validate-fixture-source.sh "$FIXTURE_SOURCE"
+
+      - name: Fetch + verify fixture source (SHA-pinned fixture manifest)
+        run: |
+          set -euo pipefail
+          curl -fsSL -- "$FIXTURE_SOURCE" -o "$RUNNER_TEMP/fixtures.tgz"
+          mkdir -p "$RUNNER_TEMP/fixtures"
+          tar -xzf "$RUNNER_TEMP/fixtures.tgz" -C "$RUNNER_TEMP/fixtures"
+          test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
+          test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
+          test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
+          cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
+
+      - name: Build pi-shuttle
+        run: npm run build
+
+      - name: Real-stack evidence (installer → lifecycle → MCP → pi-guard)
+        env:
+          FIXTURE_DIR: "${{ runner.temp }}/fixtures"
+          WORK_ROOT: "${{ runner.temp }}/realstack"
+          PSHUTTLE_REPO: "${{ github.workspace }}"
+          PI_LANE_BIN: "${{ runner.temp }}/pi-lane/node_modules/.bin"
+          PI_LOADER: "${{ runner.temp }}/pi-lane/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js"
+          GIT_2454: "${{ runner.temp }}/git-2.45.4/bin/git"
+          NODE_BIN: "${{ runner.temp }}/node/bin/node"
+        run: bash scripts/ci-lane-b-real-stack.sh
+
+  fixture-gate-report:
+    name: Fixture-source gate report
+    runs-on: ubuntu-24.04
+    needs: build-test
+    if: always()
+    steps:
+      - name: Report real-stack subsection state
+        run: |
+          if [ -z "${FIXTURE_SOURCE:-}" ]; then
+            echo "fixture-source not configured — real-stack integration subsection skipped (self-contained build/platform/APFS/unit evidence above ran and is unaffected)" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "fixture-source configured — real-stack integration subsection executed in the real-stack job" >> "$GITHUB_STEP_SUMMARY"
+          fi

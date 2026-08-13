@@ -30,6 +30,7 @@ import { artifactFilePath, findPackageRoot, hashFile, readPackageIdentity, verif
 import type { ComponentArtifactSpec, PackageIdentity } from './artifact.js';
 import { regularFileOrNull, scanArtifactMembers } from './archive.js';
 import { runProcess } from './process.js';
+import { stripQuarantineAttribute } from './quarantine.js';
 
 export type ComponentResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly message: string };
 
@@ -39,6 +40,10 @@ export interface ComponentInstallContext {
   readonly stagingDir: string;
   readonly nodeExecutable: string;
   readonly expectedSha256?: string;
+  /** Host platform (PS-6 quarantine handling is darwin-only). */
+  readonly platform: string;
+  /** Executable-search environment for quarantine handling (test seam). */
+  readonly pathEnv?: NodeJS.ProcessEnv;
 }
 
 /**
@@ -218,6 +223,12 @@ export async function installGatewayComponent(input: GatewayInput): Promise<Comp
   const artifact = await verifyArtifactFile(input.context.artifactDir, spec);
   if (!artifact.ok) return artifact;
 
+  // PS-6 darwin quarantine handling (platform-support-contract §3.7):
+  // AFTER SHA-256 verification, BEFORE extraction/activation. Absence of
+  // the attribute is a normal no-quarantine condition; Linux is a no-op.
+  const quarantine = await stripQuarantineAttribute(artifact.value.path, input.context.platform, input.context.pathEnv);
+  if (!quarantine.ok) return quarantine;
+
   const extracted = await extractArtifact(artifact.value.path, input.context.stagingDir, 'gateway', input.tarExecutable);
   if (!extracted.ok) return extracted;
   const root = findPackageRoot(extracted.value);
@@ -359,6 +370,12 @@ export async function installPiGuardComponent(input: PiGuardInput): Promise<Comp
   };
   const artifact = await verifyArtifactFile(input.context.artifactDir, spec);
   if (!artifact.ok) return artifact;
+
+  // PS-6 darwin quarantine handling (platform-support-contract §3.7):
+  // AFTER SHA-256 verification, BEFORE extraction/activation. Absence of
+  // the attribute is a normal no-quarantine condition; Linux is a no-op.
+  const quarantine = await stripQuarantineAttribute(artifact.value.path, input.context.platform, input.context.pathEnv);
+  if (!quarantine.ok) return quarantine;
 
   const extracted = await extractArtifact(artifact.value.path, input.context.stagingDir, 'piguard', input.tarExecutable);
   if (!extracted.ok) return extracted;

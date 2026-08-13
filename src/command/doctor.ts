@@ -8,8 +8,8 @@
  * `partial installation`.
  *
  * Probe discipline:
- *   - platform/architecture claims are manifest-bound (Linux x86_64 only;
- *     macOS arm64 gated — never claimed);
+ *   - platform/architecture claims are manifest-bound (Linux x86_64 and
+ *     darwin arm64 supported; macOS Intel/Windows never claimed);
  *   - Node is the running interpreter (same rule as the installer);
  *   - Git is discovered through PATH (never `/usr/bin/git`); the exact
  *     evidence lane is 2.45.4 — presence ≠ lane evidence;
@@ -146,17 +146,39 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   const nodeExecutable = ctx.nodeExecutable ?? process.execPath;
   const lane = hostLane(ctx.env.platform, ctx.env.arch);
   const supportedLane = COMPATIBILITY_MANIFEST.supportedLanes.includes(lane);
-  const gatedLane = COMPATIBILITY_MANIFEST.gatedLanes.includes(lane);
   const checks: DoctorCheck[] = [];
   const notes: string[] = [];
 
   // 1. Platform / architecture (manifest-bound claim; gate §13).
-  checks.push(check('platform', 'platform', supportedLane ? 'supported' : 'unsupported', `${ctx.env.platform} ${ctx.env.arch} (lane ${lane})${gatedLane ? ' — gated: PS-6 host-lane evidence required, not claimed' : ''}`));
+  checks.push(check('platform', 'platform', supportedLane ? 'supported' : 'unsupported', `${ctx.env.platform} ${ctx.env.arch} (lane ${lane})`));
 
   // 2. Node (the running interpreter is the runtime node; same rule as the installer).
   const nodeRun = await runProcess(nodeExecutable, ['--version'], { env: ctx.pathEnv, timeoutMs: 10_000 });
   const nodeVersion = nodeRun.exitCode === 0 ? nodeRun.stdout.trim().replace(/^v/, '') : '';
+  // PS-6 darwin lane: on the darwin-arm64 host lane the ACTUAL Node
+  // executable must be arm64 — a Rosetta/x64 Node cannot satisfy the
+  // first-class darwin-arm64 lane (platform-support-contract §3.9; the
+  // version probe alone cannot distinguish native from translated
+  // binaries). Read-only, argv-safe; never affects Linux behavior.
+  const requiresNativeArm64Node = ctx.env.platform === 'darwin' && ctx.env.arch === 'arm64';
+  let nodeArch = '';
+  if (requiresNativeArm64Node) {
+    const archRun = await runProcess(nodeExecutable, ['-p', 'process.arch'], { env: ctx.pathEnv, timeoutMs: 10_000 });
+    nodeArch = archRun.exitCode === 0 && archRun.signal === null && !archRun.timedOut ? archRun.stdout.trim() : '';
+  }
   checks.push(check('node', 'node', nodeVersion === NODE_LANE_VERSION ? 'supported' : 'unsupported', nodeVersion === '' ? 'version probe produced no output' : `node ${nodeVersion}${nodeVersion === NODE_LANE_VERSION ? '' : ` — the validated lane is ${NODE_LANE_VERSION} (package floor >=22 is not a support claim)`}`));
+  if (requiresNativeArm64Node && nodeVersion === NODE_LANE_VERSION) {
+    if (nodeArch === 'arm64') {
+      const archCheck = checks[checks.length - 1]!;
+      checks[checks.length - 1] = check('node', 'node', 'supported', `${archCheck.detail} — native arm64 executable (process.arch ${nodeArch})`);
+    } else if (nodeArch !== '') {
+      // Rosetta/x64 (or otherwise wrong-arch) Node on the darwin-arm64
+      // lane: the lane requires a native arm64 Node — fail closed.
+      checks[checks.length - 1] = check('node', 'node', 'unsupported', `node ${nodeVersion} runs as ${nodeArch} — the darwin-arm64 lane requires a native arm64 Node executable (Rosetta/x64 is not a claimed lane)`);
+    } else {
+      checks[checks.length - 1] = check('node', 'node', 'installed but unverified', `node ${nodeVersion} — architecture probe produced no observable result on the darwin-arm64 lane`);
+    }
+  }
 
   // 3. Git (PATH discovery; presence ≠ evidence lane; exact lane 2.45.4).
   const gitPath = resolveExecutable('git', ctx.pathEnv);
