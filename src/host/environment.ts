@@ -25,6 +25,14 @@ export interface HostEnvironment {
   readonly platform: string;
   /** Node architecture (`x64`, `arm64`, ...). */
   readonly arch: string;
+  /**
+   * Executable-search environment (PATH) for subprocess discovery. The
+   * value is captured here — the only seam allowed to read `process.env`
+   * besides the process boundary — and consumed by the PS-4 lifecycle
+   * probes through the runner. Absent in synthetic/test environments:
+   * the runner then falls back to the real process environment.
+   */
+  readonly pathEnv?: NodeJS.ProcessEnv;
 }
 
 /** Build the host environment from the real process (CLI entry only). */
@@ -33,7 +41,7 @@ export function hostEnvironmentFromProcess(): { readonly ok: true; readonly envi
   if (home === undefined || home.length === 0) {
     return { ok: false, message: 'HOME is not set; pi-shuttle requires an operator home directory' };
   }
-  return { ok: true, environment: { home, platform: process.platform, arch: process.arch } };
+  return { ok: true, environment: { home, platform: process.platform, arch: process.arch, pathEnv: process.env } };
 }
 
 /** The complete approved pi-shuttle layout, derived from the home dir. */

@@ -1,29 +1,36 @@
 /**
- * PS-2 composition root: parse argv, route to the owning handler, and
+ * PS-4 composition root: parse argv, route to the owning handler, and
  * return a deterministic outcome (exit code + bounded stdout/stderr).
  *
- * Operational ownership:
- *   --help / --version           PS-2 (fully implemented)
- *   doctor                       PS-2 skeleton (see command/doctor.ts)
- *   project add/list/remove      grammar PS-2; operational behavior PS-4
- *   start                        grammar PS-2; operational behavior PS-4
+ * Operational ownership (post-PS-4):
+ *   --help / --version      PS-2 (deterministic, state-free)
+ *   doctor                  PS-4 (full local probe suite)
+ *   project add/list/remove PS-4 (lifecycle; Gateway bootstrap composition)
+ *   start                   PS-4 (Gateway runtime composition; stdio inherited)
  *
- * Deferred handlers fail closed with a typed, stable message and exit 1 —
- * the grammar is closed and validated, but the end-user workflow is
- * truthfully reported as not implemented in this gate.
+ * `run` is async because `start` composes a live child process and
+ * resolves only when the Gateway child exits (exit status propagated).
  */
 import type { HostEnvironment } from './host/environment.js';
 import { parseCommand } from './command/parse.js';
 import { helpText, versionText } from './command/help.js';
-import { formatDoctorReport, runDoctorSkeleton } from './command/doctor.js';
+import { formatDoctorReport, runDoctor } from './command/doctor.js';
+import { addProject, listProjects, removeProject } from './lifecycle/projects.js';
+import { runStartCommand } from './lifecycle/start.js';
+import { resolveLayout } from './host/environment.js';
 
 export interface AppDeps {
   /**
    * Host environment. Required ONLY by commands that observe host/layout
-   * state (`doctor`); state-free commands (`--help`, `--version`) work
-   * without it (SIR-PS2-010). Deferred PS-4 handlers need no environment.
+   * state; state-free commands (`--help`, `--version`) work without it
+   * (SIR-PS2-010).
    */
   readonly env?: HostEnvironment;
+  /**
+   * Real CLI path only: forward SIGINT/SIGTERM/SIGHUP to the Gateway child
+   * during `start` (direct tests leave this off).
+   */
+  readonly forwardSignals?: boolean;
 }
 
 export interface CommandOutcome {
@@ -32,14 +39,12 @@ export interface CommandOutcome {
   readonly stderr: string;
 }
 
-const DEFERRED_NOTE = 'operational behavior is not implemented in PS-2 (owned by PS-4); the command grammar is closed and validated';
-
-function deferred(command: string): CommandOutcome {
-  return { exitCode: 1, stdout: '', stderr: `pi-shuttle: ${command}: ${DEFERRED_NOTE}\n` };
+function noHome(): CommandOutcome {
+  return { exitCode: 2, stdout: '', stderr: 'pi-shuttle: HOME is not set; pi-shuttle requires an operator home directory\n' };
 }
 
-/** Run one CLI invocation. Pure IO-free dispatch: writes nothing itself. */
-export function run(argv: readonly string[], deps: AppDeps): CommandOutcome {
+/** Run one CLI invocation. State writes happen only inside the owning handlers. */
+export async function run(argv: readonly string[], deps: AppDeps): Promise<CommandOutcome> {
   const parsed = parseCommand(argv);
   if (!parsed.ok) {
     return { exitCode: 2, stdout: '', stderr: `pi-shuttle: ${parsed.message}` };
@@ -50,22 +55,28 @@ export function run(argv: readonly string[], deps: AppDeps): CommandOutcome {
     case 'version':
       return { exitCode: 0, stdout: versionText(), stderr: '' };
     case 'doctor': {
-      if (deps.env === undefined) {
-        return { exitCode: 2, stdout: '', stderr: 'pi-shuttle: HOME is not set; pi-shuttle requires an operator home directory\n' };
-      }
-      const result = runDoctorSkeleton(deps.env);
+      if (deps.env === undefined) return noHome();
+      const result = await runDoctor({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv });
       if (!result.ok) {
         return { exitCode: result.exitCode, stdout: '', stderr: `pi-shuttle: doctor: ${result.message}\n` };
       }
       return { exitCode: result.exitCode, stdout: formatDoctorReport(result.report), stderr: '' };
     }
-    case 'project-add':
-      return deferred('project add');
-    case 'project-list':
-      return deferred('project list');
-    case 'project-remove':
-      return deferred('project remove');
-    case 'start':
-      return deferred('start');
+    case 'project-add': {
+      if (deps.env === undefined) return noHome();
+      return addProject({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv }, parsed.command.path);
+    }
+    case 'project-list': {
+      if (deps.env === undefined) return noHome();
+      return listProjects({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv });
+    }
+    case 'project-remove': {
+      if (deps.env === undefined) return noHome();
+      return removeProject({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv }, parsed.command.target);
+    }
+    case 'start': {
+      if (deps.env === undefined) return noHome();
+      return runStartCommand({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv, forwardSignals: deps.forwardSignals ?? false });
+    }
   }
 }

@@ -4,20 +4,25 @@
  *
  * 1. Network/tunnel/MCP-SDK vocabulary is FORBIDDEN everywhere: pi-shuttle
  *    production code performs no network behavior in any gate.
- * 2. Subprocess execution exists ONLY inside the installer process
- *    boundary (`src/installer/process.ts`); the CLI/config/registry
- *    layers remain subprocess-free (PS-2 invariant preserved).
+ * 2. Subprocess execution exists ONLY inside the shared process boundary
+ *    (`src/process/runner.ts`, extracted in PS-4 from the PS-3 installer
+ *    boundary); the CLI/config/registry layers remain subprocess-free.
  * 3. `process.env` is confined to the host seam and the process boundary.
  * 4. `node:crypto` is confined to identity derivation and artifact
  *    digest verification.
  * 5. `node:fs` is confined to the leaf modules with per-module exact
  *    allowlists. Filesystem MUTATION vocabulary lives only in the
- *    persistence writer (state/config documents) and the installer
- *    boundary (ordinary local operator package management — installation
- *    authority is explicitly NOT Gateway trusted authority).
+ *    persistence writer (state/config documents), the installer boundary
+ *    (ordinary local operator package management), and the approved
+ *    lifecycle operator-directory boundary (`src/lifecycle/projects.ts`
+ *    — trusted store parent locators, git isolation dirs, artifact dirs,
+ *    and its own disposable probe files only).
  * 6. No trusted-authority vocabulary: pi-shuttle must never mint or
  *    reference Gateway provenance/capability/approval machinery.
- * 7. Package surface stays a single private bin with zero runtime
+ * 7. The Gateway bootstrap verb and `--config` argv are reachable only
+ *    through the lifecycle boundary (fixed argv shapes); inherited stdio
+ *    exists only inside the fixed start spawn shape.
+ * 8. Package surface stays a single private bin with zero runtime
  *    dependencies.
  */
 import { test } from 'node:test';
@@ -59,7 +64,12 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/installer/install.ts': ['existsSync', 'mkdirSync', 'readlinkSync', 'rmSync', 'symlinkSync'],
   'src/installer/artifact.ts': ['createReadStream'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
-  'src/installer/process.ts': ['accessSync', 'constants'],
+  'src/process/runner.ts': ['accessSync', 'constants'],
+  // PS-4 lifecycle boundary (approved operator-directory creation + probes):
+  'src/lifecycle/state.ts': ['existsSync'],
+  'src/lifecycle/projects.ts': ['mkdirSync', 'statSync', 'unlinkSync', 'existsSync'],
+  'src/lifecycle/start.ts': ['statSync'],
+  'src/command/doctor.ts': ['existsSync', 'readdirSync', 'statSync'],
 };
 
 test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src', () => {
@@ -74,20 +84,20 @@ test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src', () => {
   }
 });
 
-test('ps3 static guard: subprocess execution exists only inside the installer process boundary', () => {
+test('ps2/ps3/ps4 static guard: subprocess execution exists only inside the shared process boundary', () => {
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/installer/process.ts') continue;
+    if (rel(file) === 'src/process/runner.ts') continue;
     assert.equal(content.includes('node:child_process'), false, `${rel(file)} must not import child_process`);
     assert.equal(content.includes('spawn('), false, `${rel(file)} must not spawn processes`);
     assert.equal(content.includes('exec('), false, `${rel(file)} must not exec`);
   }
 });
 
-test('ps2/ps3 static guard: process.env is confined to the host seam and the process boundary', () => {
+test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the process boundary', () => {
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/installer/process.ts') continue;
+    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts') continue;
     assert.equal(content.includes('process.env'), false, `${rel(file)} must not read the environment directly`);
   }
 });
@@ -114,14 +124,34 @@ test('ps2/ps3 static guard: node:fs is confined to leaf modules with exact allow
   }
 });
 
-test('ps2/ps3 static guard: filesystem mutation vocabulary lives only in the writer, the shared lock, and the installer boundary', () => {
+test('ps2/ps3 static guard: filesystem mutation vocabulary lives only in the writer, the shared lock, the installer boundary, and the approved lifecycle operator-directory boundary', () => {
   const MUTATING = ['renameSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'cpSync', 'chmodSync', 'symlinkSync', 'writeFileSync', 'copyFileSync', 'truncateSync', 'readlinkSync'];
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || INSTALLER(file)) continue;
+    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;
     for (const name of MUTATING) {
       assert.equal(content.includes(name), false, `${rel(file)} must not mutate the filesystem (${name})`);
     }
+  }
+});
+
+test('ps4 static guard: the Gateway bootstrap verb is reachable only through the lifecycle boundary with a fixed argv shape', () => {
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    if (rel(file) === 'src/lifecycle/projects.ts') continue;
+    assert.equal(content.includes("'bootstrap'"), false, `${rel(file)} must not invoke the Gateway bootstrap verb`);
+    if (rel(file) !== 'src/process/runner.ts') {
+      assert.equal(content.includes("'--config'"), false, `${rel(file)} must not build Gateway CLI argv`);
+    }
+  }
+});
+
+test('ps4 static guard: the start runtime path uses inherited stdio only through the fixed spawnGatewayForStart shape', () => {
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    if (rel(file) === 'src/process/runner.ts' || rel(file) === 'src/lifecycle/start.ts') continue;
+    assert.equal(content.includes('stdio: \'inherit\''), false, `${rel(file)} must not inherit stdio outside the start spawn boundary`);
+    assert.equal(content.includes('spawnGatewayForStart'), false, `${rel(file)} must not bypass the fixed start spawn shape (only src/lifecycle/start.ts may call it)`);
   }
 });
 

@@ -10,7 +10,10 @@ import { parseCommand } from '../../src/command/parse.js';
 import { run } from '../../src/app.js';
 import { GATEWAY_PS1_BASELINE_COMMIT, PI_GUARD_VERSION } from '../../src/compat/manifest.js';
 
-const LINUX_ENV = { home: '/home/operator', platform: 'linux', arch: 'x64' };
+// Deterministic probe environment: no git/pi on PATH (the real host lanes
+// must not leak into unit dispatch tests); missing runtime config is the
+// finding under test.
+const LINUX_ENV = { home: '/home/operator', platform: 'linux', arch: 'x64', pathEnv: { PATH: '' } as NodeJS.ProcessEnv };
 
 test('cli grammar: every approved command parses', () => {
   const cases: Array<[readonly string[], string]> = [
@@ -58,72 +61,82 @@ test('cli grammar: malformed invocations fail closed', () => {
   }
 });
 
-test('cli dispatch: help and version are deterministic and state-free', () => {
-  const help = run(['--help'], { env: LINUX_ENV });
+test('cli dispatch: help and version are deterministic and state-free', async () => {
+  const help = await run(['--help'], { env: LINUX_ENV });
   assert.equal(help.exitCode, 0);
   assert.ok(help.stdout.includes('usage: pi-shuttle <command> [operands]'));
   assert.ok(help.stdout.includes('project add <path>'));
   assert.equal(help.stderr, '');
-  assert.deepEqual(run(['--help'], { env: LINUX_ENV }), help, 'help must be byte-deterministic');
+  assert.deepEqual(await run(['--help'], { env: LINUX_ENV }), help, 'help must be byte-deterministic');
 
-  const version = run(['--version'], { env: LINUX_ENV });
+  const version = await run(['--version'], { env: LINUX_ENV });
   assert.equal(version.exitCode, 0);
   assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
   assert.ok(version.stdout.includes(GATEWAY_PS1_BASELINE_COMMIT));
   assert.ok(version.stdout.includes(`pi-guard ${PI_GUARD_VERSION}`));
-  assert.deepEqual(run(['--version'], { env: LINUX_ENV }), version, 'version must be byte-deterministic');
+  assert.deepEqual(await run(['--version'], { env: LINUX_ENV }), version, 'version must be byte-deterministic');
 });
 
-test('cli dispatch: malformed invocation exits 2 with usage on stderr', () => {
+test('cli dispatch: malformed invocation exits 2 with usage on stderr', async () => {
   for (const argv of [['unknown-cmd'], ['project', 'add'], ['doctor', 'x'], []]) {
-    const outcome = run(argv, { env: LINUX_ENV });
+    const outcome = await run(argv, { env: LINUX_ENV });
     assert.equal(outcome.exitCode, 2, JSON.stringify(argv));
     assert.equal(outcome.stdout, '');
     assert.ok(outcome.stderr.includes('pi-shuttle:'), JSON.stringify(argv));
   }
 });
 
-test('cli dispatch: PS-4-owned operational handlers fail closed with exit 1', () => {
-  const cases: Array<[readonly string[], string]> = [
-    [['project', 'add', '/tmp/proj'], 'project add'],
-    [['project', 'list'], 'project list'],
-    [['project', 'remove', '/tmp/proj'], 'project remove'],
-    [['start'], 'start'],
-  ];
-  for (const [argv, name] of cases) {
-    const outcome = run(argv, { env: LINUX_ENV });
-    assert.equal(outcome.exitCode, 1, JSON.stringify(argv));
-    assert.equal(outcome.stdout, '');
-    assert.ok(outcome.stderr.includes(name), `stderr must name the deferred command: ${outcome.stderr}`);
-    assert.ok(outcome.stderr.includes('PS-4'), `stderr must state PS-4 ownership: ${outcome.stderr}`);
-  }
+test('cli dispatch: PS-4 operational handlers fail closed without an installation (exit 1, typed)', async () => {
+  const add = await run(['project', 'add', '/tmp/proj'], { env: LINUX_ENV });
+  assert.equal(add.exitCode, 1);
+  assert.equal(add.stdout, '');
+  assert.ok(add.stderr.includes('project add'), add.stderr);
+  assert.ok(add.stderr.includes('receipt'), add.stderr);
+
+  const remove = await run(['project', 'remove', '/tmp/proj'], { env: LINUX_ENV });
+  assert.equal(remove.exitCode, 1);
+  assert.equal(remove.stdout, '');
+  assert.ok(remove.stderr.includes('project remove'), remove.stderr);
+  assert.ok(remove.stderr.includes('no registered project matches'), remove.stderr);
+
+  const start = await run(['start'], { env: LINUX_ENV });
+  assert.equal(start.exitCode, 1);
+  assert.equal(start.stdout, '');
+  assert.ok(start.stderr.includes('start'), start.stderr);
+  assert.ok(start.stderr.includes('receipt'), start.stderr);
+
+  // project list works without any installation (empty registry is valid).
+  const list = await run(['project', 'list'], { env: LINUX_ENV });
+  assert.equal(list.exitCode, 0, list.stderr);
+  assert.equal(list.stdout, 'no registered projects\n');
 });
 
-test('cli dispatch: doctor skeleton runs on the injected environment (missing config = finding, exit 1)', () => {
-  const outcome = run(['doctor'], { env: LINUX_ENV });
+test('cli dispatch: doctor runs on the injected environment (missing config = finding, exit 1)', async () => {
+  const outcome = await run(['doctor'], { env: LINUX_ENV });
   // SIR-PS2-003: missing runtime configuration is a finding-class verdict → exit 1.
   assert.equal(outcome.exitCode, 1);
   assert.ok(outcome.stdout.includes('platform: supported'));
   assert.ok(outcome.stdout.includes('runtime configuration: missing'));
+  assert.ok(outcome.stdout.includes('installation receipt: missing'), outcome.stdout);
 });
 
-test('cli dispatch: help/version work without any host environment (SIR-PS2-010)', () => {
-  const help = run(['--help'], {});
+test('cli dispatch: help/version work without any host environment (SIR-PS2-010)', async () => {
+  const help = await run(['--help'], {});
   assert.equal(help.exitCode, 0);
   assert.ok(help.stdout.includes('usage: pi-shuttle'));
   assert.equal(help.stderr, '');
-  const version = run(['--version'], {});
+  const version = await run(['--version'], {});
   assert.equal(version.exitCode, 0);
   assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
   // Env-requiring commands fail closed without an environment.
-  const doctor = run(['doctor'], {});
+  const doctor = await run(['doctor'], {});
   assert.equal(doctor.exitCode, 2);
   assert.ok(doctor.stderr.includes('HOME is not set'));
 });
 
-test('cli dispatch: help text documents the full exit-2 semantics (SIR-PS2-004)', () => {
-  const help = run(['--help'], {});
-  assert.ok(help.stdout.includes('2 malformed invocation or unsupported platform/architecture (`doctor`)'), help.stdout);
+test('cli dispatch: help text documents the full exit-2 semantics (SIR-PS2-004)', async () => {
+  const help = await run(['--help'], {});
+  assert.ok(help.stdout.includes('2 malformed invocation or unsupported platform/architecture (`doctor`, `start`)'), help.stdout);
 });
 
 // ─── real-CLI subprocess smoke tests (compiled dist/cli.js) ──────────────
@@ -149,27 +162,34 @@ function runCli(args: readonly string[], home: string, envOverride?: NodeJS.Proc
 
 test('cli subprocess: real CLI help/version/unknown/deferred/doctor', async () => {
   const home = join(REPO, 'dist-test', 'smoke-home');
-  const help = await runCli(['--help'], home);
+  // Deterministic probe PATH (no real git/pi lanes; the host's Pi 0.84.1
+  // must never leak into this unit assertion).
+  const probeEnv = { ...process.env, HOME: home, PATH: '' };
+  const help = await runCli(['--help'], home, probeEnv);
   assert.equal(help.code, 0);
   assert.ok(help.stdout.includes('usage: pi-shuttle'));
   assert.equal(help.stderr, '');
 
-  const version = await runCli(['--version'], home);
+  const version = await runCli(['--version'], home, probeEnv);
   assert.equal(version.code, 0);
   assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
 
-  const unknown = await runCli(['frobnicate'], home);
+  const unknown = await runCli(['frobnicate'], home, probeEnv);
   assert.equal(unknown.code, 2);
   assert.ok(unknown.stderr.includes('unknown command'));
 
-  const malformed = await runCli(['project', 'add'], home);
+  const malformed = await runCli(['project', 'add'], home, probeEnv);
   assert.equal(malformed.code, 2);
 
-  const deferred = await runCli(['project', 'list'], home);
-  assert.equal(deferred.code, 1);
-  assert.ok(deferred.stderr.includes('PS-4'));
+  const deferred = await runCli(['project', 'list'], home, probeEnv);
+  assert.equal(deferred.code, 0);
+  assert.equal(deferred.stdout, 'no registered projects\n');
 
-  const doctor = await runCli(['doctor'], home);
+  const add = await runCli(['project', 'add', '/nonexistent'], home, probeEnv);
+  assert.equal(add.code, 1);
+  assert.ok(add.stderr.includes('receipt'), add.stderr);
+
+  const doctor = await runCli(['doctor'], home, probeEnv);
   // SIR-PS2-003: missing runtime configuration is a finding → exit 1.
   assert.equal(doctor.code, 1);
   assert.ok(doctor.stdout.includes('platform: supported'));

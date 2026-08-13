@@ -27,6 +27,16 @@ export function deriveWorkspaceId(canonicalRoot: string): string {
   return `pgw:w:${deriveStoreId(canonicalRoot)}`;
 }
 
+/**
+ * Deterministic operator surface id (`pgw-` + store id). Must match the
+ * Gateway's closed logical-identifier pattern (`/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/`,
+ * ≤ 64 chars — component-boundaries §3); the colons of the workspaceId
+ * form are outside that grammar, so the surface gets its own derivation.
+ */
+export function deriveSurfaceId(canonicalRoot: string): string {
+  return `pgw-${deriveStoreId(canonicalRoot)}`;
+}
+
 /** Deterministic trusted-store parent locator (approved layout: share/stores/<storeId>). */
 export function deriveStoreLocator(shareDir: string, canonicalRoot: string): string {
   return join(shareDir, 'stores', deriveStoreId(canonicalRoot));

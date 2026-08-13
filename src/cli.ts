@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * pi-shuttle CLI entry (PS-2). Thin shell: dispatch state-free commands
+ * pi-shuttle CLI entry. Thin shell: dispatch state-free commands
  * (`--help`, `--version`) BEFORE constructing host/layout state so they
  * work without HOME (SIR-PS2-010); build the host environment only for
  * commands that need it, then run the composition root and apply the
- * outcome. The CLI is installed as `pi-shuttle`; no publication occurs in
- * this gate.
+ * outcome. `start` composes the Gateway runtime with inherited stdio and
+ * forwards SIGINT/SIGTERM/SIGHUP to the child, so the CLI resolves only
+ * after the Gateway child exits and propagates its status.
  */
 import { run } from './app.js';
 import { parseCommand } from './command/parse.js';
@@ -24,7 +25,7 @@ if (needsEnvironment) {
   }
   env = host.environment;
 }
-const outcome = run(argv, { ...(env !== undefined ? { env } : {}) });
+const outcome = await run(argv, { ...(env !== undefined ? { env } : {}), forwardSignals: true });
 if (outcome.stdout.length > 0) process.stdout.write(outcome.stdout);
 if (outcome.stderr.length > 0) process.stderr.write(outcome.stderr);
 process.exitCode = outcome.exitCode;
