@@ -15,7 +15,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/normalize-cli-mode.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "rm -rf dist dist-test && npm run build && tsc -p tsconfig.tests.json && node --test \"dist-test/tests/unit/*.test.js\""
   },
