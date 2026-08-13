@@ -17,10 +17,12 @@
 #     --out <fixture-dir>
 #
 # Expected baselines (fail closed on mismatch):
-#   Gateway : commit 28f1d3a12382bc145376c8d8a2d87d89495785ec
-#             (mfx-labs/project-gateway PS-6R baseline — the exact source
-#             closure; product-contract §6 "gatewayCommit pins the exact
-#             source closure for the packaged artifact")
+#   Gateway : commit 55f764290a4567a20557f1db19d2a6fb97572a97
+#             (mfx-labs/project-gateway PS-6I local baseline — the exact
+#             source closure incl. the darwin-x86_64 trusted host lane
+#             (ADR-043); supersedes the PS-6R public baseline
+#             28f1d3a12382bc145376c8d8a2d87d89495785ec; the public
+#             repository is updated by a separate human-gated push)
 #   pi-guard: tag v0.1.2 @ commit 7a7580cc4cbd7926797564c72269394fc29a860a
 #
 # Output:
@@ -29,7 +31,7 @@
 #   <fixture-dir>/fixture-manifest.json
 set -euo pipefail
 
-GATEWAY_COMMIT="28f1d3a12382bc145376c8d8a2d87d89495785ec"
+GATEWAY_COMMIT="55f764290a4567a20557f1db19d2a6fb97572a97"
 PI_GUARD_COMMIT="7a7580cc4cbd7926797564c72269394fc29a860a"
 PI_GUARD_TAG="v0.1.2"
 

@@ -1,13 +1,15 @@
-# PS-6 Lane B — macOS arm64 first-class evidence (public multi-repo lane).
+# PS-6I Lane C — macOS Intel first-class evidence (public multi-repo lane).
 #
-# Purpose: first-class darwin arm64 support evidence: exact Node 22.23.2
-# arm64 (architecture ASSERTED), deterministic install, build, typecheck,
-# full test suite, the dedicated mandatory APFS evidence invocation (skips
-# make the evidence job RED, never a silent green), direct
-# executable/package checks, exact Git 2.45.4 provisioning (digest-pinned
-# kernel.org source, built version asserted), volume case-sensitivity
-# record, and the real-stack subsection built on the runner from the
-# EXACT component source commits (mfx-labs/project-gateway @
+# Purpose: first-class darwin Intel/x64 support evidence — the Lane C
+# transformation (PS-6I): the previous refusal-honesty purpose is replaced
+# by SUPPORTED real-stack evidence: exact Node 22.23.2 darwin-x64
+# (architecture ASSERTED x64 — native Intel, never emulated), deterministic
+# install, build, typecheck, full test suite, the dedicated mandatory APFS
+# evidence invocation (skips make the evidence job RED, never a silent
+# green), direct executable/package checks, exact Git 2.45.4 provisioning
+# (digest-pinned kernel.org source, built version asserted), volume
+# case-sensitivity record, and the real-stack subsection built on the
+# runner from the EXACT component source commits (mfx-labs/project-gateway @
 # 55f764290a4567a20557f1db19d2a6fb97572a97 (PS-6I local baseline), mfx-labs/pi-guard @
 # 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2) via the committed
 # scripts/prepare-fixtures.sh boundary — no external fixture hosting, no
@@ -17,7 +19,10 @@
 # Component identities are repository-owned constants (this file), never
 # user-supplied workflow_dispatch refs; the checked-out HEAD of every
 # component is asserted against its exact pin before any build.
-name: Lane B — macOS arm64 evidence
+#
+# The lane runs on the GitHub Intel macOS runner (macos-15-intel); Lane A
+# (Linux) and Lane B (Apple Silicon) behavior is unchanged.
+name: Lane C — macOS Intel evidence
 
 on:
   push:
@@ -30,17 +35,13 @@ permissions:
 
 env:
   # Repository-owned exact component pins (PS-6 public multi-repo lane).
-  # Gateway: product-contract §6 — "gatewayCommit pins the exact source
-  # closure for the packaged artifact" (mfx-labs/project-gateway, PS-6R
-  # baseline).
-  # pi-guard: v0.1.2 exact commit.
   GATEWAY_COMMIT: 55f764290a4567a20557f1db19d2a6fb97572a97
   PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
   build-test:
-    name: Build + tests (darwin arm64)
-    runs-on: macos-15 # GA Apple Silicon (arm64) hosted image; Intel is the explicit macos-15-intel label
+    name: Build + tests (darwin Intel x64)
+    runs-on: macos-15-intel # explicit Intel (x86_64) image — first-class Intel lane
     steps:
       # actions/checkout v4.2.2 — pinned by full commit SHA (no floating refs)
       - name: Checkout
@@ -48,28 +49,28 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify runner architecture is arm64 (Apple Silicon)
+      - name: Verify runner architecture is x86_64 (Intel)
         run: |
           uname -m
-          test "$(uname -m)" = "arm64"
+          test "$(uname -m)" = "x86_64"
 
-      # Exact validated evidence lane: Node v22.23.2 darwin-arm64 from the
-      # official nodejs.org distribution, SHA-256 pinned. A Rosetta/x64 node
-      # must never satisfy the darwin-arm64 lane.
-      - name: Provision exact Node 22.23.2 (darwin-arm64)
+      # Exact validated evidence lane: Node v22.23.2 darwin-x64 from the
+      # official nodejs.org distribution, SHA-256 pinned. Native Intel x64
+      # is the lane's own architecture — no emulation, no Rosetta.
+      - name: Provision exact Node 22.23.2 (darwin-x64)
         run: |
           set -euo pipefail
-          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz
-          echo "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6  node-v22.23.2-darwin-arm64.tar.gz" | shasum -a 256 -c -
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz
+          echo "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026  node-v22.23.2-darwin-x64.tar.gz" | shasum -a 256 -c -
           mkdir -p "$RUNNER_TEMP/node"
-          tar -xzf node-v22.23.2-darwin-arm64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
-          rm node-v22.23.2-darwin-arm64.tar.gz
+          tar -xzf node-v22.23.2-darwin-x64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          rm node-v22.23.2-darwin-x64.tar.gz
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
           node --version
-          # SIR-PS6-007: the architecture is ASSERTED, not merely printed —
-          # anything other than arm64 fails this job.
-          test "$(node -p process.arch)" = "arm64"
-          echo "node-arch=arm64" >> "$GITHUB_STEP_SUMMARY"
+          # The architecture is ASSERTED, not merely printed — anything
+          # other than x64 fails this job (native Intel evidence).
+          test "$(node -p process.arch)" = "x64"
+          echo "node-arch=x64" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Deterministic dependency install (lockfile)
         run: npm ci
@@ -80,18 +81,18 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      # Full suite incl. the PS-6 APFS evidence tests (case variant,
-      # Unicode NFC/NFD, symlink alias) — real default-APFS assertions on
-      # this runner; case-sensitive-volume skips are truthful, never
-      # product failures.
+      # Full suite incl. the APFS evidence tests (case variant, Unicode
+      # NFC/NFD, symlink alias) — real default-APFS assertions on this
+      # runner; the APFS object-identity invariant is architecture-
+      # independent (ADR-042/043).
       - name: Full test suite (incl. APFS path evidence)
         run: npm test
 
-      # SIR-PS6-004: mandatory Lane B APFS evidence — a DEDICATED
-      # invocation that distinguishes PASS from NOT EXECUTED/SKIPPED.
-      # Any skip makes this evidence job RED: first-class support evidence
-      # never silently converts a missing APFS evidence test into green.
-      - name: Lane B APFS evidence (mandatory — no silent skip)
+      # SIR-PS6-004: mandatory APFS evidence — a DEDICATED invocation that
+      # distinguishes PASS from NOT EXECUTED/SKIPPED. Any skip makes this
+      # evidence job RED: first-class support evidence never silently
+      # converts a missing APFS evidence test into green.
+      - name: APFS evidence (mandatory — no silent skip)
         run: |
           ./node_modules/.bin/tsc -p tsconfig.tests.json
           node scripts/ci-apfs-evidence-strict.mjs
@@ -104,12 +105,11 @@ jobs:
           tar -xzf "$TGZ" -C "$RUNNER_TEMP/packcheck"
           "$RUNNER_TEMP/packcheck/package/dist/cli.js" --version
           "$RUNNER_TEMP/packcheck/package/dist/cli.js" --help >/dev/null
-          echo "packed dist/cli.js executes directly on darwin arm64"
+          echo "packed dist/cli.js executes directly on darwin Intel x64"
 
       # Exact Git 2.45.4 (SIR-PS6-003): ONE digest-pinned kernel.org source
       # artifact, user/workspace-scope source build (no sudo, no system Git
-      # replacement), built version asserted exactly. Stock /usr/bin/git
-      # (Apple CLT) is never sufficient for the Gateway runtime.
+      # replacement), built version asserted exactly.
       - name: Provision exact Git 2.45.4 (digest-pinned, user scope, version asserted)
         run: |
           set -euo pipefail
@@ -125,14 +125,12 @@ jobs:
       - name: Clean-tree sanity
         run: git diff --check
 
-  # ── Real-stack subsection (Lane B evidence, public multi-repo) ──────────
-  # Runs on every event (push/PR/dispatch): the exact public component
-  # checkouts are built/verified on the runner, so no workflow_dispatch
-  # input or external fixture hosting is involved. The build-test evidence
-  # above is unaffected; the real-stack job is full Lane B evidence.
+  # ── Real-stack subsection (Lane C evidence, public multi-repo) ──────────
+  # The exact public component checkouts are built/verified on the runner,
+  # so no workflow_dispatch input or external fixture hosting is involved.
   real-stack:
     name: Real-stack integration (public multi-repo)
-    runs-on: macos-15
+    runs-on: macos-15-intel
     needs: build-test
     steps:
       - name: Checkout pi-shuttle
@@ -140,20 +138,21 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Verify runner architecture is arm64 (Apple Silicon)
+      - name: Verify runner architecture is x86_64 (Intel)
         run: |
           uname -m
-          test "$(uname -m)" = "arm64"
+          test "$(uname -m)" = "x86_64"
 
-      - name: Provision exact Node 22.23.2 (darwin-arm64)
+      - name: Provision exact Node 22.23.2 (darwin-x64)
         run: |
           set -euo pipefail
-          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-arm64.tar.gz
-          echo "61130f394c1630d211dd50aecc4353d379480f36d3ac913cd85dbba1aed585c6  node-v22.23.2-darwin-arm64.tar.gz" | shasum -a 256 -c -
+          curl -fsSLO https://nodejs.org/dist/v22.23.2/node-v22.23.2-darwin-x64.tar.gz
+          echo "58e99022c2ff89395576cc7fd4d98cea24bb68081475d5f88b801ee8729fb026  node-v22.23.2-darwin-x64.tar.gz" | shasum -a 256 -c -
           mkdir -p "$RUNNER_TEMP/node"
-          tar -xzf node-v22.23.2-darwin-arm64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          tar -xzf node-v22.23.2-darwin-x64.tar.gz -C "$RUNNER_TEMP/node" --strip-components=1
+          rm node-v22.23.2-darwin-x64.tar.gz
           echo "$RUNNER_TEMP/node/bin" >> "$GITHUB_PATH"
-          test "$(node -p process.arch)" = "arm64"
+          test "$(node -p process.arch)" = "x64"
 
       - name: Provision exact Git 2.45.4 (digest-pinned, user scope, version asserted)
         run: |
@@ -164,9 +163,6 @@ jobs:
 
       # Exact public component checkouts — full-SHA-pinned refs, never
       # branches/tags as authority. Public repositories: no credentials.
-      # Checked out under the workspace (actions/checkout v4 requires the
-      # destination inside $GITHUB_WORKSPACE); fixture output stays in
-      # runner.temp.
       - name: Checkout Gateway exact commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
@@ -232,6 +228,7 @@ jobs:
 
       - name: Real-stack evidence (installer → lifecycle → MCP → pi-guard)
         env:
+          EVIDENCE_LABEL: "LANE C"
           FIXTURE_DIR: "${{ runner.temp }}/fixtures"
           WORK_ROOT: "${{ runner.temp }}/realstack"
           PSHUTTLE_REPO: "${{ github.workspace }}"

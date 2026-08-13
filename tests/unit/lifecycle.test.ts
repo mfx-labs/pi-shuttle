@@ -216,13 +216,13 @@ test('project add: case-variant spelling of a registered project fails closed wi
   }
 });
 
-test('project add: unsupported platform (macOS Intel) exits 2 before any Gateway work', async () => {
+test('project add: unsupported platform (windows) exits 2 before any Gateway work', async () => {
   const env = makeEnv();
   try {
     const root = makeProjectRoot(env);
     installFixtureGateway(env);
     writeReceiptFixture(env);
-    const ctx = { ...contextFor(env), env: { home: env, platform: 'darwin', arch: 'x64' } };
+    const ctx = { ...contextFor(env), env: { home: env, platform: 'win32', arch: 'x64' } };
     const outcome = await addProject(ctx, root);
     assert.equal(outcome.exitCode, 2);
     assert.ok(outcome.stderr.includes('ERR-PS4-PREFLIGHT-PLATFORM'), outcome.stderr);

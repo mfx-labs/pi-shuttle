@@ -55,6 +55,6 @@ test('host: canonicalizePath resolves symlinks and fails closed on absence', () 
 test('host: host-lane mapping is inherited and manifest-bound', () => {
   assert.equal(hostLane('linux', 'x64'), 'linux-x86_64-posix-utf8-node22');
   assert.equal(hostLane('darwin', 'arm64'), 'darwin-arm64-posix-utf8-node22');
-  assert.equal(hostLane('darwin', 'x64'), 'darwin-x64'); // Intel: unclaimed lane
+  assert.equal(hostLane('darwin', 'x64'), 'darwin-x86_64-posix-utf8-node22'); // PS-6I Intel lane
   assert.equal(hostLane('win32', 'x64'), 'win32-x64'); // unclaimed lane
 });

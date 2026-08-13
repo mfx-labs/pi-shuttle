@@ -344,7 +344,7 @@ test('doctor: stale coordination lock artifacts are detected with recovery guida
   }
 });
 
-test('doctor: darwin arm64 platform is supported (PS-6 promoted lane); darwin x64 fails closed exit 2', async () => {
+test('doctor: darwin arm64 and darwin Intel platforms are supported (PS-6/PS-6I promoted lanes); windows fails closed exit 2', async () => {
   const { env, ctx } = healthyContext();
   try {
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' } });
@@ -354,9 +354,13 @@ test('doctor: darwin arm64 platform is supported (PS-6 promoted lane); darwin x6
     const intel = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'x64' } });
     assert.equal(intel.ok, true);
     if (!intel.ok) return;
-    assert.equal(intel.exitCode, 2);
-    assert.equal(verdicts(intel.report)['platform'], 'unsupported');
-    assert.ok(intel.report.checks.find((c) => c.id === 'platform')!.detail.includes('darwin-x64'), 'Intel lane is reported as unclaimed');
+    assert.equal(verdicts(intel.report)['platform'], 'supported', 'macOS Intel is a first-class claimed lane (PS-6I)');
+    assert.ok(intel.report.checks.find((c) => c.id === 'platform')!.detail.includes('darwin-x86_64-posix-utf8-node22'), 'Intel lane is reported by its trusted lane constant');
+    const windows = await runDoctor({ ...ctx, env: { home: env, platform: 'win32', arch: 'x64' } });
+    assert.equal(windows.ok, true);
+    if (!windows.ok) return;
+    assert.equal(windows.exitCode, 2);
+    assert.equal(verdicts(windows.report)['platform'], 'unsupported');
   } finally {
     cleanupEnv(env);
   }

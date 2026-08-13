@@ -145,13 +145,14 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
   fixes. No remote Actions, no push.
 - **Prerequisites:** PS-1 (same repo, must land first); Lane A evidence
   as the Linux lane reference.
-- **Acceptance criteria:** Gateway darwin lane green on macOS arm64
+- **Acceptance criteria:** Gateway darwin lanes green on macOS arm64
   (storage + crash + integrity suites); Lane B green (installer batch,
   CLI, confinement, focused E2E, APFS case-sensitivity + node arch
-  recorded); Lane D journey recorded; macOS Intel reported honestly
-  (Lane C focused only); platform-support-contract claims match evidence.
-- **Focused tests:** Gateway darwin-lane suite; pi-shuttle macOS batch
-  install/E2E; doctor honesty on macOS Intel.
+  recorded); Lane D journey recorded; macOS Intel supported with Lane C
+  first-class evidence + physical Intel smoke (PS-6I);
+  platform-support-contract claims match evidence.
+- **Focused tests:** Gateway darwin-lane suites; pi-shuttle macOS batch
+  install/E2E; doctor platform claims on all three supported lanes.
 - **Human/external gates:** Gateway ADR review (APFS case-insensitivity
   decision, fsync evidence acceptance); GitHub Actions authorization.
 

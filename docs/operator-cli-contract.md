@@ -29,10 +29,10 @@ unverified); `2` unsupported platform/architecture (fail closed).
 Status vocabulary (used exactly, never embellished):
 
 - **supported** — matches the manifest lane and verifies;
-- **unsupported** — not a claimed lane (e.g. macOS Intel without evidence,
-  Windows, Pi below the 0.83.0 minimum, Node below the 22.19.0 minimum,
-  a failed required compatibility probe, case-insensitive filesystem where the
-  lane contract requires evidence);
+- **unsupported** — not a claimed lane (e.g. Windows, Pi below the
+  0.83.0 minimum, Node below the 22.19.0 minimum, a failed required
+  compatibility probe, case-insensitive filesystem where the lane contract
+  requires evidence);
 - **installed but unverified** — present, version cannot be confirmed
   against the manifest or compatibility predicate (e.g. unknown pi-guard
   version);

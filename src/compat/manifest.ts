@@ -7,18 +7,19 @@
  * semver ranges, no unverified Pi 0.84.x claims.
  *
  * Pins preserved from the approved contract + later gate facts:
- *   gateway committed baseline 28f1d3a12382bc145376c8d8a2d87d89495785ec
- *     (PS-6R local baseline: the exact source closure the packaged
+ *   gateway committed baseline 55f764290a4567a20557f1db19d2a6fb97572a97
+ *     (PS-6I local baseline: the exact source closure the packaged
  *     artifact is built from; product-contract §6 "gatewayCommit pins the
  *     exact source closure for the packaged artifact". Supersedes the
- *     pre-public pin 1a454b61241ca23a638c3083e2e7d28e28f86b18 and the
- *     PS-6 public pin 98d1b204a864596bda91bec1104b8a8d5e89e1cd)
+ *     PS-6R public baseline 28f1d3a12382bc145376c8d8a2d87d89495785ec,
+ *     which predates the darwin-x86_64 trusted host lane (ADR-043); the
+ *     public repository is updated by a separate human-gated push)
  *   pi-guard v0.1.2 (commit 7a7580cc4cbd7926797564c72269394fc29a860a)
  *   Pi compatibility baseline 0.83.0 (SUPPORTED_PI_LANE)
  */
 export const PI_SHUTTLE_VERSION = '0.1.0';
 export const GATEWAY_PACKAGE_VERSION = '0.1.0';
-export const GATEWAY_PS1_BASELINE_COMMIT = '28f1d3a12382bc145376c8d8a2d87d89495785ec';
+export const GATEWAY_PS1_BASELINE_COMMIT = '55f764290a4567a20557f1db19d2a6fb97572a97';
 export const GATEWAY_DEPENDENCIES: Readonly<Record<string, string>> = {
   '@modelcontextprotocol/server': '2.0.0',
   'ajv': '8.20.0',
@@ -47,6 +48,8 @@ export const CONFIG_FORMAT_VERSION = 1;
 export const LINUX_HOST_LANE = 'linux-x86_64-posix-utf8-node22';
 /** darwin arm64 lane (PS-6, Gateway ADR-042): accepted first-class lane. */
 export const DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22';
+/** darwin Intel/x64 lane (PS-6I, Gateway ADR-043): accepted first-class lane. */
+export const DARWIN_X86_64_HOST_LANE = 'darwin-x86_64-posix-utf8-node22';
 
 /** The closed compatibility-manifest shape (product-contract §6). */
 export interface CompatibilityManifest {
@@ -86,6 +89,6 @@ export const COMPATIBILITY_MANIFEST: CompatibilityManifest = Object.freeze({
   gatewayDependencies: Object.freeze({ ...GATEWAY_DEPENDENCIES }),
   configurationVersion: CONFIGURATION_VERSION,
   configFormatVersion: CONFIG_FORMAT_VERSION,
-  supportedLanes: Object.freeze([LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE]),
+  supportedLanes: Object.freeze([LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
   gatedLanes: Object.freeze([]),
 });

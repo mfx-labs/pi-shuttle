@@ -8,12 +8,13 @@
  * `partial installation`.
  *
  * Probe discipline:
- *   - platform/architecture claims are manifest-bound (Linux x86_64 and
- *     darwin arm64 supported; macOS Intel/Windows never claimed);
+ *   - platform/architecture claims are manifest-bound (Linux x86_64,
+ *     darwin arm64, and darwin Intel supported; Windows never claimed);
  *   - Node is the running interpreter (same rule as the installer);
  *     runtime minimum >= 22.19.0 (22.23.2 is the validated CI baseline,
  *     reported never gating); native arm64 required on the darwin-arm64
- *     lane (PS-6R policy);
+ *     lane only (PS-6R policy); the darwin-Intel lane requires no
+ *     architecture beyond the running interpreter (x64 is native there);
  *   - Git is discovered through PATH (never `/usr/bin/git`); runtime
  *     minimum >= 2.30.0 (2.45.4 is the validated CI baseline, reported
  *     never gating); presence ≠ lane evidence;

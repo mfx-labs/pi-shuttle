@@ -10,17 +10,24 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, classifyNodeRuntime, classifyPiVersion, ensureWritableLayout } from '../../src/installer/preflight.js';
 import { resolveLayout } from '../../src/host/environment.js';
+import { COMPATIBILITY_MANIFEST, DARWIN_X86_64_HOST_LANE, LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE } from '../../src/compat/manifest.js';
 
 const LINUX = { home: '/tmp/x', platform: 'linux', arch: 'x64' };
 
-test('preflight: platform lane classification — linux x64 and darwin arm64 supported; darwin x64/windows refused', () => {
+test('preflight: platform lane classification — linux x64, darwin arm64, and darwin Intel supported; windows refused', () => {
   assert.equal(checkPlatformLane(LINUX).ok, true);
   const mac = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'arm64' });
   assert.equal(mac.ok, true, 'macOS arm64 is the PS-6 promoted first-class lane');
   const intel = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' });
-  assert.equal(intel.ok, false, 'macOS Intel is never claimed');
-  if (!intel.ok) assert.ok(intel.message.includes('supported lanes'), intel.message);
+  assert.equal(intel.ok, true, 'macOS Intel is the PS-6I promoted first-class lane');
+  assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' }).ok, true);
   assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'win32', arch: 'x64' }).ok, false);
+});
+
+test('preflight: darwin Intel lane is a manifest claim, not a mapping guess', () => {
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), true);
+  assert.equal(LINUX_HOST_LANE, 'linux-x86_64-posix-utf8-node22');
+  assert.equal(DARWIN_ARM64_HOST_LANE, 'darwin-arm64-posix-utf8-node22');
 });
 
 test('preflight: node lane is the exact validated version', () => {

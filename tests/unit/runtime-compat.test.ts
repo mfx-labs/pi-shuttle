@@ -86,12 +86,14 @@ test('host lane: identifiers are frozen opaque protocol strings, never derived f
   // identity. A newer compatible Node runtime must NOT alter them.
   assert.equal(hostLane('linux', 'x64'), 'linux-x86_64-posix-utf8-node22');
   assert.equal(hostLane('darwin', 'arm64'), 'darwin-arm64-posix-utf8-node22');
+  assert.equal(hostLane('darwin', 'x64'), 'darwin-x86_64-posix-utf8-node22'); // PS-6I Intel lane
   // The mapping is pure: it depends only on platform/arch — never on
   // process.version (there is no runtime-version input anywhere in the
   // mapping; the 'node22' label is frozen protocol text).
   const mappingSource = readFileSync(join(REPO, 'src', 'host', 'environment.ts'), 'utf8');
   assert.ok(mappingSource.includes("'linux-x86_64-posix-utf8-node22'"), 'frozen Linux lane constant');
   assert.ok(mappingSource.includes("'darwin-arm64-posix-utf8-node22'"), 'frozen darwin lane constant');
+  assert.ok(mappingSource.includes("'darwin-x86_64-posix-utf8-node22'"), 'frozen darwin Intel lane constant');
   assert.ok(!mappingSource.includes('process.version'), 'the lane mapping must not consult the runtime version');
   assert.ok(!mappingSource.includes('NODE_LANE_VERSION'), 'the lane mapping must not consult the manifest node lane');
   assert.ok(!mappingSource.includes('node24') && !mappingSource.includes('node25'), 'no future node lanes are generated');

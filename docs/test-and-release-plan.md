@@ -21,11 +21,14 @@ canonicalization), focused E2E (handshake + nine tools + persist/replay),
 storage crash suite on APFS, record volume case-sensitivity and exact node
 arch. Requires the PS-6 Gateway host-lane change to be meaningful.
 
-### Lane C — macOS Intel (GitHub Actions, if available and useful)
-Compatibility/focused lane only: installer refusal/doctor verdicts are
-tested for honesty (must report `unsupported`, never `supported`), plus
-any build-level smoke tests. Does NOT upgrade the platform claim; only
-sufficient independent evidence can do that.
+### Lane C — macOS Intel (GitHub Actions)
+First-class darwin Intel/x64 evidence (PS-6I): exact Node 22.23.2
+(darwin-x64, architecture ASSERTED x64), build + typecheck + full test
+suite, mandatory APFS evidence invocation, exact Git 2.45.4 provision,
+and the real-stack subsection (exact public Gateway/pi-guard checkouts →
+fixture construction → installer COMPLETE → doctor healthy → Gateway
+start → MCP 9/9 → Pi 0.83.0 known-good). The Lane C runner is
+`macos-15-intel`; it does not depend on the physical Lane D machine.
 
 ### Lane D — macOS arm64 (physical)
 Final manual user journey, exactly as the end user: install → add project →

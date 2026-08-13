@@ -270,11 +270,11 @@ test('start: cleanup removes only listeners installed by this invocation (SIR-PS
   }
 });
 
-test('start: unsupported platform (macOS Intel) exits 2 without composing a Gateway process', async () => {
+test('start: unsupported platform (windows) exits 2 without composing a Gateway process', async () => {
   const env = makeEnv();
   try {
     const { layout } = startEnv({ FIXTURE_GATEWAY_START: '1' });
-    const ctx = { env: { home: env, platform: 'darwin', arch: 'x64' }, layout, nodeExecutable: process.execPath, pathEnv: fixturePathEnv(env, { FIXTURE_GATEWAY_START: '1' }) };
+    const ctx = { env: { home: env, platform: 'win32', arch: 'x64' }, layout, nodeExecutable: process.execPath, pathEnv: fixturePathEnv(env, { FIXTURE_GATEWAY_START: '1' }) };
     const outcome = await runStartCommand(ctx);
     assert.equal(outcome.exitCode, 2);
     assert.equal(outcome.stdout, '');

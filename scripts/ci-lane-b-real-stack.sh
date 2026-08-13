@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 #
-# PS-6 Lane B real-stack evidence orchestrator (CI test/evidence ONLY).
+# PS-6 Lane B / PS-6I Lane C real-stack evidence orchestrator (CI
+# test/evidence ONLY).
 #
 # Runs the REAL installed product stack against SHA-pinned package fixtures
 # built on the runner from the EXACT public component checkouts
@@ -10,6 +11,10 @@
 # project add/list/doctor/re-add/remove → pi 0.83.0 lane + pi-guard install
 # + exact `pi list` verification + extension-load probe → real
 # `pi-shuttle start` MCP handshake probe → volume/arch facts record.
+#
+# Architecture-neutral: it runs on Linux x86_64 (Lane A), darwin arm64
+# (Lane B), and darwin x86_64 (Lane C); the runner architecture is
+# recorded, never assumed. EVIDENCE_LABEL selects the closing label.
 #
 # No external fixture hosting: fixtures arrive via the committed helper from
 # exact public checkouts, and the manifest's recorded source commits are
@@ -26,6 +31,8 @@
 #   GATEWAY_COMMIT    exact public Gateway commit (workflow pin)
 #   PI_GUARD_COMMIT   exact public pi-guard commit (workflow pin)
 set -euo pipefail
+
+EVIDENCE_LABEL="${EVIDENCE_LABEL:-LANE B}"
 
 for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE_BIN GATEWAY_COMMIT PI_GUARD_COMMIT; do
   if [ -z "${!v:-}" ]; then echo "real-stack: $v is required" >&2; exit 2; fi
@@ -130,4 +137,4 @@ if command -v diskutil >/dev/null 2>&1; then
 else
   echo "(not darwin — volume facts recorded by the runner context)"
 fi
-echo "real-stack: LANE B REAL-STACK EVIDENCE — GREEN"
+echo "real-stack: $EVIDENCE_LABEL REAL-STACK EVIDENCE — GREEN"

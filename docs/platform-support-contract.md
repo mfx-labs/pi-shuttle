@@ -5,14 +5,17 @@
 | Platform | Arch | Status | Evidence required |
 |---|---|---|---|
 | Linux | x86_64 | **supported** (first-class) | Lane A physical/local E2E on the exact lane |
-| macOS | arm64 (Apple Silicon) | **supported** (first-class, gated) | PS-6 Gateway host-lane change + Lane B CI + Lane D physical journey |
-| macOS | Intel (x86_64) | **unsupported unless evidence** — NOT claimed because it compiles | Lane C focused lane only; upgrade to supported only with sufficient validation evidence |
+| macOS | arm64 (Apple Silicon) | **supported** (first-class) | PS-6 Gateway host-lane change + Lane B CI + Lane D physical journey |
+| macOS | Intel (x86_64) | **supported** (first-class, PS-6I) | PS-6I Gateway host-lane change (ADR-043) + Lane C CI + this gate's physical Intel smoke |
 | anything else (incl. Windows) | — | **unsupported** (installer refuses; doctor exit 2) | none |
 
 Supported lane constants (inherited, never reinterpreted):
 
-- Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux) and
-  `darwin-arm64-posix-utf8-node22` (macOS, proposed — PS-6);
+- Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux),
+  `darwin-arm64-posix-utf8-node22` (macOS arm64 — PS-6), and
+  `darwin-x86_64-posix-utf8-node22` (macOS Intel — PS-6I); the `node22`
+  suffix is a frozen opaque protocol label, never an exact Node runtime
+  equality requirement;
 - Node: runtime minimum `>=22.19.0`; `22.23.2` is the validated
   deterministic CI baseline (reported, never an equality gate; the
   package floor `>=22.0.0` is not a support claim);
@@ -71,10 +74,15 @@ Portability rules (binding):
    unverified/unsupported. The store layout is fixed lowercase, so
    collision risk is low, but the contract text must be addressed, not
    waved through. Evidence required: (a) record the volume's case
-   sensitivity in Lane B/D; (b) either validate on a case-sensitive volume
+   sensitivity in Lane B/C/D; (b) either validate on a case-sensitive volume
    or obtain a reviewed Gateway ADR assessing the fixed-lowercase layout;
    (c) the compatibility probe (`runCompatibilityProbe`) must run green on
-   the darwin lane. **Open decision for human judgment** (§7).
+   the darwin lanes. **Decided in ADR-042/043: default case-insensitive
+   APFS is supported; identity derives from the filesystem-canonical
+   spelling, so case/Unicode aliases of one object never create duplicate
+   authority (PS6-MAC-001).** This is architecture-independent: Intel
+   APFS uses the same dev+ino object identity (PS-6I verified on
+   MacBookPro13,3).
 3. **`/tmp` canonicalization.** macOS `/tmp` is a symlink to `/private/tmp`
    and Node's `os.tmpdir()` returns per-user `/var/folders/...` paths. The
    store never lives under `/tmp` (locator under `~/.local/share/
@@ -106,15 +114,19 @@ Portability rules (binding):
 8. **Git on macOS.** Git is not preinstalled; a Git satisfying the minimum
    runtime version (>= 2.30.0) must be provided by the operator (homebrew
    etc.) and discovered by version probe. The validated CI baseline is
-   exactly 2.45.4 (Lane B digest-pinned provision). `/usr/bin/git` (Apple
+   exactly 2.45.4 (Lane B/C digest-pinned provision). `/usr/bin/git` (Apple
    shim) is never assumed. Lane D must record the git origin (brew vs.
-   custom build) and version.
-9. **Node on macOS.** A native arm64 Node satisfying the minimum runtime
-   version (>= 22.19.0) is required; the version probe must confirm the
-   version AND that the binary is arm64 (a Rosetta/Intel node under arm64
-   macOS would be unverified for the darwin-arm64 lane — arch mismatch
-   fails closed in doctor). The validated CI baseline is exactly 22.23.2
-   (Lane B).
+   custom build) and version. The physical Intel smoke (PS-6I) records
+   Apple Git 2.37.1 as an accepted >= 2.30.0 operator-provided runtime,
+   subject to the Gateway Git binary safety/fingerprint checks.
+9. **Node on macOS.** On the darwin-arm64 lane a native arm64 Node
+   satisfying the minimum runtime version (>= 22.19.0) is required; the
+   version probe must confirm the version AND that the binary is arm64 (a
+   Rosetta/Intel node under arm64 macOS would be unverified for the
+   darwin-arm64 lane — arch mismatch fails closed in doctor). The
+   darwin-Intel lane requires no such probe: x64 is the lane's own native
+   architecture, and the running interpreter is the runtime Node (PS-6I).
+   The validated CI baseline is exactly 22.23.2 (Lane B/C).
 
 ## 4. What "supported" means
 

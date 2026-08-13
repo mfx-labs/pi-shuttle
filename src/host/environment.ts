@@ -101,9 +101,15 @@ export function canonicalizePath(path: string): string | null {
  * Map platform/architecture to a Gateway host-lane constant. Lane semantics
  * are inherited from the Gateway (component-boundaries §3); the manifest's
  * supported/gated lane sets are the claim, never this mapping.
+ *
+ * The canonical vocabulary: process-facing boundaries use Node's
+ * architecture names (`x64`, `arm64`); protocol boundaries use the
+ * TrustedHostLane spelling (`x86_64`). The `node22` suffix is a frozen
+ * opaque protocol label, never an exact Node runtime requirement (PS-6R).
  */
 export function hostLane(platform: string, arch: string): string {
   if (platform === 'linux' && arch === 'x64') return 'linux-x86_64-posix-utf8-node22';
   if (platform === 'darwin' && arch === 'arm64') return 'darwin-arm64-posix-utf8-node22';
+  if (platform === 'darwin' && arch === 'x64') return 'darwin-x86_64-posix-utf8-node22';
   return `${platform}-${arch}`;
 }

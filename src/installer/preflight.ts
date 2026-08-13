@@ -21,7 +21,7 @@ import { mkdirSync } from 'node:fs';
 
 export type PreflightVerdict = { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Platform/architecture lane claim (Linux x86_64 + darwin arm64; others refused). */
+/** Platform/architecture lane claim (Linux x86_64, darwin arm64 + darwin Intel; others refused). */
 export function checkPlatformLane(env: HostEnvironment): PreflightVerdict {
   const lane = hostLane(env.platform, env.arch);
   if (COMPATIBILITY_MANIFEST.supportedLanes.includes(lane)) {

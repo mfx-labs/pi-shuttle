@@ -58,9 +58,9 @@ required flags; no silent defaults in batch mode for components 1–2.
 
 ## 4. Preflight and refusal boundaries
 
-- Platform/architecture: Linux x86_64 → supported; macOS arm64 → supported
-  lane (pending PS-6 evidence, enforced by manifest gate); anything else →
-  **refuse with a clear message** (do not claim support).
+- Platform/architecture: Linux x86_64 → supported; macOS arm64 →
+  supported (PS-6); macOS Intel/x86_64 → supported (PS-6I); anything
+  else → **refuse with a clear message** (do not claim support).
 - Node: minimum runtime `22.19.0`; versions at/above the minimum are
   version-compatible. `22.23.2` is the validated CI baseline (reported,
   never an equality gate). Malformed/unreadable versions fail closed.

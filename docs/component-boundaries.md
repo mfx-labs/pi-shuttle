@@ -84,11 +84,14 @@
   namespace contains metadata/, records/, index/, audit/, tmp/, locks/,
   quarantine/").
 - **Host lane:** `TRUSTED_HOST_LANE = 'linux-x86_64-posix-utf8-node22'`
-  (`src/trusted/host-lane.ts`) — a compile-time constant, hard-coded by the
-  validator and containment checks; macOS/Windows/case-insensitive
-  filesystems are "unverified and unsupported" per the lane contract.
-  **Implication: first-class macOS arm64 support requires a reviewed
-  Gateway host-lane change (PS-6), not just CI.**
+  plus `DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22'`
+  (PS-6, ADR-042) and `DARWIN_X86_64_HOST_LANE =
+  'darwin-x86_64-posix-utf8-node22'` (PS-6I, ADR-043)
+  (`src/trusted/host-lane.ts`) — a closed accepted-lane set enforced by the
+  validator and containment checks; everything else (Windows,
+  case-insensitive filesystems are addressed by ADR-042/043) fails closed.
+  **First-class macOS arm64 and Intel support are Gateway host-lane
+  changes (PS-6/PS-6I), not just CI.**
 - **Pi lane:** `SUPPORTED_PI_LANE = 'pi-0.83.0-extension-api-v1'`
   (`src/adapters/pi/types.ts`). Pi 0.84.1 on the current host is NOT
   release evidence (runbook §1/§8; P3A-WP15-006 open).
@@ -146,15 +149,15 @@ forbidden (duplication + unreachable private brands + package exports
 exclude it); (c) MCP tool — forbidden; (d) instructing users to import
 private modules — forbidden.
 
-### 4.2 PS-6 — host-lane parameterization (blocking only macOS first-class support)
-`TRUSTED_HOST_LANE` is a compile-time constant hard-coded in the validator.
-macOS arm64 first-class support requires a reviewed change to a closed
-accepted-lane set (e.g. `linux-x86_64-posix-utf8-node22` unchanged +
-`darwin-arm64-posix-utf8-node22`), with the lane selected as an explicit
-trusted operand, plus macOS evidence gates (see platform-support-contract).
-Host lane participates in configuration identity → stores are lane-bound;
-Linux stores are not portable to macOS and vice versa (acceptable,
-documented; stores are machine-local).
+### 4.2 PS-6/PS-6I — host-lane parameterization (macOS first-class support)
+`TRUSTED_HOST_LANE` is the closed accepted-lane set
+(`linux-x86_64-posix-utf8-node22` + `darwin-arm64-posix-utf8-node22`
+[ADR-042] + `darwin-x86_64-posix-utf8-node22` [ADR-043]), with the lane
+selected as an explicit trusted operand, plus macOS evidence gates (see
+platform-support-contract). Host lane participates in configuration
+identity → stores are lane-bound; cross-lane replay (including between
+darwin-arm64 and darwin-Intel) fails closed; stores are machine-local and
+never migrated.
 
 ## 5. pi-guard: no source change required
 
