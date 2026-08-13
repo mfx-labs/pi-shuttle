@@ -1,99 +1,184 @@
 # pi-shuttle
 
-End-user product / distribution layer for the Project Gateway MCP + pi-guard
-composed installation.
+pi-shuttle is the local operator layer that composes **Project Gateway**
+and **pi-guard** into one product, so you can let AI clients work with
+your coding projects through small, deliberate, bounded interfaces —
+instead of handing them a shell, a filesystem, or your Git push access.
 
-This repository is the product and release contract. It contains the
-end-user installer design, the operator CLI contract, the compatibility
-manifest, onboarding documentation, and the CI/release orchestration for
-the composed product. It does **not** contain Project Gateway MCP source or
-pi-guard source; those remain separately versioned component repositories
-and are composed here as pinned dependencies.
+It is built around one idea: useful project access should not require
+dangerous access. pi-shuttle registers the projects you choose, installs
+and verifies the components that serve them, checks that your
+environment is healthy, and starts the gateway that AI clients talk to.
+All of that happens on your machine, under your control.
 
-Status: **PS-4 implementation gate** — the project lifecycle (`project
-add/list/remove`), the full `doctor` probe suite, and `start` runtime
-composition are implemented and awaiting senior review (uncommitted,
-unstaged). Pre-release; unpublished; no external mutations; no commits
-yet.
+The design deliberately does **not** expose:
 
-## Local installer (PS-3)
+- **arbitrary shell execution** — there is no generic shell/exec surface;
+- **unrestricted filesystem access** — access is scoped to registered
+  projects through containment rules;
+- **Git mutation / push authority** — Git interaction is read-only
+  inspection, never push or rewrite;
+- **AI self-approval / self-issued authority** — the system has no
+  approve/issue/activate surface for an AI client to grant itself power.
 
-Run the local installer from the repository build:
+## Status
 
-```text
+**Pre-release and under active development.** There is no stable
+production release yet, no published one-line installer URL, and no
+package-manager distribution. The installer and CLI work today from a
+developer checkout with locally built, digest-verified component
+artifacts.
+
+Currently validated supported platforms: **Linux x86_64**, **macOS arm64
+(Apple Silicon)**, and **macOS Intel (x86_64)**. Windows and anything else
+are unsupported (the installer refuses). See [Supported
+platforms](#supported-platforms) for the full matrix and requirements.
+
+Runtime requirements: **Node >= 22.19.0**, **Git >= 2.30.0**, and
+**Pi 0.83.0+** (0.83.0 is the known-good baseline; newer Pi versions are
+accepted only when the committed pi-guard compatibility probe passes).
+
+## Quick start
+
+The current installation path is developer/pre-release: build pi-shuttle
+from source, then install the composed product with locally built
+component artifacts.
+
+```bash
+git clone https://github.com/mfx-labs/pi-shuttle.git
+cd pi-shuttle
+npm ci
 npm run build
-./install.sh --batch --gateway yes --pi-guard no --artifact-dir <dir>
 ```
 
-- Interactive mode prompts for components, install/bin directories, and
-  project configuration (which routes to `pi-shuttle project add <path>`).
-- Batch mode requires explicit `--gateway yes|no` / `--pi-guard yes|no`.
-- Components are installed from digest-verified local artifacts under
-  `<artifact-dir>/` (release artifacts and the public installer URL are
-  pending publication); the receipt is written to
-  `~/.local/state/pi-shuttle/install.json`.
-- Supported lanes (manifest-bound): Linux x86_64, macOS arm64 / Apple
-  Silicon (PS-6 promoted), and macOS Intel / darwin-x64 (PS-6I promoted).
-  Windows remains unsupported (installer refuses; doctor exit 2). CI
-  workflow files exist under `.github/workflows/` (local only; remote
-  execution is a separate human-gated action), and physical macOS UAT
-  (Lane D) remains release evidence.
+The installer (`./install.sh`) installs Project Gateway and pi-guard from
+SHA-256-verified local artifacts. Until release artifacts are published,
+build them from the exact pinned component checkouts with the committed
+fixture helper:
 
-## Operator CLI (PS-4)
+```bash
+bash scripts/prepare-fixtures.sh \
+  --gateway-checkout <path-to-project-gateway-checkout> \
+  --pi-guard-checkout <path-to-pi-guard-checkout> \
+  --out <artifact-dir>
+```
+
+Then run the installer in batch mode (interactive mode prompts for the
+same choices):
+
+```bash
+./install.sh --batch --gateway yes --pi-guard yes --artifact-dir <artifact-dir>
+```
+
+This installs the `pi-shuttle` command into `~/.local/bin`, verifies
+every component, and writes an installation receipt. From there:
+
+```bash
+pi-shuttle doctor               # health check: platform, Node, Git, Pi,
+                                # components, config, registered projects
+pi-shuttle project add <path>   # register a coding project
+pi-shuttle project list         # show registered projects
+pi-shuttle start                # start the Project Gateway MCP server
+```
+
+`pi-shuttle project add <path>` registers a Git repository you choose;
+re-adding the same path is a safe no-op replay. `pi-shuttle start` keeps
+stdout as pure MCP protocol for the AI client. See
+[`docs/installation-contract.md`](docs/installation-contract.md) and
+[`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) for the
+full contract.
+
+## What is pi-shuttle?
+
+Three components work together:
+
+- **pi-shuttle** — the end-user layer: installation, project
+  registration, health checks (`doctor`), and startup (`start`);
+- **Project Gateway** — the bounded MCP/project-access component: a
+  read-and-inspect MCP server that serves exactly nine tools for
+  registered projects (validate, inspect, verify, enumerate, draft,
+  persist, change tracking) — no shell, no push, no approval surface;
+- **pi-guard** — the Pi-side enforcement component that makes the same
+  boundaries real inside the Pi environment.
 
 ```text
-pi-shuttle doctor
-pi-shuttle project add <path>
-pi-shuttle project list
-pi-shuttle project remove <path-or-workspace-id>
-pi-shuttle start
+User / AI client
+       |
+       v
+Project Gateway
+       |
+   registered project
+
+pi-shuttle
+  ├─ installs / verifies Gateway
+  ├─ installs / verifies pi-guard
+  ├─ project management
+  ├─ doctor
+  └─ start
+
+Pi
+ └─ pi-guard
 ```
 
-- `project add <path>` canonicalizes the project root (symlink-resolved),
-  verifies it is a Git repository (read-only probe), derives the
-  deterministic identity (`workspaceId pgw:w:<32-hex>`, store locator
-  `~/.local/share/pi-shuttle/stores/<32-hex>`), prepares the operator-owned
-  directories (store parent 0700, `git-home`/`git-tmp` isolation dirs, the
-  version-2 `artifacts/` dir), composes the smallest bootstrap
-  configuration, and invokes the installed Gateway operator bootstrap verb
-  (`project-gateway-mcp bootstrap --config <input> --output <resolved>`).
-  The Gateway derives the trusted configuration identity (pi-shuttle never
-  computes it); the resolved runtime configuration is validated and
-  correlated (surface/locator/workspace/root/git lane) before the project
-  is registered transactionally in
-  `~/.config/pi-shuttle/runtime.json` (atomic, 0600, concurrency-safe).
-  Re-adding the same project is an exact idempotent replay; re-adding after
-  a `remove` reuses the same preserved store (verification replay).
-- `project list` prints one deterministic line per registered project
-  (workspaceId, canonical root, surface id, store locator) from the
-  authoritative runtime document; an empty registry is a successful state.
-- `project remove` is **deregister only**: the registration is removed
-  transactionally; the trusted store, project directory, Git history, and
-  artifact data are never deleted. Re-add after remove reuses the store.
-- `doctor` runs the full local probe suite (platform, node, git, pi,
-  installation receipt, gateway component, pi-guard, runtime configuration,
-  registered projects, git isolation dirs, coordination locks) with the
-  closed status vocabulary and exit codes 0/1/2. It never mutates state:
-  stale locks are detected with recovery guidance (never auto-deleted),
-  trusted-store integrity is reported as available only through the
-  Gateway bootstrap replay, and ChatGPT/tunnel readiness is reported as
-  not locally observable (PS-7).
-- `start` validates the receipt and runtime configuration, resolves the
-  exact installed Gateway executable, and composes
-  `node <gateway-bin> --config <runtime.json>` with inherited stdio —
-  stdout stays MCP protocol (no pi-shuttle text), diagnostics go to
-  stderr before the child starts, and the Gateway exit status/signals
-  propagate truthfully. `start` never bootstraps, never repairs, never
-  mutates.
+Project Gateway and pi-guard are separate, independently versioned
+repositories (mfx-labs/project-gateway, mfx-labs/pi-guard); pi-shuttle
+pins exact versions of both and verifies their digests at install time,
+so what you run is exactly what was reviewed.
 
-## Layout
+## Security boundaries
 
-- `docs/product-contract.md` — product composition, boundary, authority separation
-- `docs/component-boundaries.md` — ownership split across the three repositories
-- `docs/installation-contract.md` — one-command installer contract
-- `docs/operator-cli-contract.md` — `pi-shuttle` CLI contract
-- `docs/platform-support-contract.md` — Linux/macOS support matrix and evidence
-- `docs/test-and-release-plan.md` — test lanes A–D and release gates
-- `docs/work-packages.md` — dependency-ordered implementation plan (PS-0..PS-8)
-- `docs/decisions/` — ADRs (only where durable rationale is required)
-- `docs/reports/` — gate implementation/review reports
+- **Bounded tool surface.** The Gateway exposes exactly nine public MCP
+  tools for inspection, validation, and controlled artifact
+  drafting/persistence. There is no generic shell/exec tool and no
+  approve/issue/grant surface — an AI client cannot invoke arbitrary
+  commands and cannot issue itself authority.
+- **Workspace confinement.** Access resolves against registered
+  projects only; containment rules keep reads inside the workspace.
+- **Read-only Git.** Git interaction is read-only inspection
+  (ownership, mode, and fingerprint checks included) — never push,
+  rebase, or rewrite.
+- **Digest-verified installation.** Components are installed from
+  artifacts verified against pinned SHA-256 digests; the installer
+  refuses unknown or mismatched artifacts.
+- **Per-user, operator-owned state.** Installation is per-user under
+  `~/.local`, never root; stores and configuration are created with
+  owner-only permissions; `doctor` never mutates state.
+- **Fail-closed health.** `pi-shuttle doctor` reports unsupported
+  platforms, missing components, and failed compatibility probes as
+  failures (exit 2 / exit 1), never as silent success.
+
+## Supported platforms
+
+| Platform | Architecture | Requirement |
+|---|---|---|
+| Linux | x86_64 | Node >= 22.19.0, Git >= 2.30.0, Pi 0.83.0+ |
+| macOS | arm64 (Apple Silicon) | same, plus native arm64 Node |
+| macOS | Intel (x86_64) | same (native x64 Node) |
+| Windows | — | not supported |
+
+Runtime versions are minimums, not exact pins: the validated CI
+baselines (Node 22.23.2, Git 2.45.4, Pi 0.83.0) are evidence, not
+requirements. Validated macOS evidence points so far: macOS 12.7.6 on an
+Intel MacBook Pro, and the macOS 15 runners used by CI — evidence
+points, not a universal minimum macOS version.
+
+## Documentation
+
+- [`docs/product-contract.md`](docs/product-contract.md) — what the
+  product is and is not, composition and authority separation
+- [`docs/installation-contract.md`](docs/installation-contract.md) —
+  installer behavior, version pinning, preflight refusals
+- [`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) —
+  the exact `pi-shuttle` command surface and `doctor` status vocabulary
+- [`docs/platform-support-contract.md`](docs/platform-support-contract.md) —
+  the platform support matrix and its evidence
+- [`docs/component-boundaries.md`](docs/component-boundaries.md) — what
+  each repository owns
+- [`docs/decisions/`](docs/decisions/) — architecture decision records
+- [`docs/reports/`](docs/reports/) — gate implementation and evidence
+  reports
+
+## License
+
+UNLICENSED, pre-release, unpublished. See `package.json` for the current
+package state.
