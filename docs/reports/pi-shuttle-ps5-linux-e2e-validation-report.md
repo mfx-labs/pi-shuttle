@@ -573,3 +573,83 @@ command before PS-5 may be declared ACCEPTED.
 PS-5 LINUX E2E — CORRECTIONS REQUIRED (awaiting post-commit revalidation)
 
 `PS5-LINUX-001 — CORRECTED AND BASELINED` (see PS-5 executable focused rereview)
+`PS5-LINUX-001 — CORRECTED AND BASELINED` (see PS-5 executable focused rereview)
+
+
+---
+
+## 32. Post-correction Linux E2E revalidation (PS5-LINUX-001 closure)
+
+Executed against the corrected committed SHA `5380b3113dd7aea76f75347105e1b0a6363562c8`
+(`fix: make pi-shuttle CLI executable`), after the focused rereview
+(`pi-shuttle-ps5-linux-executable-focused-rereview.md` — ACCEPTED).
+Fresh disposable zero-state root: `/tmp/pi-shuttle-ps5-revalidation`
+(isolated HOME/config/state/share/bin, Pi 0.83.0 lane, Git HOME/TMP,
+project root, artifact dir; zero-state proven before install). All
+product commands in this revalidation were executed through the directly
+executable installed `pi-shuttle` — NEVER via `node dist/cli.js`.
+
+### 32.1 Revalidation evidence
+
+| Step | Result |
+|---|---|
+| Clean build (`rm -rf dist` + `npm run build` at `5380b31…`) | `dist/cli.js` regular file, mode **0755**, shebang `#!/usr/bin/env node`, `./dist/cli.js --version` exit 0 (no `node` prefix) |
+| npm-pack release-shaped artifact | `pi-shuttle-0.1.0.tgz` SHA-256 `e2144878d51b9d356c5f85a0be4a9e00c85a1fd10f5fd4b1e8b2c0bfd967e75f` (54 members); member `package/dist/cli.js` **-rwxr-xr-x (0755)**; extracted direct exec `--version` and `--help` both exit 0 |
+| Gateway artifact (clean clone `7f3b4af…`) | `project-gateway-artifact-core-0.1.0.tgz` SHA `d37c598f5685e5f66d7c8a580003631423bdf5b36c5b85bc98925e4778aa395c` (deterministic — identical to prior run) |
+| pi-guard artifact (clean clone v0.1.2) | `pi-guard-0.1.2.tgz` SHA `057f1b636328e8c77857a4b590d051fcc52c0c9b015ca5dd1a773c21d7d24d01` (deterministic — identical to prior run) |
+| Dependency materialization | exact pins `@modelcontextprotocol/server@2.0.0`, `ajv@8.20.0`, `zod@4.4.3` (PS5-LINUX-003 release-pipeline evidence, unchanged) |
+| Installer (fresh HOME, batch, both yes, explicit digests) | run 1 PARTIAL (gateway activated, deps pending — truthful); after materialization **run 2 COMPLETE, exit 0**; receipt: gateway `installed-verified`, pi-guard `installed-verified` (pi 0.83.0, `pi-list`), **both `digestVerified: true`** |
+| **Direct-executable acceptance (PS5-LINUX-001)** | `<binDir>/pi-shuttle` → `dist/cli.js` (0755 regular file); **direct** `pi-shuttle --version` exit 0 and `pi-shuttle --help` exit 0 — no `node`, no EACCES, no 126 |
+| Direct `project add` | exit 0, `state: initialized`; identity independently recomputed (storeId `eb8264d59b3e3099c3c89319d666dbb9` matches); store-v1 created by real Gateway; runtime config persisted; sentinel unchanged; artifacts dir created |
+| Direct exact re-add | exit 0, `verification-replay`, store metadata byte-identical, 1 registration |
+| Direct `project list` | deterministic single line, exit 0 |
+| Direct `doctor` | **exit 0** (11 supported checks: platform, node, git, pi 0.83.0, receipt, gateway, pi-guard exact source, runtime config, project, git isolation, locks) |
+| Direct `pi-shuttle start` → real Gateway MCP | **8/8 harness assertions**: initialize (real serverInfo), exactly the nine public tools, no admin/bootstrap leak, inspect-registry ok, validate-artifact valid, clean EOF exit 0, stdout byte-clean protocol (every line JSON, zero pi-shuttle text), stderr empty |
+| Direct remove | deregister-only: store metadata byte-identical, project/`.git`/artifacts preserved, list → `no registered projects` |
+| Direct re-add after remove | same identity/locator, `verification-replay`, store reused byte-identical, doctor exit 0 |
+| Installer rerun | COMPLETE exit 0; store and runtime config byte-identical; pi extension not duplicated; direct `pi-shuttle --version` still exit 0 |
+| Executable negative (§19) | throwaway copy: target 0644 → direct exec exit 126 (OS layer EACCES); 0755 (corrected-build semantics) → direct exec exit 0; primary environment untouched |
+| Permissions audit | CLI target 755 regular; receipt/runtime config/store metadata 0600; isolation dirs 0700; no locks at steady state; component dirs 0775 under 0700 parent (PS5-LINUX-002, unchanged) |
+| Baseline regression | `npm test` **187/187 pass, 0 skip**; `npm run typecheck` clean; `npm ci --dry-run` green; `git diff --check` clean |
+| Source integrity | pi-shuttle HEAD `5380b31…`; Gateway `7f3b4af…` (4 pre-existing untracked); pi-guard `7a7580cc…` (8 pre-existing untracked); real Pi state untouched; no push/tag/publication |
+
+### 32.2 Evidence reuse (unchanged `src/**` by the executable correction)
+
+The correction changed ONLY the build script, the build-mode normalizer,
+the executable regression tests, and reports — `src/**` is byte-identical
+to the originally validated code. Therefore the following prior PS-5
+evidence remains applicable and is REUSED (not re-executed here): Pi
+0.83.0 extension load proof; full MCP 10/10 matrix; bounded interaction
+13/13 (validate/draft/persist/confine); confinement negative matrix
+(MCP + CLI + unsupported-Pi lane); bootstrap residual recovery (F5);
+permissions/confinement audit baseline; source integrity. This
+revalidation REVALIDATED: clean build executability, npm-pack
+executability, installed-symlink direct exec, installer COMPLETE, direct
+add/list/doctor/start/remove/re-add/rerun. NOT APPLICABLE to this gate:
+interactive installer lane (unchanged from prior run), broad Gateway/
+pi-guard suites.
+
+### 32.3 Finding dispositions (final)
+
+- **`PS5-LINUX-001 — VERIFIED CLOSED`** — the corrected committed SHA
+  produces a release-shaped installation whose public `pi-shuttle`
+  command executes directly through the real end-to-end path (clean
+  build → npm-pack → installer → symlink → direct exec → full lifecycle
+  → real Gateway MCP runtime). Closed by the focused correction baseline
+  `5380b311…` plus this revalidation; the original failure evidence
+  (§7/§23/§27) and the correction record (§31) remain preserved above.
+- `PS5-LINUX-002 — DEFERRED / OPTIONAL HARDENING` — npm-pack component
+  directories may activate as 0775 under a 0700 parent (reconfirmed this
+  run; unchanged, not broadened).
+- `PS5-LINUX-003 — RELEASE-PIPELINE EVIDENCE` — exact Gateway dependency
+  materialization remains a release-pipeline step; no production
+  correction (reconfirmed this run).
+
+### 32.4 Historical verdict preserved
+
+The original run's verdict `PS-5 LINUX E2E — CORRECTIONS REQUIRED`
+(§27/§30) remains on record as historical evidence and is not erased.
+The revalidation above closes the sole mandatory-criterion failure, so
+the current PS-5 verdict is updated:
+
+`PS-5 LINUX E2E — ACCEPTED`
