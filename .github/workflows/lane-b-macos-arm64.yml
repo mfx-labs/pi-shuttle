@@ -213,6 +213,9 @@ jobs:
           test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
           cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
 
+      - name: Deterministic dependency install (lockfile)
+        run: npm ci
+
       - name: Build pi-shuttle
         run: npm run build
 
