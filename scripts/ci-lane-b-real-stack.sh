@@ -3,15 +3,17 @@
 # PS-6 Lane B real-stack evidence orchestrator (CI test/evidence ONLY).
 #
 # Runs the REAL installed product stack against SHA-pinned package fixtures
-# on the darwin arm64 lane: batch installer → Gateway dependency
-# materialization (PS5-LINUX-003 release-pipeline step, encoded) → COMPLETE
-# receipt → project add/list/doctor/re-add/remove → pi 0.83.0 lane +
-# pi-guard install + exact `pi list` verification + extension-load probe →
-# real `pi-shuttle start` MCP handshake probe → volume/arch facts record.
+# built on the runner from the EXACT public component checkouts
+# (scripts/prepare-fixtures.sh — the authoritative artifact-build/provenance
+# boundary): batch installer → Gateway dependency materialization
+# (PS5-LINUX-003 release-pipeline step, encoded) → COMPLETE receipt →
+# project add/list/doctor/re-add/remove → pi 0.83.0 lane + pi-guard install
+# + exact `pi list` verification + extension-load probe → real
+# `pi-shuttle start` MCP handshake probe → volume/arch facts record.
 #
-# This script is invoked ONLY when a fixture source is configured (the CI
-# fixture-source gate); without fixtures the real-stack subsection reports
-# `fixture-source not configured` and is skipped — never marked PASS.
+# No external fixture hosting: fixtures arrive via the committed helper from
+# exact public checkouts, and the manifest's recorded source commits are
+# asserted against the workflow's repository-owned pins (fail closed).
 #
 # Env requirements (provisioned by the workflow):
 #   FIXTURE_DIR   prepared fixtures + fixture-manifest.json
@@ -21,9 +23,11 @@
 #   PI_LOADER     pi 0.83.0 extension loader.js (absolute)
 #   GIT_2454      absolute path to the exact git 2.45.4 binary
 #   NODE_BIN      absolute path to the exact node 22.23.2 executable
+#   GATEWAY_COMMIT    exact public Gateway commit (workflow pin)
+#   PI_GUARD_COMMIT   exact public pi-guard commit (workflow pin)
 set -euo pipefail
 
-for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE_BIN; do
+for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE_BIN GATEWAY_COMMIT PI_GUARD_COMMIT; do
   if [ -z "${!v:-}" ]; then echo "real-stack: $v is required" >&2; exit 2; fi
 done
 
@@ -34,9 +38,17 @@ export NODE_BIN
 
 echo "real-stack: lane facts — node=$("$NODE_BIN" -p "process.platform + ' ' + process.arch") nodeVersion=$("$NODE_BIN" --version) git=$("$GIT_2454" --version) pi=$("$PI_LANE_BIN/pi" --version 2>/dev/null || echo missing)"
 
-# 1. Fixture verification against the fixture manifest (fail closed).
-GATEWAY_SHA="$(node -e "console.log(require('$FIXTURE_DIR/fixture-manifest.json').gateway.sha256)")"
-PI_GUARD_SHA="$(node -e "console.log(require('$FIXTURE_DIR/fixture-manifest.json').piGuard.sha256)")"
+# 1. Fixture provenance coherence against the repository-owned pins
+#    (manifest commits must equal the exact public component SHAs), then
+#    digest verification against the fixture manifest (fail closed).
+MANIFEST="$FIXTURE_DIR/fixture-manifest.json"
+GATEWAY_MANIFEST_COMMIT="$(node -e "console.log(require('$MANIFEST').gateway.commit)")"
+PI_GUARD_MANIFEST_COMMIT="$(node -e "console.log(require('$MANIFEST').piGuard.commit)")"
+test "$GATEWAY_MANIFEST_COMMIT" = "$GATEWAY_COMMIT" || { echo "real-stack: manifest gateway commit $GATEWAY_MANIFEST_COMMIT != pinned $GATEWAY_COMMIT" >&2; exit 1; }
+test "$PI_GUARD_MANIFEST_COMMIT" = "$PI_GUARD_COMMIT" || { echo "real-stack: manifest pi-guard commit $PI_GUARD_MANIFEST_COMMIT != pinned $PI_GUARD_COMMIT" >&2; exit 1; }
+echo "real-stack: fixture manifest commits match the repository-owned pins"
+GATEWAY_SHA="$(node -e "console.log(require('$MANIFEST').gateway.sha256)")"
+PI_GUARD_SHA="$(node -e "console.log(require('$MANIFEST').piGuard.sha256)")"
 echo "$GATEWAY_SHA  $FIXTURE_DIR/project-gateway-artifact-core-0.1.0.tgz" | shasum -a 256 -c - >/dev/null
 echo "$PI_GUARD_SHA  $FIXTURE_DIR/pi-guard-0.1.2.tgz" | shasum -a 256 -c - >/dev/null
 echo "real-stack: fixture digests verified against fixture-manifest.json"
@@ -79,7 +91,11 @@ PSHUTTLE="$HOME/.local/bin/pi-shuttle"
 PI_GUARD_PKG="$HOME/.local/share/pi-shuttle/packages/pi-guard@0.1.2"
 
 # 6. pi-guard exact-source verification through `pi list`.
-"$PI_LANE_BIN/pi" list | grep -Fqx "$PI_GUARD_PKG" || {
+# pi 0.83.0 prints the installed source twice — the entry relative to its
+# plugin root and the resolved ABSOLUTE path on an indented sub-line;
+# leading whitespace is stripped so the exact absolute source line is
+# matched full-line (never substring), as in the PS-5 Linux E2E.
+"$PI_LANE_BIN/pi" list | sed 's/^[[:space:]]*//' | grep -Fqx "$PI_GUARD_PKG" || {
   echo "real-stack: exact pi-guard source not confirmed in pi list"; "$PI_LANE_BIN/pi" list; exit 1; }
 echo "real-stack: pi list confirms the exact pi-guard source"
 
@@ -89,7 +105,9 @@ PI_LOADER="$PI_LOADER" PI_GUARD_ENTRY="$PI_GUARD_ENTRY" HOME="$HOME" "$NODE_BIN"
 
 # 8. Project lifecycle on the real installed stack.
 "$PSHUTTLE" project add "$PROJECT" > "$WORK_ROOT/add1.log" 2>&1
-grep -q "state: initialized" "$WORK_ROOT/add1.log" || { cat "$WORK_ROOT/add1.log"; exit 1; }
+# The CLI column-aligns the state value ("state:     initialized");
+# whitespace-tolerant exact-state match.
+grep -qE "state:[[:space:]]+initialized" "$WORK_ROOT/add1.log" || { cat "$WORK_ROOT/add1.log"; exit 1; }
 "$PSHUTTLE" project list | grep -q "pgw:w:" || exit 1
 "$PSHUTTLE" project add "$PROJECT" > "$WORK_ROOT/add2.log" 2>&1
 grep -q "verification-replay" "$WORK_ROOT/add2.log" || { cat "$WORK_ROOT/add2.log"; exit 1; }

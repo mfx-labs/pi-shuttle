@@ -96,7 +96,10 @@ else {
     fail(`unexpected serverInfo: ${JSON.stringify(serverInfo)}`);
   }
 }
-child.stdin.write('{"jsonrpc":"2.0","id":2,"method":"notifications/initialized","params":{}}\n');
+// MCP notification (JSON-RPC notifications carry NO id — an id-bearing
+// notification would collide with the next dynamic request id and some
+// Gateway versions answer it with -32601).
+child.stdin.write('{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}\n');
 
 // 2. tools/list — exactly the closed nine-tool surface, no authority tools.
 let toolCount = 0;

@@ -1,6 +1,4 @@
-# PS-6 Lane B — macOS arm64 first-class evidence (LOCAL ONLY in this gate;
-# remote execution is the external human-gated action. Do not push, do not
-# claim remote results.)
+# PS-6 Lane B — macOS arm64 first-class evidence (public multi-repo lane).
 #
 # Purpose: first-class darwin arm64 support evidence: exact Node 22.23.2
 # arm64 (architecture ASSERTED), deterministic install, build, typecheck,
@@ -8,14 +6,17 @@
 # make the evidence job RED, never a silent green), direct
 # executable/package checks, exact Git 2.45.4 provisioning (digest-pinned
 # kernel.org source, built version asserted), volume case-sensitivity
-# record, and the fixture-gated real-stack subsection (installer →
-# lifecycle → real Gateway MCP → pi 0.83.0 + pi-guard extension load).
-# Without a configured fixture source the real-stack subsection reports
-# `fixture-source not configured` and is skipped — it is never marked
-# PASS. The fixture_source input crosses only the narrow job-level env
-# boundary of the consuming jobs (data, never shell syntax) and is
-# strictly validated before any curl. The real-stack gate requires an
-# explicit workflow_dispatch event — a normal push/PR never activates it.
+# record, and the real-stack subsection built on the runner from the
+# EXACT PUBLIC component source commits (mfx-labs/project-gateway @
+# 98d1b204a864596bda91bec1104b8a8d5e89e1cd, mfx-labs/pi-guard @
+# 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2) via the committed
+# scripts/prepare-fixtures.sh boundary — no external fixture hosting, no
+# fixture_source input, no curl fixture download, no secrets (both
+# component repositories are public).
+#
+# Component identities are repository-owned constants (this file), never
+# user-supplied workflow_dispatch refs; the checked-out HEAD of every
+# component is asserted against its exact pin before any build.
 name: Lane B — macOS arm64 evidence
 
 on:
@@ -23,19 +24,17 @@ on:
     branches: [master]
   pull_request:
   workflow_dispatch:
-    inputs:
-      # Fixture source for the real-stack subsection: a URL to a tarball
-      # prepared by scripts/prepare-fixtures.sh (fixture tgz pair +
-      # fixture-manifest.json). Test/CI acquisition only — never the
-      # production installer. Empty = subsection skipped truthfully.
-      fixture_source:
-        description: URL of the prepared fixtures tarball (or empty)
-        required: false
-        type: string
-        default: ""
 
 permissions:
   contents: read
+
+env:
+  # Repository-owned exact component pins (PS-6 public multi-repo lane).
+  # Gateway: product-contract §6 — "gatewayCommit pins the exact source
+  # closure for the packaged artifact" (public mfx-labs/project-gateway).
+  # pi-guard: v0.1.2 exact commit.
+  GATEWAY_COMMIT: 98d1b204a864596bda91bec1104b8a8d5e89e1cd
+  PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
   build-test:
@@ -125,26 +124,25 @@ jobs:
       - name: Clean-tree sanity
         run: git diff --check
 
-  # ── Fixture-gated real-stack subsection (Lane B evidence) ────────────────
-  # Runs ONLY on an explicit workflow_dispatch event WITH a non-empty
-  # validated fixture source (PS6-CI-004): push/PR events and empty-input
-  # dispatches can never activate the fixture path (undefined/default
-  # input semantics must never enable it). Self-contained evidence above
-  # is unaffected either way. The skipped state is reported truthfully
-  # and is never PASS. The input crosses the job-level env boundary as
-  # DATA (SIR-PS6-002) and is validated before any curl.
+  # ── Real-stack subsection (Lane B evidence, public multi-repo) ──────────
+  # Runs on every event (push/PR/dispatch): the exact public component
+  # checkouts are built/verified on the runner, so no workflow_dispatch
+  # input or external fixture hosting is involved. The build-test evidence
+  # above is unaffected; the real-stack job is full Lane B evidence.
   real-stack:
-    name: Real-stack integration (fixture-gated)
+    name: Real-stack integration (public multi-repo)
     runs-on: macos-15
     needs: build-test
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture_source != '' }}
-    env:
-      FIXTURE_SOURCE: ${{ inputs.fixture_source }}
     steps:
-      - name: Checkout
+      - name: Checkout pi-shuttle
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           persist-credentials: false
+
+      - name: Verify runner architecture is arm64 (Apple Silicon)
+        run: |
+          uname -m
+          test "$(uname -m)" = "arm64"
 
       - name: Provision exact Node 22.23.2 (darwin-arm64)
         run: |
@@ -163,6 +161,55 @@ jobs:
           test "$("$GIT_BIN" --version)" = "git version 2.45.4"
           echo "$(dirname "$GIT_BIN")" >> "$GITHUB_PATH"
 
+      # Exact public component checkouts — full-SHA-pinned refs, never
+      # branches/tags as authority. Public repositories: no credentials.
+      - name: Checkout Gateway exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: mfx-labs/project-gateway
+          ref: 98d1b204a864596bda91bec1104b8a8d5e89e1cd
+          path: ${{ runner.temp }}/gateway
+          persist-credentials: false
+
+      - name: Checkout pi-guard exact commit
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          repository: mfx-labs/pi-guard
+          ref: 7a7580cc4cbd7926797564c72269394fc29a860a
+          path: ${{ runner.temp }}/pi-guard
+          persist-credentials: false
+
+      # Independent exact-commit assertion: git rev-parse HEAD must equal
+      # the repository-owned pin for each component (fail closed).
+      - name: Assert exact component HEADs
+        run: |
+          set -euo pipefail
+          GW_HEAD="$(git -C "$RUNNER_TEMP/gateway" rev-parse HEAD)"
+          PG_HEAD="$(git -C "$RUNNER_TEMP/pi-guard" rev-parse HEAD)"
+          test "$GW_HEAD" = "$GATEWAY_COMMIT" || { echo "gateway HEAD mismatch: expected $GATEWAY_COMMIT got $GW_HEAD" >&2; exit 1; }
+          test "$PG_HEAD" = "$PI_GUARD_COMMIT" || { echo "pi-guard HEAD mismatch: expected $PI_GUARD_COMMIT got $PG_HEAD" >&2; exit 1; }
+          echo "gateway HEAD == $GW_HEAD (exact public pin)"
+          echo "pi-guard HEAD == $PG_HEAD (exact public pin, v0.1.2)"
+
+      # The committed fixture builder: the authoritative artifact-build and
+      # provenance boundary. Exact checkouts → clean build/package →
+      # fixture-manifest.json + SHA-256. Wrong commit / dirty checkout
+      # fails closed inside the script.
+      - name: Build fixtures from exact public checkouts
+        run: |
+          set -euo pipefail
+          bash scripts/prepare-fixtures.sh \
+            --gateway-checkout "$RUNNER_TEMP/gateway" \
+            --pi-guard-checkout "$RUNNER_TEMP/pi-guard" \
+            --out "$RUNNER_TEMP/fixtures"
+          test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
+          test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
+          test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
+          cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
+
+      - name: Build pi-shuttle
+        run: npm run build
+
       - name: Isolated Pi 0.83.0 lane (no real user Pi state)
         run: |
           set -euo pipefail
@@ -173,26 +220,6 @@ jobs:
           "$RUNNER_TEMP/pi-lane/node_modules/.bin/pi" --version
           test -f "$RUNNER_TEMP/pi-lane/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js"
 
-      # SIR-PS6-002: the fixture source arrives as the FIXTURE_SOURCE
-      # environment variable (data, never shell syntax), is strictly
-      # validated BEFORE any curl, and is fetched argv-safe (`curl --`).
-      - name: Validate fixture source (data + closed URL policy)
-        run: bash scripts/ci-validate-fixture-source.sh "$FIXTURE_SOURCE"
-
-      - name: Fetch + verify fixture source (SHA-pinned fixture manifest)
-        run: |
-          set -euo pipefail
-          curl -fsSL -- "$FIXTURE_SOURCE" -o "$RUNNER_TEMP/fixtures.tgz"
-          mkdir -p "$RUNNER_TEMP/fixtures"
-          tar -xzf "$RUNNER_TEMP/fixtures.tgz" -C "$RUNNER_TEMP/fixtures"
-          test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
-          test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
-          test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
-          cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
-
-      - name: Build pi-shuttle
-        run: npm run build
-
       - name: Real-stack evidence (installer → lifecycle → MCP → pi-guard)
         env:
           FIXTURE_DIR: "${{ runner.temp }}/fixtures"
@@ -202,18 +229,6 @@ jobs:
           PI_LOADER: "${{ runner.temp }}/pi-lane/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js"
           GIT_2454: "${{ runner.temp }}/git-2.45.4/bin/git"
           NODE_BIN: "${{ runner.temp }}/node/bin/node"
+          GATEWAY_COMMIT: "${{ env.GATEWAY_COMMIT }}"
+          PI_GUARD_COMMIT: "${{ env.PI_GUARD_COMMIT }}"
         run: bash scripts/ci-lane-b-real-stack.sh
-
-  fixture-gate-report:
-    name: Fixture-source gate report
-    runs-on: ubuntu-24.04
-    needs: [build-test, real-stack]
-    if: always()
-    steps:
-      - name: Report real-stack subsection state
-        run: |
-          if [ "${{ needs.real-stack.result }}" = "skipped" ]; then
-            echo "fixture-source not configured — real-stack integration subsection NOT EXECUTED (self-contained build/platform/APFS/unit evidence above ran and is unaffected)" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "fixture-source configured — real-stack integration subsection executed in the real-stack job (result: ${{ needs.real-stack.result }})" >> "$GITHUB_STEP_SUMMARY"
-          fi

@@ -14,6 +14,7 @@ import { readReceipt } from '../../src/installer/receipt.js';
 import { rollback, runInstall } from '../../src/installer/install.js';
 import { validateBinPath } from '../../src/installer/components.js';
 import { resolveLayout } from '../../src/host/environment.js';
+import { GATEWAY_PS1_BASELINE_COMMIT } from '../../src/compat/manifest.js';
 
 const SHA_RE = /^[0-9a-f]{64}$/;
 
@@ -51,7 +52,7 @@ test('installer: COMPLETE install of both components (batch)', async () => {
     assert.equal(receipt.receipt.components.gateway.status, 'installed-verified');
     assert.equal(receipt.receipt.components.gateway.smoke, 'passed');
     assert.equal(receipt.receipt.components.gateway.version, '0.1.0');
-    assert.equal(receipt.receipt.components.gateway.commit, '1a454b61241ca23a638c3083e2e7d28e28f86b18');
+    assert.equal(receipt.receipt.components.gateway.commit, GATEWAY_PS1_BASELINE_COMMIT);
     assert.match(receipt.receipt.components.gateway.artifactSha256, SHA_RE);
     assert.equal(receipt.receipt.components.piGuard.status, 'installed-verified');
     assert.equal(receipt.receipt.components.piGuard.verifiedBy, 'pi-list');

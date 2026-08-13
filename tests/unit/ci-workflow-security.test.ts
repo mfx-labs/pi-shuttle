@@ -8,14 +8,13 @@
  *    one `@`; the left side is a valid action identity; the right side is
  *    exactly 40 hex; no floating branch/tag ref; a BARE SHA is invalid);
  *  - no sudo, no token write, no publication/release/deployment steps;
- *  - no workflow-level `env:` may depend on `inputs.*` (PS6-CI-003): the
- *    dispatch input crosses only the narrow job-level env boundary;
- *  - the real-stack gate requires `github.event_name == 'workflow_dispatch'`
- *    explicitly (PS6-CI-004) — push/PR and empty-input dispatch can never
- *    activate the fixture path;
- *  - no workflow_dispatch input interpolated into `run:` shell text
- *    (fixture_source crosses the boundary as env data and is validated
- *    before any curl);
+ *  - no workflow_dispatch inputs at all (PS-6 public multi-repo lane):
+ *    component identities are repository-owned constants, never
+ *    user-supplied refs — no `inputs.*` anywhere;
+ *  - every component checkout `ref:` is an exact full 40-hex SHA and the
+ *    checked-out HEAD is asserted against the repository-owned pin;
+ *  - no external fixture transport (no fixture_source, no curl fixture
+ *    download, no fixture-source validation helper);
  *  - every helper script referenced by the workflows exists.
  */
 import { test } from 'node:test';
@@ -68,13 +67,7 @@ test('workflow security: every workflow pins permissions, owner/repo@full-SHA ac
     assert.ok(!text.includes('npm publish'), `${name}: no npm publication`);
     assert.ok(!text.includes('GITHUB_TOKEN'), `${name}: no token usage`);
     assert.ok(!text.includes('gh release'), `${name}: no GitHub Release`);
-    // SIR-PS6-002: dispatch inputs never reach shell text directly.
-    for (const line of text.split('\n')) {
-      if (line.trimStart().startsWith('run:') || line.includes('run:')) {
-        assert.ok(!line.includes('${{ inputs.'), `${name}: no input interpolation in run: shell text (${line.trim().slice(0, 80)})`);
-      }
-      assert.ok(!line.includes('inputs.fixture_source"'), `${name}: no quoted input interpolation in shell text`);
-    }
+    assert.ok(!text.includes('${{ inputs.'), `${name}: no workflow_dispatch inputs anywhere (PS-6 public multi-repo lane)`);
     assert.ok(!text.includes('github.com/git/git/archive'), `${name}: no floating git tag tarball URL (digest-pinned kernel.org source only)`);
   }
 });
@@ -95,30 +88,38 @@ test('workflow security: remote action refs require owner/repo@40-hex — PS6-CI
   assert.equal(isValidRemoteActionRef('actions/checkout@@11bd71901bbe5b1630ceea73d27597364c9af683'), false, 'empty ref between @ → FAIL');
 });
 
-test('workflow security: no workflow-level env depends on inputs.* — PS6-CI-003 regression cases', () => {
+test('workflow security: no workflow_dispatch inputs, no external fixture transport — PS-6 public multi-repo lane', () => {
   const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
-  // Workflow-level env values are indented exactly 2 spaces; the inputs
-  // context is invalid there. The fixture source may only appear at the
-  // narrow job-level env boundary of the consuming jobs.
-  const workflowLevelInputs = text.split('\n').filter((l) => /^  [A-Z_]+: \$\{\{ inputs\./.test(l));
-  assert.deepEqual(workflowLevelInputs, [], 'no workflow-level env may reference inputs.* (PS6-CI-003)');
-  // The narrow job-level boundary exists (real-stack job, 6-space value).
-  assert.ok(text.includes('      FIXTURE_SOURCE: ${{ inputs.fixture_source }}'), 'job-level env carries fixture_source at the narrow consuming boundary');
-  // And it is consumed as DATA: argv-safe curl + strict validation before fetch.
-  assert.ok(text.includes('bash scripts/ci-validate-fixture-source.sh "$FIXTURE_SOURCE"'), 'fixture source validated before fetch (SIR-PS6-002)');
-  assert.ok(text.includes('curl -fsSL -- "$FIXTURE_SOURCE"'), 'argv-safe curl boundary (no shell interpolation)');
+  assert.ok(!text.includes('workflow_dispatch:\n    inputs:'), 'no dispatch inputs in Lane B (component identities are repository-owned pins)');
+  assert.ok(!text.includes('inputs.fixture_source'), 'no fixture_source input machinery remains');
+  assert.ok(!text.includes('FIXTURE_SOURCE'), 'no fixture-source env transport remains');
+  assert.ok(!text.includes('ci-validate-fixture-source.sh'), 'fixture-source validation helper no longer referenced');
+  assert.ok(!text.includes('curl -fsSL -- "$FIXTURE_SOURCE"'), 'no curl fixture download remains');
+  assert.ok(!text.includes("github.event_name == 'workflow_dispatch'"), 'real-stack job is no longer dispatch-gated');
+  assert.ok(!text.includes('needs.real-stack.result'), 'no fixture-gate report job remains');
 });
 
-test('workflow security: real-stack requires an explicit workflow_dispatch event — PS6-CI-004 regression cases', () => {
+test('workflow security: component checkouts are exact public SHAs with asserted HEADs — PS-6 public multi-repo lane', () => {
   const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
-  assert.ok(
-    text.includes("if: ${{ github.event_name == 'workflow_dispatch' && inputs.fixture_source != '' }}"),
-    'real-stack gate must require workflow_dispatch explicitly AND a non-empty fixture source',
-  );
-  // The report job derives the state from the real-stack job result (never
-  // from workflow-level env or inputs on non-dispatch events).
-  assert.ok(text.includes('needs: [build-test, real-stack]'), 'report job observes the real-stack job result');
-  assert.ok(text.includes('needs.real-stack.result'), 'report job uses needs.real-stack.result');
+  const GATEWAY_COMMIT = '98d1b204a864596bda91bec1104b8a8d5e89e1cd';
+  const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
+  // Exact full-SHA component checkouts (never branches/tags as authority).
+  assert.ok(text.includes(`repository: mfx-labs/project-gateway`), 'Gateway checked out from its public repository');
+  assert.ok(text.includes(`ref: ${GATEWAY_COMMIT}`), 'Gateway checkout ref is the exact public commit');
+  assert.ok(text.includes(`repository: mfx-labs/pi-guard`), 'pi-guard checked out from its public repository');
+  assert.ok(text.includes(`ref: ${PI_GUARD_COMMIT}`), 'pi-guard checkout ref is the exact commit');
+  // Repository-owned pins as workflow constants (no user-supplied refs).
+  assert.ok(text.includes(`GATEWAY_COMMIT: ${GATEWAY_COMMIT}`), 'Gateway pin is a repository-owned workflow constant');
+  assert.ok(text.includes(`PI_GUARD_COMMIT: ${PI_GUARD_COMMIT}`), 'pi-guard pin is a repository-owned workflow constant');
+  // Independent HEAD assertion for both components (fail closed).
+  assert.ok(text.includes('git -C "$RUNNER_TEMP/gateway" rev-parse HEAD'), 'Gateway checked-out HEAD asserted');
+  assert.ok(text.includes('git -C "$RUNNER_TEMP/pi-guard" rev-parse HEAD'), 'pi-guard checked-out HEAD asserted');
+  assert.ok(text.includes('test "$GW_HEAD" = "$GATEWAY_COMMIT"'), 'Gateway HEAD compared to the exact pin');
+  assert.ok(text.includes('test "$PG_HEAD" = "$PI_GUARD_COMMIT"'), 'pi-guard HEAD compared to the exact pin');
+  // Fixtures built on the runner through the committed helper (no hosting).
+  assert.ok(text.includes('bash scripts/prepare-fixtures.sh'), 'fixtures built through the committed helper');
+  assert.ok(text.includes('--gateway-checkout "$RUNNER_TEMP/gateway"'), 'Gateway checkout passed to the fixture builder');
+  assert.ok(text.includes('--pi-guard-checkout "$RUNNER_TEMP/pi-guard"'), 'pi-guard checkout passed to the fixture builder');
 });
 
 test('workflow security: every referenced helper script exists', () => {
@@ -137,8 +138,7 @@ test('workflow security: lane B asserts the node architecture and uses the dedic
   const text = readFileSync(join(WORKFLOWS, 'lane-b-macos-arm64.yml'), 'utf8');
   assert.ok(text.includes('test "$(node -p process.arch)" = "arm64"'), 'lane B: node arch must be ASSERTED arm64 (SIR-PS6-007)');
   assert.ok(text.includes('node scripts/ci-apfs-evidence-strict.mjs'), 'lane B: dedicated APFS evidence invocation (SIR-PS6-004)');
-  assert.ok(text.includes('bash scripts/ci-validate-fixture-source.sh'), 'lane B: fixture source validated before fetch (SIR-PS6-002)');
   assert.ok(text.includes('bash scripts/ci-provision-git-2454.sh'), 'lane B: digest-pinned git provisioning (SIR-PS6-003)');
-  assert.ok(text.includes('curl -fsSL -- "$FIXTURE_SOURCE"'), 'lane B: argv-safe curl boundary');
-  assert.ok(!text.includes('${{ inputs.fixture_source }}"'), 'lane B: no interpolated fixture_source in shell text');
+  assert.ok(text.includes('bash scripts/prepare-fixtures.sh'), 'lane B: fixtures built through the committed helper');
+  assert.ok(!text.includes('ci-validate-fixture-source.sh'), 'lane B: no fixture-source validation helper remains');
 });

@@ -223,3 +223,73 @@ evidence plan does not waive that subsection. Physical Lane D is not
 declared completed.
 
 `PS-6 REMOTE CI — PARTIAL EVIDENCE; FIXTURE AUTHORIZATION REQUIRED`
+
+---
+
+## 12. Lane B real-stack — fixture preparation (hosting boundary)
+
+Gate: `PS-6 — MACOS ARM64 REAL-STACK CI EVIDENCE`. Baselines frozen:
+pi-shuttle local == remote == `c3eb4fdce85122f890b0d1be6167a7019d9d46fd`
+(clean tree); Gateway `1a454b61241ca23a638c3083e2e7d28e28f86b18`;
+pi-guard `7a7580cc4cbd7926797564c72269394fc29a860a` = `v0.1.2`.
+Pre-existing untracked debris recorded and untouched (Gateway WP-13D
+entries; pi-guard v0.1.1 review docs). No component repository modified.
+
+### 12.1 Fixture built through the committed helper
+
+`scripts/prepare-fixtures.sh --gateway-checkout … --pi-guard-checkout …
+--out /tmp/ps6-realstack-fixture` — verified exact Gateway HEAD, exact
+pi-guard HEAD/tag, rejected dirty tracked state, built from scratch
+clean clones (`npm ci` + `npm run build` + `npm pack`), produced the
+artifacts and the fixture manifest, computed SHA-256 values.
+
+| Component | Package | Version | Source commit/tag | Artifact SHA-256 |
+|---|---|---|---|---|
+| Gateway | `@project-gateway/artifact-core` (bin `project-gateway-mcp` → `./dist/runtime/mcp/cli.js`) | 0.1.0 | `1a454b61241ca23a638c3083e2e7d28e28f86b18` | `e211403b3b8bf3c4f6d47faba627d4f1dfaabd53b2775565466cf8a4c3134a8b` |
+| pi-guard | `pi-guard` | 0.1.2 | `7a7580cc4cbd7926797564c72269394fc29a860a` = `v0.1.2` | `057f1b636328e8c77857a4b590d051fcc52c0c9b015ca5dd1a773c21d7d24d01` (identical to the PS-5 recorded digest — deterministic pack) |
+
+Transport bundle (containing manifest + both artifacts):
+`ps6-lane-b-fixtures-0.1.0.tgz`, bundle SHA-256
+`54fec79447a6a8b16d334a4d7f6ca865bb5124074e3d624a06b812808599e0af`.
+
+### 12.2 Fixture content inspection (before any placement)
+
+- Gateway artifact: exactly the npm-pack shape for `files: ["dist"]` —
+  507 members, all `package/dist/**` + `package/package.json`; identity
+  verified `@project-gateway/artifact-core@0.1.0`.
+- pi-guard artifact: exactly `package/{src,extensions/pi-guard/index.ts,
+  package.json,LICENSE,README.md}` (12 members).
+- No `.git`, no source-repository debris, no secrets/credentials, no
+  `.env`/`.npmrc`/keys, no HOME state, no real Pi state, no unrelated
+  files (member-level scan of both tarballs).
+- Independent provenance verification: manifest commits/tags and every
+  artifact SHA-256 recomputed from bytes — **ALL MATCH** (manifest
+  gateway commit == `1a454b61…`; pi-guard commit == `7a7580cc…`, tag
+  == `v0.1.2`).
+
+### 12.3 Hosting boundary determination
+
+The gate authorizes placement ONLY at the operator-authorized HTTPS
+fixture source. Exhaustive local review found **no operator-authorized
+HTTPS fixture destination/source**: no fixture URL is recorded in any
+report or repository history, no storage/bucket configuration exists on
+this host, and no prior fixture source was ever authorized (this
+report's §5/§11.5 record `NOT EXECUTED: fixture-source not configured`
+for the same reason). Per the gate instruction, the fixture was NOT
+made public or placed by improvisation (no gist, no release, no new
+repo, no access-control disabling, no npm publication).
+
+**workflow_dispatch: NOT PERFORMED** (no run ID; the already-committed
+Lane B workflow was not dispatched because no authorized fixture source
+exists to reference).
+
+### 12.4 State for the authorized continuation
+
+- Local fixture ready at `/tmp/ps6-realstack-fixture/` (manifest +
+  artifacts + bundle, SHA-256s above).
+- On operator authorization of an HTTPS destination: place the bundle
+  unchanged, dispatch the committed Lane B workflow with
+  `fixture_source = <authorized URL>` (no workflow modification
+  needed), then record run ID/job inventory/results in §12.5.
+
+`PS-6 LANE B REAL-STACK — FIXTURE HOSTING REQUIRED`

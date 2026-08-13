@@ -4,6 +4,8 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   COMPATIBILITY_MANIFEST,
   CONFIGURATION_VERSION,
@@ -16,14 +18,16 @@ import {
   PI_SHUTTLE_VERSION,
 } from '../../src/compat/manifest.js';
 
+const REPO = join(import.meta.dirname, '..', '..', '..');
+
 test('manifest: exact approved pins are preserved', () => {
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, PI_SHUTTLE_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, '0.1.0');
   assert.equal(COMPATIBILITY_MANIFEST.gateway, '0.1.0');
-  // Gateway committed baseline (PS-6 coordinated pin — see L2 of the
-  // focused correction gate).
+  // Gateway committed baseline: the exact PUBLIC source closure (PS-6
+  // public multi-repo lane; mfx-labs/project-gateway main).
   assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, GATEWAY_PS1_BASELINE_COMMIT);
-  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '1a454b61241ca23a638c3083e2e7d28e28f86b18');
+  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, '98d1b204a864596bda91bec1104b8a8d5e89e1cd');
   // pi-guard verified release.
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, PI_GUARD_VERSION);
   assert.equal(COMPATIBILITY_MANIFEST.piGuard, '0.1.2');
@@ -61,4 +65,23 @@ test('manifest: no latest, no ranges, no Pi 0.84.x claims anywhere', () => {
   assert.ok(!text.includes('0.84'), 'no Pi 0.84.x claim');
   assert.ok(!text.includes('^') && !text.includes('~'), 'no semver ranges in pins');
   assert.ok(!text.includes('<computed-at-release>'), 'digests must be represented as null, not placeholder strings');
+});
+
+test('manifest: the authoritative public Gateway pin is exact and repository-owned', () => {
+  // PS-6 public multi-repo lane: the manifest must pin the EXACT public
+  // Gateway source commit that prepare-fixtures.sh builds/verifies and the
+  // Lane B workflow checks out — one 40-hex full SHA, no branch/tag/floating
+  // ref, identical across every authoritative location (product-contract §6:
+  // "gatewayCommit pins the exact source closure for the packaged artifact").
+  const PUBLIC_GATEWAY_COMMIT = '98d1b204a864596bda91bec1104b8a8d5e89e1cd';
+  assert.match(PUBLIC_GATEWAY_COMMIT, /^[0-9a-f]{40}$/, 'pin must be a full 40-hex SHA');
+  assert.equal(GATEWAY_PS1_BASELINE_COMMIT, PUBLIC_GATEWAY_COMMIT, 'manifest pin == exact public Gateway commit');
+  assert.equal(COMPATIBILITY_MANIFEST.gatewayCommit, PUBLIC_GATEWAY_COMMIT, 'manifest exposes the same exact pin');
+  const fixturesScript = readFileSync(join(REPO, 'scripts', 'prepare-fixtures.sh'), 'utf8');
+  assert.ok(fixturesScript.includes(`GATEWAY_COMMIT="${PUBLIC_GATEWAY_COMMIT}"`), 'prepare-fixtures.sh embeds the same exact public Gateway pin');
+  const laneB = readFileSync(join(REPO, '.github', 'workflows', 'lane-b-macos-arm64.yml'), 'utf8');
+  assert.ok(laneB.includes(`GATEWAY_COMMIT: ${PUBLIC_GATEWAY_COMMIT}`), 'Lane B workflow owns the same exact public Gateway pin');
+  assert.ok(laneB.includes(`ref: ${PUBLIC_GATEWAY_COMMIT}`), 'Lane B Gateway checkout ref is the exact public commit');
+  assert.ok(laneB.includes(`PI_GUARD_COMMIT: ${PI_GUARD_COMMIT}`), 'Lane B workflow owns the exact pi-guard pin');
+  assert.ok(laneB.includes(`ref: ${PI_GUARD_COMMIT}`), 'Lane B pi-guard checkout ref is the exact commit');
 });
