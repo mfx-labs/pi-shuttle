@@ -27,6 +27,8 @@ export const GATEWAY_DEPENDENCIES: Readonly<Record<string, string>> = {
 };
 export const PI_GUARD_VERSION = '0.1.2';
 export const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
+/** pi-guard release tag at the pinned commit (release-envelope binding). */
+export const PI_GUARD_TAG = 'v0.1.2';
 export const PI_COMPATIBILITY_BASELINE = '0.83.0';
 export const SUPPORTED_PI_LANE = 'pi-0.83.0-extension-api-v1';
 

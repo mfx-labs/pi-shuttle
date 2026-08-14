@@ -35,8 +35,10 @@ import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
 import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, checkTarPresent, classifyPiVersion, ensureWritableLayout, PI_RUNTIME_POLICY } from './preflight.js';
 import { runProcess, resolveExecutable } from './process.js';
-import { componentDirName, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, GATEWAY_PACKAGE_NAME, PI_GUARD_PACKAGE_NAME } from './components.js';
-import type { GatewayInstallResult, PiGuardInstallResult } from './components.js';
+import { activatePackageRoot, componentDirName, extractArtifact, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, validateBinPath, verifyIdentity, GATEWAY_PACKAGE_NAME, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME } from './components.js';
+import type { ComponentResult, GatewayInstallResult, PiGuardInstallResult } from './components.js';
+import { scanArtifactMembers } from './archive.js';
+import { findPackageRoot, readPackageIdentity } from './artifact.js';
 import { newReceipt, readReceipt, writeReceipt } from './receipt.js';
 import type { GatewayReceiptEntry, InstallReceipt, PiGuardReceiptEntry } from './receipt.js';
 import type { InstallerSelections } from './selection.js';
@@ -59,6 +61,16 @@ export interface InstallOptions {
   readonly expectGatewaySha256?: string;
   readonly expectPiGuardSha256?: string;
   /**
+   * PS-8A release lane: the digest-verified pi-shuttle release package
+   * (tgz). When set, the core activates the pi-shuttle package itself
+   * into packages storage and points the bin link at the activated
+   * package — the release installer runs from an ephemeral shell
+   * extraction, so linking to the running module would dangle after
+   * cleanup. Same scan/identity/activation/rollback discipline as
+   * components.
+   */
+  readonly releasePackageTgz?: string;
+  /**
    * Injectable UID observation (SIR-PS3-007 root refusal). Defaults to
    * `process.getuid()` when absent; test-only seam, never hard-coded.
    */
@@ -69,10 +81,11 @@ export interface InstallAttempt {
   readonly layout: LayoutPaths;
   readonly receiptPath: string;
   readonly stagingDir: string;
-  readonly binLinkTarget: string;
+  /** Assigned during the locked run (release lane may retarget it). */
+  binLinkTarget: string;
+  binLinkCreated: boolean;
   gateway?: GatewayInstallResult;
   piGuard?: PiGuardInstallResult;
-  binLinkCreated: boolean;
   /** External Pi-side state caused by THIS attempt (SIR-PS3-002). */
   piGuardPiState: 'none' | 'pre-existing' | 'attempt-installed';
   receipt?: InstallReceipt;
@@ -180,7 +193,7 @@ export async function runInstall(env: HostEnvironment, options: InstallOptions):
     layout,
     receiptPath: layout.installReceiptPath,
     stagingDir: join(layout.stagingDir, `ps3-${process.pid}-${Date.now()}`),
-    binLinkTarget: ownCliPath(),
+    binLinkTarget: '',
     binLinkCreated: false,
     piGuardPiState: 'none',
     rollbackCandidates: [],
@@ -218,13 +231,15 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   // Component acquisition prerequisites (only when components are selected).
   const needsArtifacts = options.selections.gateway || options.selections.piGuard;
   if (needsArtifacts && options.artifactDir === undefined) {
-    return { kind: 'REFUSED', reason: 'no artifact source configured (--artifact-dir); official release artifacts are pending publication, so installation requires the local artifact lane' };
+    return { kind: 'REFUSED', reason: 'no artifact source configured: pass --artifact-dir <dir> (local artifact lane) or install through the official release installer (version-pinned install.sh; see README "Official release")' };
   }
-  if (needsArtifacts) {
+  // PS-8A release lane needs tar for the pi-shuttle package activation too.
+  const needsTar = needsArtifacts || options.releasePackageTgz !== undefined;
+  if (needsTar) {
     const tarCheck = checkTarPresent();
     if (!tarCheck.ok) return { kind: 'REFUSED', reason: tarCheck.message };
   }
-  const tarExecutable = needsArtifacts ? resolveExecutable('tar')! : null;
+  const tarExecutable = needsTar ? resolveExecutable('tar')! : null;
 
   // pi presence (needed for pi-guard install AND for actual-state
   // reconciliation of an already-installed pi-guard); version
@@ -280,7 +295,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   if (!writable.ok) return { kind: 'REFUSED', reason: writable.message };
 
   // Staging.
-  if (needsArtifacts) {
+  if (needsTar) {
     try {
       mkdirSync(attempt.stagingDir, { recursive: true, mode: 0o700 });
     } catch (err) {
@@ -292,6 +307,60 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   // Narrowed by the guards above: needsArtifacts ⇒ artifactDir and tar are present.
   const artifactDir = options.artifactDir as string;
   const tar = tarExecutable as string;
+
+  // PS-8A release lane: activate the pi-shuttle package itself into
+  // packages storage so the bin link points at persistent state (the
+  // release installer runs from an ephemeral shell extraction; linking
+  // to the running module would dangle after cleanup). The package is
+  // structurally scanned, identity-verified (name/version/bin), and
+  // activated with the same atomic no-clobber discipline as components;
+  // rollback tracks it like any other attempt-created path.
+  let binLinkTarget = ownCliPath();
+  if (options.releasePackageTgz !== undefined) {
+    const releaseScan = await scanArtifactMembers(options.releasePackageTgz);
+    if (!releaseScan.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: `pi-shuttle release package failed the archive policy (${releaseScan.message})` };
+    }
+    const releaseExtract = await extractArtifact(options.releasePackageTgz, attempt.stagingDir, 'pishuttle', tar);
+    if (!releaseExtract.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: releaseExtract.message };
+    }
+    const releaseRoot = findPackageRoot(releaseExtract.value);
+    const releaseIdentity = releaseRoot === null ? null : readPackageIdentity(releaseRoot);
+    const identityCheck = verifyIdentity(releaseIdentity, PI_SHUTTLE_PACKAGE_NAME, PI_SHUTTLE_VERSION, 'pi-shuttle release');
+    if (!identityCheck.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: identityCheck.message };
+    }
+    const binRaw = identityCheck.value.bin['pi-shuttle'];
+    if (binRaw === undefined) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: 'pi-shuttle release package does not declare the pi-shuttle bin' };
+    }
+    const binCheck = validateBinPath(binRaw, releaseRoot ?? releaseExtract.value);
+    if (!binCheck.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: binCheck.message };
+    }
+    const shuttleTarget = join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, PI_SHUTTLE_VERSION));
+    attempt.rollbackCandidates.push({ path: shuttleTarget, preExisting: existsSync(shuttleTarget) });
+    const verifyShuttle = (existingRoot: string): ComponentResult<unknown> => {
+      const existing = readPackageIdentity(existingRoot);
+      if (existing === null || existing.name !== PI_SHUTTLE_PACKAGE_NAME || existing.version !== PI_SHUTTLE_VERSION) {
+        return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing pi-shuttle installation at ${existingRoot} has incompatible identity; refusing to touch it` };
+      }
+      return { ok: true, value: undefined };
+    };
+    const activated = activatePackageRoot(releaseRoot ?? releaseExtract.value, shuttleTarget, verifyShuttle);
+    if (!activated.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: activated.message };
+    }
+    binLinkTarget = join(shuttleTarget, binCheck.value);
+  }
+  attempt.binLinkTarget = binLinkTarget;
   let gatewayResult: GatewayInstallResult | undefined;
   if (options.selections.gateway) {
     const gatewayTarget = join(layout.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, GATEWAY_PACKAGE_VERSION));

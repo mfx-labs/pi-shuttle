@@ -5,6 +5,8 @@
  * (installation-contract §2: "no silent defaults in batch mode for
  * components 1–2"). Interactive defaults are yes/yes per the contract.
  */
+import { createInterface } from 'node:readline/promises';
+
 export interface InstallerSelections {
   readonly gateway: boolean;
   readonly piGuard: boolean;
@@ -40,6 +42,9 @@ export const INSTALLER_USAGE = [
   '  --artifact-dir <path>          local component artifact directory (local lane)',
   '  --expect-gateway-sha256 <hex>  strict expected digest for the gateway artifact',
   '  --expect-pi-guard-sha256 <hex> strict expected digest for the pi-guard artifact',
+  '',
+  'Official release installs use the version-pinned install.sh (curl | bash);',
+  'artifact download and digest verification are managed internally there.',
 ].join('\n') + '\n';
 
 const YES = new Set(['yes', 'y']);
@@ -132,9 +137,32 @@ export function parseInstallerArgs(argv: readonly string[]): InstallerArgResult 
   };
 }
 
-/** Minimal prompt seam (readline-backed in main.ts; injectable for tests). */
+/** Minimal prompt seam (readline-backed; injectable for tests). */
 export interface PromptUI {
   ask(question: string, defaultValue?: string): Promise<string>;
+}
+
+/**
+ * The interactive prompt session (installation-contract §2, prompts 1–5)
+ * backed by stdin/stdout readline. Shared by the local installer entry
+ * (main.ts) and the release installer entry (release/bootstrap.ts).
+ */
+export async function promptInteractive(defaults: { readonly installDir: string; readonly binDir: string }): Promise<InteractiveResult> {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const lines = rl[Symbol.asyncIterator]();
+  const ui: PromptUI = {
+    ask: async (question: string, defaultValue?: string) => {
+      process.stdout.write(question);
+      const next = await lines.next();
+      const answer = next.done ? '' : next.value.trim();
+      return answer.length > 0 ? answer : (defaultValue ?? '');
+    },
+  };
+  try {
+    return await promptSelections(ui, defaults);
+  } finally {
+    rl.close();
+  }
 }
 
 export interface InteractiveResult {

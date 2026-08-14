@@ -38,11 +38,36 @@ Runtime requirements: **Node >= 22.19.0**, **Git >= 2.30.0**, and
 **Pi 0.83.0+** (0.83.0 is the known-good baseline; newer Pi versions are
 accepted only when the committed pi-guard compatibility probe passes).
 
-## Quick start
+## Official release (v0.1.0) — after the publication gate
 
-The current installation path is developer/pre-release: build pi-shuttle
-from source, then install the composed product with locally built
-component artifacts.
+The future one-command install uses a VERSION-SPECIFIC installer URL
+(no floating `latest`), conceptually:
+
+```bash
+curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.0/install.sh | bash
+```
+
+**This URL is not live yet.** It becomes available only after the
+separate publication gate (release hosting, artifact distribution
+authorization, and the v0.1.0 license decision). The release installer
+downloads and digest-verifies every component itself — the end user
+never clones Project Gateway or pi-guard, runs `prepare-fixtures.sh`,
+or passes `--artifact-dir`. After installing:
+
+```bash
+pi-shuttle doctor               # health check
+pi-shuttle project add <path>   # register a project
+pi-shuttle start                # start the Project Gateway MCP server
+```
+
+See [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md)
+for the ChatGPT integration path. Release-candidate assets are built
+locally with `scripts/build-release.mjs` into `dist-release/v0.1.0/`.
+
+## Development from source
+
+Current pre-release path: build pi-shuttle from source, then install the
+composed product with locally built component artifacts.
 
 ```bash
 git clone https://github.com/mfx-labs/pi-shuttle.git
@@ -51,10 +76,7 @@ npm ci
 npm run build
 ```
 
-The installer (`./install.sh`) installs Project Gateway and pi-guard from
-SHA-256-verified local artifacts. Until release artifacts are published,
-build them from the exact pinned component checkouts with the committed
-fixture helper:
+### Local artifact lane
 
 ```bash
 bash scripts/prepare-fixtures.sh \

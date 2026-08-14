@@ -9,18 +9,17 @@
  * opt-out/unverified stack); 2 FAILED / UNSUPPORTED / REFUSED / malformed
  * invocation.
  */
-import { createInterface } from 'node:readline/promises';
+import { realpathSync } from 'node:fs';
 import { hostEnvironmentFromProcess } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, parseInstallerArgs, promptSelections } from './selection.js';
-import type { PromptUI } from './selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, parseInstallerArgs, promptInteractive } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
 
 export const INSTALLER_EXIT = { COMPLETE: 0, PARTIAL: 1, FAILED: 2 } as const;
 
-function formatOutcome(outcome: InstallOutcome): string {
+export function formatOutcome(outcome: InstallOutcome): string {
   switch (outcome.kind) {
     case 'COMPLETE':
       return 'result: COMPLETE — all selected components installed and verified';
@@ -35,7 +34,7 @@ function formatOutcome(outcome: InstallOutcome): string {
   }
 }
 
-function exitCodeFor(outcome: InstallOutcome): number {
+export function exitCodeFor(outcome: InstallOutcome): number {
   switch (outcome.kind) {
     case 'COMPLETE':
       return INSTALLER_EXIT.COMPLETE;
@@ -74,25 +73,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   let binDir = parsed.options.binDir;
   let configureProject = false;
   if (selections === undefined) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const lines = rl[Symbol.asyncIterator]();
-    const ui: PromptUI = {
-      ask: async (question: string, defaultValue?: string) => {
-        process.stdout.write(question);
-        const next = await lines.next();
-        const answer = next.done ? '' : next.value.trim();
-        return answer.length > 0 ? answer : (defaultValue ?? '');
-      },
-    };
-    try {
-      const interactive = await promptSelections(ui, { installDir: parsed.options.installDir ?? layout.shareDir, binDir: parsed.options.binDir ?? layout.binDir });
-      selections = interactive.selections;
-      installDir = interactive.installDir;
-      binDir = interactive.binDir;
-      configureProject = interactive.configureProject;
-    } finally {
-      rl.close();
-    }
+    const interactive = await promptInteractive({ installDir: parsed.options.installDir ?? layout.shareDir, binDir: parsed.options.binDir ?? layout.binDir });
+    selections = interactive.selections;
+    installDir = interactive.installDir;
+    binDir = interactive.binDir;
+    configureProject = interactive.configureProject;
   }
 
   if (configureProject) {
@@ -120,10 +105,19 @@ export async function main(argv: readonly string[]): Promise<number> {
 }
 
 // Direct execution entry (install.sh execs this module): run the installer
-// only when executed, never when imported by tests.
+// only when executed, never when imported by tests. The argv path is
+// compared through realpath: on macOS /tmp is a symlink to /private/tmp,
+// and argv keeps the raw path while import.meta.url is canonical — a raw
+// comparison would silently skip the entry for symlinked invocations.
 if (process.argv[1] !== undefined) {
   const { pathToFileURL } = await import('node:url');
-  if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+  let entryPath: string | null = null;
+  try {
+    entryPath = realpathSync(process.argv[1]);
+  } catch {
+    entryPath = null;
+  }
+  if (entryPath !== null && import.meta.url === pathToFileURL(entryPath).href) {
     process.exitCode = await main(process.argv.slice(2));
   }
 }

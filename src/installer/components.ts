@@ -188,6 +188,9 @@ export const GATEWAY_PACKAGE_NAME = '@project-gateway/artifact-core';
 /** Real npm-pack artifact name (hyphen form; SIR-PS3-004). */
 export const GATEWAY_ARTIFACT_FILE = 'project-gateway-artifact-core-0.1.0.tgz';
 
+/** pi-shuttle's own package name (release-lane self-activation). */
+export const PI_SHUTTLE_PACKAGE_NAME = 'pi-shuttle';
+
 export interface GatewayInstallResult {
   readonly status: 'installed-verified' | 'installed-unverified';
   readonly installPath: string;

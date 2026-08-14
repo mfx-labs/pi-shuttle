@@ -2,12 +2,17 @@
  * pi-shuttle architectural static guards (genuine invariants only — no
  * incidental line-count pins):
  *
- * 1. Network/tunnel/MCP-SDK vocabulary is FORBIDDEN everywhere: pi-shuttle
- *    production code performs no network behavior in any gate.
+ * 1. Network/tunnel/MCP-SDK vocabulary is FORBIDDEN everywhere except the
+ *    PS-8A release acquisition boundary (`src/installer/release/acquire.ts`):
+ *    the ONLY network surface in the product — HTTPS-only downloads of
+ *    digest-verified release assets, reachable only from the release
+ *    installer bootstrap. No other module may perform network behavior.
  * 2. Subprocess execution exists ONLY inside the shared process boundary
  *    (`src/process/runner.ts`, extracted in PS-4 from the PS-3 installer
  *    boundary); the CLI/config/registry layers remain subprocess-free.
- * 3. `process.env` is confined to the host seam and the process boundary.
+ * 3. `process.env` is confined to the host seam, the process boundary, and
+ *    the release installer entry (its own direct-execution CLI boundary,
+ *    exactly like the pi-guard compatibility probe).
  * 4. `node:crypto` is confined to identity derivation and artifact
  *    digest verification.
  * 5. `node:fs` is confined to the leaf modules with per-module exact
@@ -52,6 +57,14 @@ assert.ok(files.length >= 20, 'the pi-shuttle source tree must exist');
 
 const INSTALLER = (file: string): boolean => rel(file).startsWith('src/installer/');
 
+/**
+ * PS-8A network carve-out: the release acquisition boundary only. This
+ * module performs HTTPS downloads of digest-verified release assets for
+ * the official release installer; nothing else in src may touch the
+ * network vocabulary.
+ */
+const NETWORK_EXEMPT = new Set(['src/installer/release/acquire.ts']);
+
 /** Exact node:fs named-import allowlists per fs-bearing module. */
 const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/persistence/writer.ts': ['mkdirSync', 'openSync', 'closeSync', 'writeSync', 'fsyncSync', 'renameSync', 'unlinkSync', 'fchmodSync'],
@@ -65,6 +78,11 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/installer/install.ts': ['existsSync', 'mkdirSync', 'readlinkSync', 'rmSync', 'symlinkSync'],
   'src/installer/artifact.ts': ['createReadStream'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
+  // PS-8A release boundary (verified staging + handoff files):
+  'src/installer/release/acquire.ts': ['createWriteStream', 'rmSync', 'mkdirSync'],
+  'src/installer/release/bootstrap.ts': ['existsSync', 'mkdirSync', 'readFileSync', 'realpathSync', 'rmSync', 'mkdtempSync'],
+  // Installer entry direct-execution guard (symlink-safe argv comparison):
+  'src/installer/main.ts': ['realpathSync'],
   'src/process/runner.ts': ['accessSync', 'constants'],
   // PS-4 lifecycle boundary (approved operator-directory creation + probes):
   'src/lifecycle/state.ts': ['existsSync'],
@@ -73,8 +91,9 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/command/doctor.ts': ['existsSync', 'readdirSync', 'statSync'],
 };
 
-test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src', () => {
+test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src (PS-8A release acquisition boundary exempt)', () => {
   for (const file of files) {
+    if (NETWORK_EXEMPT.has(rel(file))) continue;
     const content = readFileSync(file, 'utf8');
     for (const forbidden of [
       'node:net', 'node:http', 'node:https', 'node:tls', 'node:dgram',
@@ -83,6 +102,10 @@ test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src', () => {
       assert.equal(content.includes(forbidden), false, `${rel(file)} must not reach ${forbidden}`);
     }
   }
+  // The carve-out is the release acquisition module and nothing else.
+  const acquire = readFileSync(join(SRC, 'installer', 'release', 'acquire.ts'), 'utf8');
+  assert.equal(acquire.includes('node:https'), true, 'the release acquisition boundary must use HTTPS');
+  assert.equal(acquire.includes("from 'node:http'"), false, 'plain HTTP is never reachable');
 });
 
 test('ps2/ps3/ps4 static guard: subprocess execution exists only inside the shared process boundary', () => {
@@ -100,8 +123,10 @@ test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the
     const content = readFileSync(file, 'utf8');
     // The pi-guard compatibility probe is a process boundary: its CLI main
     // (spawned by the installer/doctor/CI through the shared runner) reads
-    // its env contract directly, exactly like the runner itself.
-    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts' || rel(file) === 'src/compat/pi-guard-probe.ts') continue;
+    // its env contract directly, exactly like the runner itself. The
+    // release installer entry (PS-8A) is likewise its own direct-execution
+    // CLI boundary (spawned by the release install.sh).
+    if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts' || rel(file) === 'src/compat/pi-guard-probe.ts' || rel(file) === 'src/installer/release/bootstrap.ts') continue;
     assert.equal(content.includes('process.env'), false, `${rel(file)} must not read the environment directly`);
   }
 });
