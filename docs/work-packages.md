@@ -173,7 +173,22 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
   tunnel-launch distinction documented.
 - **Focused tests:** doc review checklist; example transcripts are
   explicitly marked conceptual where platform-dependent.
-- **Human/external gates:** OpenAI official-source verification sign-off.
+- **Human/external gates:** OpenAI official-source verification sign-off
+  (satisfied 2026-08-14; PS-7 report).
+- **Release disposition (PS-7R, human-approved):** the attempted live
+  execution stands as recorded —
+  `PS-7 — BLOCKED BY OPENAI WORKSPACE ELIGIBILITY` (no eligible
+  Business/Enterprise/Edu workspace was available; no live ChatGPT
+  success is claimed). Release disposition:
+  `PS-7 DOCUMENTATION / TRANSPORT READINESS — ACCEPTED`;
+  `LIVE CHATGPT E2E — EXTERNALLY BLOCKED / QUALIFIED`. Live ChatGPT
+  custom-app E2E remains required evidence when an eligible workspace
+  becomes available, classified as `EXTERNAL QUALIFIED ACCEPTANCE
+  EVIDENCE` — not a v0.1.0 release blocker when workspace eligibility
+  is the only blocker. This does not weaken the nine-tool surface,
+  workspace confinement, read-only Git, authority boundaries, installer
+  requirements, component provenance, release artifact verification, or
+  any local product acceptance criterion.
 
 ## PS-8 — Final zero-state pilot and release readiness
 
@@ -183,7 +198,14 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
 - **Owning repo:** pi-shuttle (evidence/report).
 - **Allowed mutations:** release evidence docs; manifest finalized with
   real SHAs.
-- **Prerequisites:** PS-5, PS-6, PS-7; P3A-WP15-006 disposition.
+- **Prerequisites:** PS-5, PS-6; PS-7 documentation/transport readiness
+  accepted (PS-7R); live ChatGPT E2E, if not yet exercised, blocked
+  solely by external workspace eligibility and explicitly qualified;
+  P3A-WP15-006 disposition.
+- **PS-7R stop conditions (never waived):** PS-8 stops if the current
+  OpenAI tunnel cannot bridge the stdio Gateway, a live
+  eligible-workspace test reveals a Gateway/tool-surface defect, or
+  official OpenAI behavior contradicts the documented integration.
 - **Acceptance criteria:** zero-state pilot green both platforms; doctor
   honesty audit (partial and complete installs; no false claims); manifest
   SHAs match artifacts; rollback drill executed once; release-readiness

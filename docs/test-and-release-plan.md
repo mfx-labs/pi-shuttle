@@ -79,7 +79,15 @@ target if the closure commit is re-verified.
 4. **PS-8 gate (release readiness)**: zero-state pilot green on Lane A
    and Lane D; manifest finalized with real artifact SHAs; docs complete;
    `doctor` honesty audit (no false `supported` claims); P3A-WP15-006
-   closed or explicitly qualified in the release evidence.
+   closed or explicitly qualified in the release evidence; PS-7
+   documentation/transport readiness accepted (PS-7R). Live ChatGPT
+   custom-app E2E, when not yet exercised, must be blocked solely by
+   external workspace eligibility and explicitly qualified as
+   `EXTERNAL QUALIFIED ACCEPTANCE EVIDENCE` — never claimed as passed.
+   PS-8 stops if the current OpenAI tunnel cannot bridge the stdio
+   Gateway, a live eligible-workspace test reveals a
+   Gateway/tool-surface defect, or official OpenAI behavior contradicts
+   the documented integration.
 5. **External human authorization gates** (separate, never implied):
    - public installer URL + artifact hosting decision;
    - GitHub repository creation for pi-shuttle (if any);
@@ -87,7 +95,11 @@ target if the closure commit is re-verified.
    - publication/distribution of the private `@project-gateway/artifact-core`
      artifact (license question — currently `UNLICENSED`/private);
    - OpenAI/Secure MCP Tunnel documentation verification (official
-     sources) at PS-7.
+     sources) — satisfied at PS-7/PS-7R (verified 2026-08-14; see
+     `docs/reports/pi-shuttle-ps-7-chatgpt-secure-mcp-tunnel-report.md`);
+     live ChatGPT custom-app E2E remains `EXTERNAL QUALIFIED ACCEPTANCE
+     EVIDENCE` until exercised on an eligible workspace (never claimed
+     as passed).
 
 ## 4. Evidence bundle
 
