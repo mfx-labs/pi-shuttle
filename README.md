@@ -174,6 +174,9 @@ points, not a universal minimum macOS version.
   the platform support matrix and its evidence
 - [`docs/component-boundaries.md`](docs/component-boundaries.md) — what
   each repository owns
+- [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md) —
+  ChatGPT integration: Secure MCP Tunnel onboarding (Business/
+  Enterprise/Edu workspace + developer mode + custom MCP app)
 - [`docs/decisions/`](docs/decisions/) — architecture decision records
 - [`docs/reports/`](docs/reports/) — gate implementation and evidence
   reports
