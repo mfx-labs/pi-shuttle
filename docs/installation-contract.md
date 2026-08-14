@@ -44,7 +44,7 @@ required flags; no silent defaults in batch mode for components 1–2.
 - Runtime environment requirements (probed from the environment, never
   installed by the installer): Node minimum `>=22.19.0` with `22.23.2` as
   the validated deterministic CI baseline (reported, never an equality
-  gate; native arm64 remains mandatory on darwin-arm64); Git minimum
+  gate); Git minimum
   `>=2.30.0` with `2.45.4` as the validated deterministic CI baseline
   (the Gateway additionally enforces its own minimum plus binary
   fingerprint/ownership checks, fail-closed, unchanged); Pi minimum
@@ -58,8 +58,11 @@ required flags; no silent defaults in batch mode for components 1–2.
 
 ## 4. Preflight and refusal boundaries
 
-- Platform/architecture: Linux x86_64 → supported; macOS arm64 →
-  supported (PS-6); macOS Intel/x86_64 → supported (PS-6I); anything
+- Platform/architecture: Linux x86_64 → supported (the ONLY v0.1.0
+  claimed lane); macOS arm64 / macOS Intel/x86_64 → **refused in v0.1.0**
+  with a message that macOS is not supported in v0.1.0 (deferred until
+  the Gateway controlled-write boundary is portable; PS8B-DEFECT-001);
+  anything
   else → **refuse with a clear message** (do not claim support).
 - Node: minimum runtime `22.19.0`; versions at/above the minimum are
   version-compatible. `22.23.2` is the validated CI baseline (reported,

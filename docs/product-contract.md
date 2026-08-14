@@ -62,8 +62,9 @@ until the omitted component is installed.
 7. The Gateway remains stdio MCP internally. No embedded HTTP/OAuth/tunnel.
 8. Pi 0.83.0 remains the declared compatibility baseline. Pi 0.84.1 present
    on the current Linux host is **not** evidence and must not be claimed.
-9. Linux x86_64 and macOS arm64 are the v0.1.0 first-class targets; macOS
-   Intel only if sufficient validation evidence is obtained.
+9. Linux x86_64 is the v0.1.0 first-class target (human-approved
+   Linux-only disposition); macOS arm64/Intel are deferred beyond v0.1.0
+   (PS8B-DEFECT-001) and are refused by the v0.1.0 installer.
 10. Default directory layout (both platforms, see platform-support-contract):
     `~/.local/share/pi-shuttle`, `~/.local/state/pi-shuttle`,
     `~/.config/pi-shuttle`, `~/.local/bin/pi-shuttle`.

@@ -148,13 +148,17 @@ test('envelope: gateway dependency set must match exactly (no additions, no drif
   assert.equal(validateEnvelope(env2).ok, false);
 });
 
-test('envelope: supported lanes must equal the manifest lane set', () => {
+test('envelope: supported lanes must equal the manifest lane set (v0.1.0: Linux only)', () => {
   const env = validEnvelope();
-  (env.policy as Record<string, unknown>).supportedLanes = ['linux-x86_64-posix-utf8-node22'];
-  assert.equal(validateEnvelope(env).ok, false);
+  (env.policy as Record<string, unknown>).supportedLanes = [...COMPATIBILITY_MANIFEST.supportedLanes, 'darwin-arm64-posix-utf8-node22'];
+  assert.equal(validateEnvelope(env).ok, false, 'a darwin lane addition must not validate against the Linux-only manifest');
   const env2 = validEnvelope();
   (env2.policy as Record<string, unknown>).supportedLanes = [...COMPATIBILITY_MANIFEST.supportedLanes, 'windows-x86_64'];
   assert.equal(validateEnvelope(env2).ok, false);
+  // The exact v0.1.0 lane set (Linux only) validates:
+  const env3 = validEnvelope();
+  (env3.policy as Record<string, unknown>).supportedLanes = ['linux-x86_64-posix-utf8-node22'];
+  assert.equal(validateEnvelope(env3).ok, true, 'the Linux-only lane set equals the v0.1.0 manifest claim');
 });
 
 test('envelope: policy facts must equal the runtime compatibility manifest', () => {

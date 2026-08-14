@@ -14,27 +14,28 @@ artifact persistence → workspace confinement → read-only Git inspection →
 absence of trusted authority tools → persistence/restart → safe
 malformed-input handling → **zero-state pilot** (fresh HOME, one command).
 
-### Lane B — macOS arm64 (GitHub Actions)
-CI lane: installer (batch mode), CLI, package integrity, filesystem/
-confinement (store owner/mode, no-follow, canonical paths, /tmp
-canonicalization), focused E2E (handshake + nine tools + persist/replay),
-storage crash suite on APFS, record volume case-sensitivity and exact node
-arch. Requires the PS-6 Gateway host-lane change to be meaningful.
+### Lane B — macOS arm64 (GitHub Actions) — DEFERRED beyond v0.1.0
+CI lane for the deferred darwin-arm64 product support (requires the
+Gateway Darwin controlled-write correction first): installer (batch
+mode), CLI, package integrity, filesystem/confinement (store owner/mode,
+no-follow, canonical paths, /tmp canonicalization), focused E2E
+(handshake + nine tools + persist/replay), storage crash suite on APFS,
+record volume case-sensitivity and exact node arch. NOT a v0.1.0 release
+prerequisite (macOS is not in the v0.1.0 supported set).
 
-### Lane C — macOS Intel (GitHub Actions)
-First-class darwin Intel/x64 evidence (PS-6I): exact Node 22.23.2
-(darwin-x64, architecture ASSERTED x64), build + typecheck + full test
-suite, mandatory APFS evidence invocation, exact Git 2.45.4 provision,
-and the real-stack subsection (exact public Gateway/pi-guard checkouts →
-fixture construction → installer COMPLETE → doctor healthy → Gateway
-start → MCP 9/9 → Pi 0.83.0 known-good). The Lane C runner is
-`macos-15-intel`; it does not depend on the physical Lane D machine.
+### Lane C — macOS Intel (GitHub Actions) — DEFERRED beyond v0.1.0
+Historical first-class darwin Intel/x64 evidence plan (PS-6I): exact
+Node 22.23.2 (darwin-x64, architecture ASSERTED x64), build + typecheck
++ full test suite, mandatory APFS evidence invocation, exact Git 2.45.4
+provision, and the real-stack subsection. NOT a v0.1.0 release
+prerequisite; deferred with macOS product support.
 
-### Lane D — macOS arm64 (physical)
-Final manual user journey, exactly as the end user: install → add project →
-Pi + pi-guard → start Gateway → Secure MCP Tunnel → ChatGPT → inspect /
-draft / persist. Recorded as the authoritative macOS evidence with the
-Lane B evidence.
+### Lane D — macOS arm64 (physical) — DEFERRED beyond v0.1.0
+`Lane D deferred with macOS product support beyond v0.1.0.`
+The final manual user journey (install → add project → Pi + pi-guard →
+start Gateway → Secure MCP Tunnel → ChatGPT → inspect / draft / persist)
+remains the authoritative future macOS evidence and is NOT a v0.1.0
+release prerequisite.
 
 ### Gateway regression lanes (reused, not duplicated)
 The Gateway's own Phase 3C lanes 0–6 remain the component-level gate
@@ -74,13 +75,16 @@ target if the closure commit is re-verified.
    ADR-041 recorded. *Human:* review of the verb's authority surface
    (operator-only confirmation).
 2. **PS-5 gate (Linux)**: Lane A green on the installed product.
-3. **PS-6 gate (macOS)**: Gateway host-lane change + ADR reviewed; Lane B
-   green; Lane D journey recorded; case-sensitivity evidence recorded.
+3. **PS-6 gate (macOS)**: HISTORICAL (PS-6/PS-6I) — the darwin lanes are
+   DEFERRED beyond v0.1.0 (see §0 of the platform-support contract); the
+   v0.1.0 release does not require Lane B/C/D evidence.
 4. **PS-8 gate (release readiness)**: zero-state pilot green on Lane A
-   and Lane D; manifest finalized with real artifact SHAs; docs complete;
+   (Linux x86_64 — the v0.1.0 supported set); manifest finalized with
+   real artifact SHAs; docs complete;
    `doctor` honesty audit (no false `supported` claims); P3A-WP15-006
    closed or explicitly qualified in the release evidence; PS-7
-   documentation/transport readiness accepted (PS-7R). Live ChatGPT
+   documentation/transport readiness accepted (PS-7R) and applicable to
+   the supported Linux product. Live ChatGPT
    custom-app E2E, when not yet exercised, must be blocked solely by
    external workspace eligibility and explicitly qualified as
    `EXTERNAL QUALIFIED ACCEPTANCE EVIDENCE` — never claimed as passed.

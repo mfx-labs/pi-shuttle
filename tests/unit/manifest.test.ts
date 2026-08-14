@@ -48,11 +48,11 @@ test('manifest: exact approved pins are preserved', () => {
   });
 });
 
-test('manifest: lane claims are evidence-bound — linux, darwin arm64, and darwin Intel supported', () => {
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], []);
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), true, 'macOS arm64 is the PS-6 promoted first-class lane');
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), true, 'macOS Intel is the PS-6I promoted first-class lane');
+test('manifest: lane claims are evidence-bound — v0.1.0 supports Linux x86_64 only; darwin lanes gated', () => {
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false, 'macOS arm64 is deferred, not a v0.1.0 claim');
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), false, 'macOS Intel is deferred, not a v0.1.0 claim');
   assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes('win32-x64'), false, 'Windows is never a claimed lane');
 });
 

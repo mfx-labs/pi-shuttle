@@ -14,20 +14,26 @@ import { COMPATIBILITY_MANIFEST, DARWIN_X86_64_HOST_LANE, LINUX_HOST_LANE, DARWI
 
 const LINUX = { home: '/tmp/x', platform: 'linux', arch: 'x64' };
 
-test('preflight: platform lane classification — linux x64, darwin arm64, and darwin Intel supported; windows refused', () => {
-  assert.equal(checkPlatformLane(LINUX).ok, true);
+test('preflight: platform lane classification — v0.1.0 supports Linux x64 only; darwin arm64/x64 and windows refused', () => {
+  assert.equal(checkPlatformLane(LINUX).ok, true, 'Linux x86_64 is the v0.1.0 supported lane');
   const mac = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'arm64' });
-  assert.equal(mac.ok, true, 'macOS arm64 is the PS-6 promoted first-class lane');
+  assert.equal(mac.ok, false, 'macOS arm64 is NOT supported in v0.1.0 (deferred)');
+  if (!mac.ok) assert.match(mac.message, /macOS .* not supported in v0\.1\.0/, 'the refusal must say macOS is not supported in v0.1.0');
   const intel = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' });
-  assert.equal(intel.ok, true, 'macOS Intel is the PS-6I promoted first-class lane');
-  assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' }).ok, true);
+  assert.equal(intel.ok, false, 'macOS Intel is NOT supported in v0.1.0 (deferred)');
+  if (!intel.ok) assert.match(intel.message, /macOS .* not supported in v0\.1\.0/, 'the refusal must say macOS is not supported in v0.1.0');
   assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'win32', arch: 'x64' }).ok, false);
 });
 
-test('preflight: darwin Intel lane is a manifest claim, not a mapping guess', () => {
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), true);
+test('preflight: manifest claims ONLY the Linux lane; darwin lanes are gated (v0.1.0 Linux-only disposition)', () => {
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), false);
+  // Retained constants + gated lanes (historical/component-level meaning):
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
   assert.equal(LINUX_HOST_LANE, 'linux-x86_64-posix-utf8-node22');
   assert.equal(DARWIN_ARM64_HOST_LANE, 'darwin-arm64-posix-utf8-node22');
+  assert.equal(DARWIN_X86_64_HOST_LANE, 'darwin-x86_64-posix-utf8-node22');
 });
 
 test('preflight: node lane is the exact validated version', () => {

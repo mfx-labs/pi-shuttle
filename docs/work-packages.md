@@ -136,7 +136,11 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
 
 - **Objective:** first-class macOS arm64 via the Gateway host-lane change;
   Lane B/C workflow files (designed locally; executed only after external
-  authorization); Lane D physical journey.
+  authorization); Lane D physical journey. **HISTORICAL / DEFERRED
+  beyond v0.1.0** — pi-shuttle v0.1.0 supports Linux x86_64 only
+  (human-approved disposition; PS8B-DEFECT-001); macOS support resumes
+  after a reviewed, contract-preserving Gateway Darwin
+  controlled-write primitive.
 - **Owning repos:** Gateway (host-lane parameterization + ADR + lane
   evidence) and pi-shuttle (CI workflow files, macOS installer/CLI fixes).
 - **Allowed mutations:** Gateway: closed accepted-lane set +
@@ -193,8 +197,9 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
 ## PS-8 — Final zero-state pilot and release readiness
 
 - **Objective:** clean-room one-command install on fresh HOMEs (Lane A
-  physical, Lane D physical), final evidence bundle, release readiness
-  review.
+  physical — Linux x86_64, the v0.1.0 supported set; Lane D is DEFERRED
+  with macOS product support beyond v0.1.0), final evidence bundle,
+  release readiness review.
 - **Owning repo:** pi-shuttle (evidence/report).
 - **Allowed mutations:** release evidence docs; manifest finalized with
   real SHAs.
@@ -206,7 +211,8 @@ independent of PS-3/PS-4 content, but its Lane D journey needs PS-4.
   OpenAI tunnel cannot bridge the stdio Gateway, a live
   eligible-workspace test reveals a Gateway/tool-surface defect, or
   official OpenAI behavior contradicts the documented integration.
-- **Acceptance criteria:** zero-state pilot green both platforms; doctor
+- **Acceptance criteria:** zero-state pilot green on the Linux lane;
+  doctor
   honesty audit (partial and complete installs; no false claims); manifest
   SHAs match artifacts; rollback drill executed once; release-readiness
   verdict recorded; external authorization gates listed and unexecuted.

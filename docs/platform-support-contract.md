@@ -1,21 +1,34 @@
 # Platform Support Contract
 
+## 0. v0.1.0 support disposition (human-approved, Linux-only)
+
+pi-shuttle v0.1.0 supports **Linux x86_64 only**. macOS support is
+DEFERRED beyond v0.1.0 until Project Gateway has a reviewed,
+contract-preserving Darwin descriptor-relative controlled-write primitive
+(PS8B-DEFECT-001; Gateway darwin-controlled-write escalation report). The
+installer refuses macOS in v0.1.0 BEFORE any component activation;
+doctor reports macOS as unsupported (exit 2). Historical macOS
+engineering evidence (PS-6/PS-6I, ADR-042/043) remains valid historical
+evidence but is NOT v0.1.0 supported-product evidence.
+
 ## 1. v0.1.0 support matrix (claims are evidence-bound)
 
 | Platform | Arch | Status | Evidence required |
 |---|---|---|---|
 | Linux | x86_64 | **supported** (first-class) | Lane A physical/local E2E on the exact lane |
-| macOS | arm64 (Apple Silicon) | **supported** (first-class) | PS-6 Gateway host-lane change + Lane B CI + Lane D physical journey |
-| macOS | Intel (x86_64) | **supported** (first-class, PS-6I) | PS-6I Gateway host-lane change (ADR-043) + Lane C CI + this gate's physical Intel smoke |
+| macOS | arm64 (Apple Silicon) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real arm64 lane evidence (future) |
+| macOS | Intel (x86_64) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real Intel lane evidence (future) |
 | anything else (incl. Windows) | — | **unsupported** (installer refuses; doctor exit 2) | none |
 
 Supported lane constants (inherited, never reinterpreted):
 
-- Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux),
-  `darwin-arm64-posix-utf8-node22` (macOS arm64 — PS-6), and
-  `darwin-x86_64-posix-utf8-node22` (macOS Intel — PS-6I); the `node22`
-  suffix is a frozen opaque protocol label, never an exact Node runtime
-  equality requirement;
+- Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux — the ONLY
+  v0.1.0 claimed lane). The darwin lane constants
+  `darwin-arm64-posix-utf8-node22` (PS-6) and
+  `darwin-x86_64-posix-utf8-node22` (PS-6I) are RETAINED in the manifest
+  as gated lanes (historical/component-level meaning) and are NOT v0.1.0
+  claims; the `node22` suffix is a frozen opaque protocol label, never an
+  exact Node runtime equality requirement;
 - Node: runtime minimum `>=22.19.0`; `22.23.2` is the validated
   deterministic CI baseline (reported, never an equality gate; the
   package floor `>=22.0.0` is not a support claim);
@@ -61,7 +74,7 @@ Portability rules (binding):
 - POSIX-oriented only: no Windows paths, no case-insensitive assumptions,
   no `spawn` shell tricks.
 
-## 3. macOS-specific risks and required evidence
+## 3. macOS-specific risks and required evidence (HISTORICAL — deferred beyond v0.1.0)
 
 1. **Gateway host lane is Linux-only today.** `TRUSTED_HOST_LANE` is a
    compile-time constant hard-coded in the WP-6 validator and containment

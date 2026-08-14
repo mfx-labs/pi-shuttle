@@ -67,7 +67,7 @@ async function runWithFixturePi(runEnv: { readonly home: string; readonly fixtur
   process.env.FIXTURE_PI_VERSION = '0.83.0';
   process.env.FIXTURE_PI_STATE = runEnv.extraEnv.FIXTURE_PI_STATE ?? '';
   try {
-    return await runInstall({ home: runEnv.home, platform: process.platform, arch: process.arch, pathEnv }, options);
+    return await runInstall({ home: runEnv.home, platform: 'linux', arch: 'x64', pathEnv }, options);
   } finally {
     process.env.PATH = oldPath;
     if (oldVersion === undefined) delete process.env.FIXTURE_PI_VERSION; else process.env.FIXTURE_PI_VERSION = oldVersion;
@@ -155,7 +155,7 @@ test('release core: a corrupted release package fails closed with no mutation', 
     const piState = join(env, 'pi-state.txt');
     const runEnv = fullInstallEnv(env, '0.83.0', piState);
     const outcome = await runInstall(
-      { home: env, platform: process.platform, arch: process.arch, pathEnv: pathEnvFor(runEnv) },
+      { home: env, platform: 'linux', arch: 'x64', pathEnv: pathEnvFor(runEnv) },
       {
         selections: { gateway: true, piGuard: true },
         artifactDir: env,
@@ -190,7 +190,7 @@ test('release core: identity mismatch in the release package is refused (foreign
     const piState = join(env, 'pi-state.txt');
     const runEnv = fullInstallEnv(env, '0.83.0', piState);
     const outcome = await runInstall(
-      { home: env, platform: process.platform, arch: process.arch, pathEnv: pathEnvFor(runEnv) },
+      { home: env, platform: 'linux', arch: 'x64', pathEnv: pathEnvFor(runEnv) },
       { selections: { gateway: false, piGuard: false }, releasePackageTgz: shuttle, uid: 12345 },
     );
     assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));

@@ -44,7 +44,7 @@ Checks (minimum, in order):
 
 | # | Check | Verdict sources |
 |---|---|---|
-| 1 | platform | OS/arch vs manifest matrix (linux-x64, darwin-arm64) |
+| 1 | platform | OS/arch vs manifest matrix (v0.1.0: linux-x64 only; darwin lanes deferred) |
 | 2 | architecture | same |
 | 3 | Node | version probe >= 22.19.0 (minimum runtime; 22.23.2 is the validated CI baseline) |
 | 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version >= 2.30.0 (minimum; 2.45.4 is the validated CI baseline) |

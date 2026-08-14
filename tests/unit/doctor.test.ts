@@ -344,18 +344,19 @@ test('doctor: stale coordination lock artifacts are detected with recovery guida
   }
 });
 
-test('doctor: darwin arm64 and darwin Intel platforms are supported (PS-6/PS-6I promoted lanes); windows fails closed exit 2', async () => {
+test('doctor: darwin arm64 and darwin Intel platforms are unsupported in v0.1.0 (Linux-only disposition); windows fails closed exit 2', async () => {
   const { env, ctx } = healthyContext();
   try {
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' } });
     assert.equal(darwin.ok, true);
     if (!darwin.ok) return;
-    assert.equal(verdicts(darwin.report)['platform'], 'supported', 'macOS arm64 is a first-class claimed lane');
+    assert.equal(verdicts(darwin.report)['platform'], 'unsupported', 'macOS arm64 is NOT a v0.1.0 supported claim (deferred)');
+    assert.equal(darwin.exitCode, 2, 'an unsupported platform fails closed');
     const intel = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'x64' } });
     assert.equal(intel.ok, true);
     if (!intel.ok) return;
-    assert.equal(verdicts(intel.report)['platform'], 'supported', 'macOS Intel is a first-class claimed lane (PS-6I)');
-    assert.ok(intel.report.checks.find((c) => c.id === 'platform')!.detail.includes('darwin-x86_64-posix-utf8-node22'), 'Intel lane is reported by its trusted lane constant');
+    assert.equal(verdicts(intel.report)['platform'], 'unsupported', 'macOS Intel is NOT a v0.1.0 supported claim (deferred)');
+    assert.equal(intel.exitCode, 2, 'an unsupported platform fails closed');
     const windows = await runDoctor({ ...ctx, env: { home: env, platform: 'win32', arch: 'x64' } });
     assert.equal(windows.ok, true);
     if (!windows.ok) return;
@@ -384,7 +385,7 @@ function writeFakeNode(binDir: string, arch: string | null): string {
   return node;
 }
 
-test('doctor: darwin-arm64 lane — native arm64 Node is supported', async () => {
+test('doctor: retained darwin-arm64 node-arch checks still behave (deferred lane; platform verdict remains unsupported in v0.1.0)', async () => {
   const { env, ctx } = healthyContext();
   try {
     const node = writeFakeNode(env, 'arm64');
@@ -393,12 +394,13 @@ test('doctor: darwin-arm64 lane — native arm64 Node is supported', async () =>
     if (!darwin.ok) return;
     assert.equal(verdicts(darwin.report)['node'], 'supported');
     assert.ok(darwin.report.checks.find((c) => c.id === 'node')!.detail.includes('arm64'), 'the arch fact must be part of the supported claim');
+    assert.equal(verdicts(darwin.report)['platform'], 'unsupported', 'the platform verdict stays unsupported regardless of the retained node-arch logic');
   } finally {
     cleanupEnv(env);
   }
 });
 
-test('doctor: darwin-arm64 lane — Rosetta/x64 Node is unsupported (fail closed)', async () => {
+test('doctor: retained darwin-arm64 Rosetta/x64 node check fails closed (deferred lane; v0.1.0 platform verdict unsupported)', async () => {
   const { env, ctx } = healthyContext();
   try {
     const node = writeFakeNode(env, 'x64');
@@ -413,7 +415,7 @@ test('doctor: darwin-arm64 lane — Rosetta/x64 Node is unsupported (fail closed
   }
 });
 
-test('doctor: darwin-arm64 lane — unobservable architecture probe is installed-but-unverified (truthful)', async () => {
+test('doctor: retained darwin-arm64 unobservable-arch probe verdict (deferred lane; v0.1.0 platform verdict unsupported)', async () => {
   const { env, ctx } = healthyContext();
   try {
     const node = writeFakeNode(env, null);
@@ -421,6 +423,7 @@ test('doctor: darwin-arm64 lane — unobservable architecture probe is installed
     assert.equal(darwin.ok, true);
     if (!darwin.ok) return;
     assert.equal(verdicts(darwin.report)['node'], 'installed but unverified');
+    assert.equal(verdicts(darwin.report)['platform'], 'unsupported');
   } finally {
     cleanupEnv(env);
   }

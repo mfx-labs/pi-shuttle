@@ -8,13 +8,13 @@
  * `partial installation`.
  *
  * Probe discipline:
- *   - platform/architecture claims are manifest-bound (Linux x86_64,
- *     darwin arm64, and darwin Intel supported; Windows never claimed);
+ *   - platform/architecture claims are manifest-bound (v0.1.0: Linux
+ *     x86_64 ONLY — the darwin lanes are DEFERRED (PS8B-DEFECT-001) and
+ *     reported unsupported; Windows never claimed);
  *   - Node is the running interpreter (same rule as the installer);
  *     runtime minimum >= 22.19.0 (22.23.2 is the validated CI baseline,
- *     reported never gating); native arm64 required on the darwin-arm64
- *     lane only (PS-6R policy); the darwin-Intel lane requires no
- *     architecture beyond the running interpreter (x64 is native there);
+ *     reported never gating); the retained darwin-arm64 architecture
+ *     check (native arm64) applies only on the deferred darwin lane;
  *   - Git is discovered through PATH (never `/usr/bin/git`); runtime
  *     minimum >= 2.30.0 (2.45.4 is the validated CI baseline, reported
  *     never gating); presence ≠ lane evidence;
@@ -206,11 +206,11 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   const nodeRun = await runProcess(nodeExecutable, ['--version'], { env: ctx.pathEnv, timeoutMs: 10_000 });
   const nodeVersion = nodeRun.exitCode === 0 ? nodeRun.stdout.trim().replace(/^v/, '') : '';
   const nodeClassification = nodeVersion === '' ? 'malformed' : classifyNodeRuntime(nodeVersion);
-  // PS-6 darwin lane: on the darwin-arm64 host lane the ACTUAL Node
-  // executable must be arm64 — a Rosetta/x64 Node cannot satisfy the
-  // first-class darwin-arm64 lane (platform-support-contract §3.9; the
-  // version probe alone cannot distinguish native from translated
-  // binaries). Read-only, argv-safe; never affects Linux behavior. The
+  // PS-6 darwin lane check (RETAINED, deferred): on the darwin-arm64 host
+  // lane the ACTUAL Node executable must be arm64 — a Rosetta/x64 Node
+  // cannot satisfy the first-class darwin-arm64 lane. The darwin lanes are
+  // NOT v0.1.0 supported claims (Linux-only disposition); this check is
+  // retained for the deferred lane and never affects Linux behavior. The
   // architecture requirement applies to ANY version-compatible runtime.
   const requiresNativeArm64Node = ctx.env.platform === 'darwin' && ctx.env.arch === 'arm64';
   let nodeArch = '';

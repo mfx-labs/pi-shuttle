@@ -29,9 +29,10 @@ package-manager distribution. The installer and CLI work today from a
 developer checkout with locally built, digest-verified component
 artifacts.
 
-Currently validated supported platforms: **Linux x86_64**, **macOS arm64
-(Apple Silicon)**, and **macOS Intel (x86_64)**. Windows and anything else
-are unsupported (the installer refuses). See [Supported
+v0.1.0 currently supports **Linux x86_64 only**. macOS support is
+deferred while the controlled-write boundary is being made portable
+without weakening its security guarantees. Windows and anything else are
+unsupported (the installer refuses). See [Supported
 platforms](#supported-platforms) for the full matrix and requirements.
 
 Runtime requirements: **Node >= 22.19.0**, **Git >= 2.30.0**, and
@@ -174,15 +175,17 @@ so what you run is exactly what was reviewed.
 | Platform | Architecture | Requirement |
 |---|---|---|
 | Linux | x86_64 | Node >= 22.19.0, Git >= 2.30.0, Pi 0.83.0+ |
-| macOS | arm64 (Apple Silicon) | same, plus native arm64 Node |
-| macOS | Intel (x86_64) | same (native x64 Node) |
+| macOS | arm64 / Intel | **not supported in v0.1.0** (deferred) |
 | Windows | — | not supported |
+
+v0.1.0 currently supports Linux x86_64. macOS support is deferred while
+the Gateway controlled-write boundary is being made portable without
+weakening its security guarantees; the installer refuses macOS in
+v0.1.0.
 
 Runtime versions are minimums, not exact pins: the validated CI
 baselines (Node 22.23.2, Git 2.45.4, Pi 0.83.0) are evidence, not
-requirements. Validated macOS evidence points so far: macOS 12.7.6 on an
-Intel MacBook Pro, and the macOS 15 runners used by CI — evidence
-points, not a universal minimum macOS version.
+requirements.
 
 ## Documentation
 

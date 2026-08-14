@@ -16,6 +16,14 @@
  *     public repository is updated by a separate human-gated push)
  *   pi-guard v0.1.2 (commit 7a7580cc4cbd7926797564c72269394fc29a860a)
  *   Pi compatibility baseline 0.83.0 (SUPPORTED_PI_LANE)
+ *
+ * v0.1.0 support decision (human-approved Linux-only disposition):
+ *   pi-shuttle v0.1.0 SHALL support Linux x86_64 only. Darwin support is
+ *   DEFERRED until Project Gateway has a reviewed, contract-preserving
+ *   Darwin descriptor-relative controlled-write primitive (PS8B-DEFECT-001;
+ *   Gateway escalation report). The darwin host-lane constants below are
+ *   retained for historical/component-level meaning and as gated lanes;
+ *   they are NOT v0.1.0 supported claims.
  */
 export const PI_SHUTTLE_VERSION = '0.1.0';
 export const GATEWAY_PACKAGE_VERSION = '0.1.0';
@@ -48,9 +56,9 @@ export const CONFIG_FORMAT_VERSION = 1;
 
 /** Gateway host lanes (inherited constants; the Gateway owns their semantics). */
 export const LINUX_HOST_LANE = 'linux-x86_64-posix-utf8-node22';
-/** darwin arm64 lane (PS-6, Gateway ADR-042): accepted first-class lane. */
+/** darwin arm64 lane (PS-6, Gateway ADR-042): retained; NOT a v0.1.0 claim (deferred). */
 export const DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22';
-/** darwin Intel/x64 lane (PS-6I, Gateway ADR-043): accepted first-class lane. */
+/** darwin Intel/x64 lane (PS-6I, Gateway ADR-043): retained; NOT a v0.1.0 claim (deferred). */
 export const DARWIN_X86_64_HOST_LANE = 'darwin-x86_64-posix-utf8-node22';
 
 /** The closed compatibility-manifest shape (product-contract §6). */
@@ -70,9 +78,9 @@ export interface CompatibilityManifest {
   readonly gatewayDependencies: Readonly<Record<string, string>>;
   readonly configurationVersion: string;
   readonly configFormatVersion: number;
-  /** Host lanes claimed as supported (evidence-bound). */
+  /** Host lanes claimed as supported (evidence-bound). v0.1.0: Linux x86_64 only. */
   readonly supportedLanes: readonly string[];
-  /** Host lanes targeted but NOT claimed (empty: no gated lanes remain after the PS-6 promotion). */
+  /** Host lanes targeted but NOT claimed (darwin lanes are gated behind the Gateway Darwin controlled-write correction). */
   readonly gatedLanes: readonly string[];
 }
 
@@ -91,6 +99,6 @@ export const COMPATIBILITY_MANIFEST: CompatibilityManifest = Object.freeze({
   gatewayDependencies: Object.freeze({ ...GATEWAY_DEPENDENCIES }),
   configurationVersion: CONFIGURATION_VERSION,
   configFormatVersion: CONFIG_FORMAT_VERSION,
-  supportedLanes: Object.freeze([LINUX_HOST_LANE, DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
-  gatedLanes: Object.freeze([]),
+  supportedLanes: Object.freeze([LINUX_HOST_LANE]),
+  gatedLanes: Object.freeze([DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
 });

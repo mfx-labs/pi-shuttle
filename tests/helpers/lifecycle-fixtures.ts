@@ -325,7 +325,7 @@ export interface CliRunResult {
 /** Run the compiled real CLI with an env override (HOME + PATH + fixture controls). */
 export function runCli(args: readonly string[], env: NodeJS.ProcessEnv, options: { readonly cwd?: string; readonly stdin?: 'open' | 'ignore' } = {}): Promise<CliRunResult> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [CLI_PATH, ...args], {
+    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), CLI_PATH, ...args], {
       stdio: options.stdin === 'open' ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
       env,
       cwd: options.cwd,

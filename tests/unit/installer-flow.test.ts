@@ -368,7 +368,7 @@ test('installer: interactive prompts route project configuration to deferred gui
     const runEnv = fullInstallEnv(env, '0.83.0', piState);
     const child = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       const pathEntries = [runEnv.fixtureBin, process.env.PATH].filter((p): p is string => p !== undefined);
-      const proc = spawn(process.execPath, [join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js'), '--artifact-dir', env], {
+      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js'), '--artifact-dir', env], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...runEnv.extraEnv, HOME: env, PATH: pathEntries.join(':') },
       });
@@ -396,7 +396,7 @@ test('installer: interactive both-decline yields PARTIAL', async () => {
     const runEnv = fullInstallEnv(env);
     const child = await new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
       const pathEntries = [runEnv.fixtureBin, process.env.PATH].filter((p): p is string => p !== undefined);
-      const proc = spawn(process.execPath, [join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js')], {
+      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js')], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...runEnv.extraEnv, HOME: env, PATH: pathEntries.join(':') },
       });

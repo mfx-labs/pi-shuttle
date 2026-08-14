@@ -21,11 +21,23 @@ import { mkdirSync } from 'node:fs';
 
 export type PreflightVerdict = { readonly ok: true } | { readonly ok: false; readonly code: string; readonly message: string };
 
-/** Platform/architecture lane claim (Linux x86_64, darwin arm64 + darwin Intel; others refused). */
+/**
+ * Platform/architecture lane claim. v0.1.0 supports Linux x86_64 ONLY
+ * (human-approved Linux-only disposition); darwin arm64 + darwin Intel
+ * are refused BEFORE any component activation with a message that says
+ * macOS is not supported in v0.1.0. All other platforms refused.
+ */
 export function checkPlatformLane(env: HostEnvironment): PreflightVerdict {
   const lane = hostLane(env.platform, env.arch);
   if (COMPATIBILITY_MANIFEST.supportedLanes.includes(lane)) {
     return { ok: true };
+  }
+  if (env.platform === 'darwin') {
+    return {
+      ok: false,
+      code: 'ERR-PS3-UNSUPPORTED-PLATFORM',
+      message: `macOS (${env.arch}) is not supported in v0.1.0 — v0.1.0 supports Linux x86_64 only; macOS support is deferred while the Gateway controlled-write boundary is made portable without weakening its security guarantees`,
+    };
   }
   return {
     ok: false,
