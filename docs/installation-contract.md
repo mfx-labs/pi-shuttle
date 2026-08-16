@@ -32,6 +32,15 @@ Non-interactive mode for CI/release lanes: `install.sh --batch` (or
 equivalent env-pinned answers) — same semantics, prompts become explicit
 required flags; no silent defaults in batch mode for components 1–2.
 
+Unified macOS user journey (ADR-003 — contracted, NOT implemented): the
+intended macOS installation UX is identical for both architectures —
+the same one-line installer (`install.sh`) journey with NO public
+experimental or acceptance flags (no `--experimental`,
+`--experimental-target`, `--acceptance-lane`, `--acceptance-target`).
+The host architecture is detected internally (x86_64 → x64 runtime
+variant; arm64 → arm64 runtime variant). Physical evidence state never
+gates installation (ADR-003 §3).
+
 ## 3. Version pinning (mandatory)
 
 - The installer downloads the release manifest
@@ -61,12 +70,27 @@ required flags; no silent defaults in batch mode for components 1–2.
 - Platform/architecture: Linux x86_64 → supported (the ONLY v0.1.0
   claimed lane); macOS arm64 / macOS Intel/x86_64 → **refused in v0.1.0**
   with a message that macOS is not supported in v0.1.0 (deferred until
-  the Gateway controlled-write boundary is portable; PS8B-DEFECT-001);
-  a future Intel distribution via `mfx-labs/project-gateway-macos` is
-  contracted (ADR-002) but NOT implemented — refusal unchanged until
-  clean-install acceptance;
-  anything
-  else → **refuse with a clear message** (do not claim support).
+  the Gateway controlled-write boundary is portable; PS8B-DEFECT-001) —
+  this is the v0.1.0 support-scope disposition, NOT an evidence gate
+  (ADR-003 §3); Intel distribution WIRING is implemented and locally
+  baselined via the A/B/C gates (`mfx-labs/project-gateway-macos`,
+  ADR-002) — what remains incomplete is the unified macOS semantic
+  migration, the arm64 distributable candidate, and normal macOS
+  support enablement; future macOS execution eligibility depends on
+  concrete technical prerequisites (a known target, a
+  provenance-complete distributable runtime, the required
+  runtime/integrity checks) — NOT on physical-evidence completion;
+  support promotion remains separately evidence-bound;
+  anything else → **refuse with a clear message** (do not claim support).
+- **Unified macOS installation (ADR-003 — contracted, NOT implemented):**
+  the intended macOS install requires NO public experimental or
+  acceptance flags and the host architecture is selected internally.
+  Physical evidence state never gates installation. macOS installation
+  may be blocked only by a concrete technical prerequisite such as the
+  absence of a provenance-complete distributable runtime artifact for
+  the detected architecture — never by missing physical evidence.
+  The install receipt schema remains unchanged and carries no acceptance
+  or evidence-gate authority.
 - Node: minimum runtime `22.19.0`; versions at/above the minimum are
   version-compatible. `22.23.2` is the validated CI baseline (reported,
   never an equality gate). Malformed/unreadable versions fail closed.
@@ -94,13 +118,20 @@ required flags; no silent defaults in batch mode for components 1–2.
    unpack. Any failure → remove staging, restore prior state (nothing
    activated yet) → abort with typed message. This is the primary failure
    boundary: nothing is ever activated partially.
-4. **Gateway component install**: pinned `npm install` of the gateway
-   tarball + exact dependency pins into
-   `~/.local/share/pi-shuttle/packages/project-gateway-artifact-core@0.1.0/`
-   (npm registry access for the three pinned deps; gateway itself from the
-   pinned artifact, never from the public registry — package is private).
-   Verify the installed `bin/project-gateway-mcp` runs and the package
-   exports match the manifest's expected surface.
+4. **Gateway component install**: pinned `npm install` of the
+   target-selected Gateway tarball + exact dependency pins into the
+   descriptor-selected package directory
+   `~/.local/share/pi-shuttle/packages/<packageName>@<version>/`
+   (ADR-002/C1 identity selection; the historical Linux target resolves
+   to `project-gateway-artifact-core@0.1.0`, the Intel target currently
+   resolves to `project-gateway-macos-core@0.1.0` — never hardcoded
+   across targets). npm registry access is for the three pinned deps
+   only; the gateway itself comes from the pinned artifact, never from
+   the public registry — the package is private. Verify the installed
+   descriptor-selected executable/bin runs (`project-gateway-mcp` for
+   the historical Linux target; `project-gateway-macos-mcp` for the
+   Intel target) and the package exports match the manifest's expected
+   surface.
 5. **pi-guard component install**: discover the Pi package store
    (read-only discovery; supported package-store install path only, never
    auto-allowed registrations); install the pinned pi-guard `0.1.2`

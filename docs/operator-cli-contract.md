@@ -15,6 +15,15 @@ pi-shuttle --version
 Nothing else. No admin commands, no config-editing commands, no update
 commands. `--help`/`--version` are hygiene, not features.
 
+Unified macOS user journey (ADR-003 — contracted, NOT implemented): the
+intended macOS installation journey is the SAME one-line installer
+(`install.sh`) for both architectures, and the post-install CLI surface
+is the SAME command set (`pi-shuttle doctor`, `pi-shuttle start`,
+existing project commands), with NO public `--experimental`,
+`--experimental-target`, `--acceptance-lane`, or `--acceptance-target`
+flags. The host architecture is detected internally; the user never
+selects architecture identity manually.
+
 The CLI is a thin operator shell: it composes the Gateway CLI as a pinned
 subprocess, persists the operator runtime configuration, and verifies
 states. It contains **no storage logic, no provenance, no authority
@@ -25,6 +34,26 @@ semantics** — all of that stays in the Gateway package behind the
 
 Exit codes: `0` all supported checks pass; `1` findings (missing/partial/
 unverified); `2` unsupported platform/architecture (fail closed).
+
+Unified macOS journey (ADR-003 — contracted, NOT implemented): doctor is
+identical for both macOS architectures and takes NO public experimental
+or acceptance flags. Physical evidence state NEVER gates doctor
+execution: absent physical evidence means only that physical behavior
+has not yet been formally demonstrated on real hardware — never
+incompatible, failed, or prohibited. Doctor reports the target's
+physical-evidence state truthfully as evidence status, not as an
+execution block. Formal acceptance evidence is collected by the same
+doctor journey on real hardware through the internal engineering/
+evidence workflow (no separate public UX).
+
+Doctor concern separation (future unified macOS model — NOT
+implemented): doctor keeps three concerns conceptually distinct —
+technical/runtime health (passing checks), physical-evidence state
+(reported truthfully), and normative support claim (manifest). A known
+macOS target with a valid distributable runtime and passing technical
+checks is not execution-refused solely because formal support promotion
+has not occurred. The current v0.1.0 refusal behavior remains
+historical until the migration is implemented.
 
 Status vocabulary (used exactly, never embellished):
 
@@ -49,7 +78,7 @@ Checks (minimum, in order):
 | 3 | Node | version probe >= 22.19.0 (minimum runtime; 22.23.2 is the validated CI baseline) |
 | 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version >= 2.30.0 (minimum; 2.45.4 is the validated CI baseline) |
 | 5 | Pi installation/version | `pi` discovery + version; 0.83.0 known-good; candidates >= 0.83.0 require the pi-guard compatibility probe PASS; below 0.83.0 = unsupported |
-| 6 | Project Gateway component | installed package path, manifest version match, `bin/project-gateway-mcp` executable (contracted ADR-002: per-lane descriptor bin name — `project-gateway-mcp` for Linux/arm64, `project-gateway-macos-mcp` for the Intel fork lane; NOT implemented, current v0.1.0 check uses the historical bin) |
+| 6 | Project Gateway component | installed package path, manifest version match, and the descriptor-selected Gateway executable (`bin/project-gateway-mcp` on the historical Linux target, `bin/project-gateway-macos-mcp` on the Intel target; implemented C2 — doctor validates against the per-target descriptor bin name; the target-model semantic migration is NOT started) |
 | 7 | pi-guard component/version | Pi package store discovery (read-only), extension entry, version == 0.1.2, ADR-037 predicate spot-checks |
 | 8 | trusted store integrity/readiness | per registered project: `bootstrap` replay-style verification (or the Gateway's verification path) — INITIALIZED=ready; ABSENT=missing; PARTIAL/UNSUPPORTED_VERSION/FOREIGN=broken (fail closed, no repair) |
 | 9 | runtime configuration | `~/.config/pi-shuttle/runtime.json` parseable, closed fields, matches installed manifest, 0600 |
@@ -83,9 +112,13 @@ The operator bootstrap path (product-contract §5). Steps:
    `<canonicalRoot>/artifacts` created if absent (version-2 requirement:
    existing directory, strict descendant of root).
 5. **Initialize or verification-replay the trusted store**: write a
-   bootstrap config document (0600, temp), run
-   `project-gateway-mcp bootstrap --config <file> --output <resolved>`
-   (pinned node + installed CLI), require exit 0 and state `INITIALIZED`.
+   bootstrap config document (0600, temp), run the installed
+   target-selected Gateway executable
+   `bootstrap --config <file> --output <resolved>` (pinned node +
+   installed CLI; the historical Linux target resolves to
+   `project-gateway-mcp`, the Intel target currently resolves to
+   `project-gateway-macos-mcp` — descriptor-selected, never hardcoded),
+   require exit 0 and state `INITIALIZED`.
 6. **Verify**: run `bootstrap` a second time — the committed replay path
    (verification-only when already initialized); require `INITIALIZED`
    again; verify the resolved config (identity, digests, canonical
@@ -141,16 +174,24 @@ projects" and exits 0.
 pi-shuttle start
 ```
 
+Unified macOS journey (ADR-003 — contracted, NOT implemented): start is
+identical for both macOS architectures and takes NO public experimental
+or acceptance flags; the runtime variant is selected internally from the
+detected host architecture. Physical evidence state never gates start
+(only concrete technical prerequisites may block execution).
+
 - Reads the runtime config; verifies it (parse, closed fields, stores
   present/replay-verifiable, manifest match). Failure → bounded diagnostic
   + "run `pi-shuttle doctor`" hint, exit nonzero, no Gateway process
   spawned.
 - Launches the installed Gateway MCP with the configured runtime state by
-  exec'ing the pinned node + installed
-  `dist/runtime/mcp/cli.js --config <runtime-config>` (or the installed
-  `bin/project-gateway-mcp`), **stdio inherited** — stdout stays MCP
-  protocol, diagnostics to stderr; the user sees exactly the Gateway
-  process behavior, without ever typing the long executable/config path.
+  exec'ing the pinned node + the installed target-selected Gateway
+  executable (`dist/runtime/mcp/cli.js --config <runtime-config>`, or the
+  installed descriptor-selected bin — `bin/project-gateway-mcp` on the
+  historical Linux target, `bin/project-gateway-macos-mcp` on the Intel
+  target), **stdio inherited** — stdout stays MCP protocol, diagnostics
+  to stderr; the user sees exactly the Gateway process behavior, without
+  ever typing the long executable/config path.
 - Propagates the Gateway exit code; forwards signals; no daemonization, no
   log capture, no wrapper state. The Gateway remains stdio MCP internally.
 - For the ChatGPT/tunnel path the user does NOT use `pi-shuttle start`:

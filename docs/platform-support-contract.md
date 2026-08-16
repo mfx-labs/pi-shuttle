@@ -11,33 +11,65 @@ doctor reports macOS as unsupported (exit 2). Historical macOS
 engineering evidence (PS-6/PS-6I, ADR-042/043) remains valid historical
 evidence but is NOT v0.1.0 supported-product evidence.
 
-**Contracted distribution direction (ADR-002 — DECIDED, NOT implemented):**
-for a future macOS Intel distribution, the lane
+**Contracted distribution direction (ADR-002 — DECIDED and implemented
+locally via the A/B/C gates; the target-model semantic migration is NOT
+started):**
+for a future macOS Intel distribution, the host target
 `darwin-x86_64-posix-utf8-node22` is bound to the accepted macOS Gateway
 fork (`mfx-labs/project-gateway-macos` @ `a90284b06420effb1ec1eeef14e7ed82e02c64e9`,
 package `@project-gateway/macos-core`, bin `project-gateway-macos-mcp`);
-the Linux and darwin-arm64 lanes remain bound to the historical Gateway.
-This is a contract decision only — NOT a support claim; the v0.1.0
-refusal behavior is unchanged until the fork artifact passes clean-install
-acceptance. Fork-side prerequisite: PGM-DIST-1 (npm artifact packaging
-boundary; distribution-only, no arm64 claim).
+the Linux target and the darwin-arm64 target remain bound to the
+historical Gateway by the CURRENT implementation (the temporary arm64
+routing is implementation state, not a permanent architecture decision
+— ADR-003 §9). This distribution WIRING is implemented and locally
+baselined via A/B/C — it is NOT a support claim; the v0.1.0
+refusal behavior is the historical v0.1.0 product disposition.
+Future macOS execution eligibility depends on concrete technical
+prerequisites (a known target, a provenance-complete distributable
+runtime, and the required runtime/integrity checks) — NOT on
+physical-evidence completion; support promotion remains separately
+evidence-bound. Fork-side prerequisite: PGM-DIST-1 (npm
+artifact packaging boundary; distribution-only, no arm64 claim).
 
 ## 1. v0.1.0 support matrix (claims are evidence-bound)
 
 | Platform | Arch | Status | Evidence required |
 |---|---|---|---|
 | Linux | x86_64 | **supported** (first-class) | Lane A physical/local E2E on the exact lane |
-| macOS | arm64 (Apple Silicon) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real arm64 lane evidence (future) |
-| macOS | Intel (x86_64) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real Intel lane evidence (future); distribution contracted via `mfx-labs/project-gateway-macos` (ADR-002) — NOT started, no support claim until clean-install acceptance |
+| macOS | arm64 (Apple Silicon) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real arm64 target evidence (future; physical evidence unavailable until real Apple Silicon hardware is available — NOT known incompatible) |
+| macOS | Intel (x86_64) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real Intel target evidence (future); distribution wiring implemented locally via A/B/C (`mfx-labs/project-gateway-macos`, ADR-002) — support promotion requires clean-install acceptance evidence (separately evidence-bound; future execution eligibility depends on concrete technical prerequisites, never on acceptance completion) |
 | anything else (incl. Windows) | — | **unsupported** (installer refuses; doctor exit 2) | none |
+
+macOS is ONE product lane (ADR-003): the two macOS rows above are
+architecture/host TARGETS within that single lane, not separate product
+lanes; evidence and support state are target-scoped.
+
+Unified macOS user journey (ADR-003 — contracted, NOT implemented): the
+intended macOS UX is identical for both targets — the same one-line
+installer (`install.sh`) installation journey and the same post-install
+CLI (`pi-shuttle doctor` / `pi-shuttle start` / existing project
+commands), with NO public experimental or acceptance flags; the host
+architecture is detected internally. Physical
+evidence state never gates execution (ADR-003 §3): the deferred status
+above is the v0.1.0 support disposition, not an execution prohibition,
+and absent physical evidence means only that physical behavior has not
+yet been formally demonstrated on real hardware — never incompatible or
+failed. Normal Apple Silicon installation may be blocked only by a
+concrete technical prerequisite (a provenance-complete distributable
+arm64 runtime artifact; the current provenance-complete macOS Gateway
+packaging candidate at the pinned Git commit is x64-only — Git
+publication of the commit is not an npm/release artifact publication)
+— never by missing evidence.
 
 Supported lane constants (inherited, never reinterpreted):
 
 - Gateway host lane: `linux-x86_64-posix-utf8-node22` (Linux — the ONLY
-  v0.1.0 claimed lane). The darwin lane constants
+  v0.1.0 claimed lane). The darwin host identifiers
   `darwin-arm64-posix-utf8-node22` (PS-6) and
   `darwin-x86_64-posix-utf8-node22` (PS-6I) are RETAINED in the manifest
-  as gated lanes (historical/component-level meaning) and are NOT v0.1.0
+  as gated host TARGETS within the single macOS product lane (ADR-003;
+  implementation still uses the historical `lane` terminology — the
+  semantic migration is NOT started) and are NOT v0.1.0
   claims; the `node22` suffix is a frozen opaque protocol label, never an
   exact Node runtime equality requirement;
 - Node: runtime minimum `>=22.19.0`; `22.23.2` is the validated
@@ -87,12 +119,17 @@ Portability rules (binding):
 
 ## 3. macOS-specific risks and required evidence (HISTORICAL — deferred beyond v0.1.0)
 
-1. **Gateway host lane is Linux-only today.** `TRUSTED_HOST_LANE` is a
-   compile-time constant hard-coded in the WP-6 validator and containment
-   checks; the lane participates in configuration identity. First-class
-   macOS support therefore requires the PS-6 Gateway change (closed
-   accepted-lane set + `darwin-arm64-posix-utf8-node22`) plus a Gateway
-   ADR. **No amount of pi-shuttle-side work can claim macOS without it.**
+1. **Gateway host lane was Linux-only at the HISTORICAL baseline.**
+   At that baseline `TRUSTED_HOST_LANE` was a compile-time constant
+   hard-coded in the WP-6 validator and containment checks, and the lane
+   participated in configuration identity. This limitation is superseded:
+   the Gateway closed accepted-lane set was extended with the darwin
+   trusted host lanes (`darwin-arm64-posix-utf8-node22`, ADR-042;
+   `darwin-x86_64-posix-utf8-node22`, ADR-043). This item is historical
+   evidence of the baseline that first-class macOS support had to
+   overcome; it is not a current implementation fact. **At that
+   baseline, no amount of pi-shuttle-side work could claim macOS
+   without the Gateway lane change.**
 2. **APFS case-insensitivity.** Default macOS APFS is case-insensitive;
    the Gateway lane contract says case-insensitive filesystems are
    unverified/unsupported. The store layout is fixed lowercase, so
@@ -154,16 +191,101 @@ Portability rules (binding):
 
 ## 4. What "supported" means
 
-- The exact lane is declared in the manifest;
-- the exact evidence lane(s) in test-and-release-plan ran green;
+- The exact host target is declared in the manifest;
+- the exact evidence lane(s) in test-and-release-plan ran green for that
+  target;
 - `doctor` reports `supported` for it;
 - anything else is `installed but unverified`, `missing`, or
   `unsupported` — never "supported".
 - Claims are per-v0.1.0: the manifest IS the claim; silence is not
   support.
+- macOS claims are TARGET-scoped (ADR-003): one macOS lane-level boolean
+  never implies equivalent evidence across x86_64 and arm64; each
+  target's support state derives from its own physical evidence.
+  Distinguish three independent concerns: runtime/distribution
+  availability (a provenance-complete distributable runtime exists);
+  physical evidence state (what has been formally demonstrated on real
+  hardware); and the product support claim (the manifest). Successful
+  installation or experimental use never promotes support status;
+  missing formal evidence never prohibits use.
 
 ## 5. Unsupported-but-visible behavior
 
 On unsupported platforms the installer refuses; a manually-run CLI prints
 `unsupported platform` with exit 2 and never proceeds to compose a Gateway
 process (fail closed, consistent with the Gateway's own lane contract).
+The v0.1.0 macOS refusal is the v0.1.0 support-scope disposition — it is
+NOT an evidence gate (ADR-003 §3).
+
+## 6. Unified macOS user journey (ADR-003 — contracted, NOT implemented)
+
+macOS has ONE user-facing installation and runtime journey; Intel
+x86_64 and Apple Silicon arm64 are architecture-specific runtime
+TARGETS of the same macOS product path. Physical evidence state never
+gates execution.
+
+- **Public UX (both targets):** the SAME one-line installer
+  (`install.sh`) installation journey, then the same post-install CLI
+  (`pi-shuttle doctor`, `pi-shuttle start`, existing project commands)
+  — NO public `--experimental`, `--experimental-target`,
+  `--acceptance-lane`, or `--acceptance-target` flags. Pi Shuttle
+  detects the real host architecture internally: macOS/x86_64 selects
+  the x64 runtime variant; macOS/arm64 selects the arm64 runtime
+  variant. The user never selects architecture identity manually.
+- **Evidence vs execution:** physical acceptance evidence MUST NOT, by
+  itself, gate download, installation, doctor, or start. Absent
+  physical evidence means only “physical behavior has not yet been
+  formally demonstrated on real hardware” — never incompatible, failed,
+  or prohibited from installation or execution.
+- **Current evidence states:** macOS/x86_64 — the Project Gateway
+  macOS/x64 runtime candidate exists and has accepted physical Intel
+  evidence (fork-side MAC-4 Intel runtime acceptance); pi-shuttle
+  unified macOS clean-install/end-to-end D acceptance is NOT STARTED,
+  so no pi-shuttle Intel support promotion has occurred. macOS/arm64 —
+  implementation/cross-build candidate exists; physical validation
+  evidence pending (no real Apple Silicon hardware available yet);
+  compatibility NOT known-bad; normal installation/use is intended
+  product behavior once the distributable arm64 runtime candidate is
+  available.
+- **Distribution prerequisite:** the current provenance-complete macOS
+  Gateway packaging candidate at the pinned Git commit is x64-only
+  (PGM-DIST-1; the Git commit
+  `a90284b06420effb1ec1eeef14e7ed82e02c64e9` is published on the public
+  Git remote — no npm package/release artifact was published, and no
+  product release/support claim follows from Git publication). Normal
+  Apple Silicon installation may be blocked only by a concrete technical
+  prerequisite such as the absence of a provenance-complete distributable
+  arm64 runtime artifact — NEVER by missing physical evidence. A
+  separate distribution gate must make the arm64 candidate
+  provenance-complete and distributable before unified macOS
+  installation can be implemented.
+- **Known-defect rule:** only a demonstrated technical incompatibility
+  or safety/correctness issue may justify an architecture-specific
+  execution block; such a block is never created preemptively from
+  missing evidence alone.
+- **Doctor (future unified macOS model — NOT implemented):** doctor
+  keeps three concerns conceptually distinct — technical/runtime health
+  (passing checks), physical-evidence state (reported truthfully), and
+  normative support claim (manifest). A known macOS target with a valid
+  distributable runtime and passing technical checks is not
+  execution-refused solely because formal support promotion has not
+  occurred. The current v0.1.0 refusal behavior remains historical
+  until the migration is implemented.
+- **Acceptance infrastructure:** formal acceptance is an internal
+  engineering/evidence workflow; it must not require a different public
+  installation UX. A future Apple Silicon host runs the same product
+  journey to collect formal evidence without introducing another macOS
+  product lane.
+- **Support promotion:** a target becomes `supported` ONLY via the
+  progression prepared/candidate → physically accepted → supported,
+  after its complete physical acceptance journey passes on real
+  hardware, evidence is recorded, and a separate human-approved
+  support-promotion gate changes the manifest, release policy, and
+  support documentation. Promotion is never automatic; missing physical
+  evidence is never represented as a failed runtime result.
+- **Preserved:** one macOS product lane; architecture-specific native
+  variants; install receipt authority and schema unchanged;
+  `artifactSha256` semantics unchanged; MAC-5 remains blocked only as a
+  FORMAL PHYSICAL-EVIDENCE gate; MAC-6 status unchanged; no Apple
+  Silicon physical acceptance claim; no support promotion in this
+  decision.
