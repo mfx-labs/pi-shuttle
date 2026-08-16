@@ -24,15 +24,18 @@
  *   Gateway escalation report). The darwin host-lane constants below are
  *   retained for historical/component-level meaning and as gated lanes;
  *   they are NOT v0.1.0 supported claims.
+ *
+ * ADR-002 fault domain A (per-lane Gateway distribution identity):
+ *   the single global Gateway identity is superseded by the authoritative
+ *   per-host-lane Gateway descriptor map (GATEWAY_LANE_DESCRIPTORS) with
+ *   exactly one fail-closed selector (gatewayDescriptorForLane). The
+ *   legacy global Gateway constants/fields remain ONLY as transitional
+ *   aliases derived from the historical descriptor so untouched B/C
+ *   consumers keep compiling; they MUST NOT participate in lane
+ *   selection. Lane support claims (supportedLanes/gatedLanes) are NOT
+ *   changed by A: v0.1.0 remains Linux-only, darwin lanes stay gated.
  */
 export const PI_SHUTTLE_VERSION = '0.1.0';
-export const GATEWAY_PACKAGE_VERSION = '0.1.0';
-export const GATEWAY_PS1_BASELINE_COMMIT = '55f764290a4567a20557f1db19d2a6fb97572a97';
-export const GATEWAY_DEPENDENCIES: Readonly<Record<string, string>> = {
-  '@modelcontextprotocol/server': '2.0.0',
-  'ajv': '8.20.0',
-  'zod': '4.4.3',
-};
 export const PI_GUARD_VERSION = '0.1.2';
 export const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
 /** pi-guard release tag at the pinned commit (release-envelope binding). */
@@ -61,9 +64,174 @@ export const DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22';
 /** darwin Intel/x64 lane (PS-6I, Gateway ADR-043): retained; NOT a v0.1.0 claim (deferred). */
 export const DARWIN_X86_64_HOST_LANE = 'darwin-x86_64-posix-utf8-node22';
 
+// ─── ADR-002 A: per-host-lane Gateway distribution descriptors ────────────
+
+/**
+ * One Gateway distribution identity for one accepted host lane
+ * (product-contract §6.1 / ADR-002). Exactly eight mandatory fields —
+ * a descriptor with any field missing, empty, or malformed is invalid
+ * and must never be selected.
+ */
+export interface GatewayLaneDescriptor {
+  readonly repository: string;
+  /** Full 40-hex source-closure commit (never a branch/tag/floating ref). */
+  readonly commit: string;
+  readonly version: string;
+  readonly packageName: string;
+  /** npm-pack tarball filename (hyphen form) in the artifact directory. */
+  readonly artifactFileName: string;
+  /**
+   * null = artifact NOT yet release-materialized. A null digest is an
+   * identity claim only: the descriptor must never be treated as a
+   * verified or downloadable artifact. 64-hex once computed at release.
+   */
+  readonly artifactSha256: string | null;
+  readonly binName: string;
+  readonly dependencies: Readonly<Record<string, string>>;
+}
+
+/** The exact dependency pins shared by every Gateway descriptor (product-contract §6). */
+const GATEWAY_DEPENDENCY_PINS: Readonly<Record<string, string>> = Object.freeze({
+  '@modelcontextprotocol/server': '2.0.0',
+  'ajv': '8.20.0',
+  'zod': '4.4.3',
+});
+
+/** The exact dependency package names a Gateway descriptor may declare (frozen; ADR-002 A strictness). */
+export const GATEWAY_DEPENDENCY_PACKAGES: readonly string[] = Object.freeze(Object.keys(GATEWAY_DEPENDENCY_PINS));
+
+/**
+ * Historical Gateway descriptor (`mfx-labs/project-gateway`): the identity
+ * for the linux and darwin-arm64 lanes, byte-for-byte preserved from the
+ * pre-ADR-002 global pins. Unchanged by this domain.
+ */
+export const HISTORICAL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freeze({
+  repository: 'mfx-labs/project-gateway',
+  commit: '55f764290a4567a20557f1db19d2a6fb97572a97',
+  version: '0.1.0',
+  packageName: '@project-gateway/artifact-core',
+  artifactFileName: 'project-gateway-artifact-core-0.1.0.tgz',
+  artifactSha256: null,
+  binName: 'project-gateway-mcp',
+  dependencies: GATEWAY_DEPENDENCY_PINS,
+});
+
+/**
+ * macOS Intel fork descriptor (`mfx-labs/project-gateway-macos`): the
+ * identity for the darwin-x86_64 lane only, bound to the PGM-DIST-1
+ * locally baselined commit (packaging boundary closed; MAC-4 Intel
+ * runtime accepted). Arm64 NEVER uses this descriptor.
+ */
+export const MACOS_INTEL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freeze({
+  repository: 'mfx-labs/project-gateway-macos',
+  commit: 'b6b50965ebd39aaebd0fa62c3e2ad7eb0f601af1',
+  version: '0.1.0',
+  packageName: '@project-gateway/macos-core',
+  artifactFileName: 'project-gateway-macos-core-0.1.0.tgz',
+  artifactSha256: null,
+  binName: 'project-gateway-macos-mcp',
+  dependencies: GATEWAY_DEPENDENCY_PINS,
+});
+
+/** The authoritative per-host-lane Gateway descriptor map (ADR-002; the ONLY lane-selection authority). */
+export const GATEWAY_LANE_DESCRIPTORS: Readonly<Record<string, GatewayLaneDescriptor>> = Object.freeze({
+  [LINUX_HOST_LANE]: HISTORICAL_GATEWAY_DESCRIPTOR,
+  [DARWIN_ARM64_HOST_LANE]: HISTORICAL_GATEWAY_DESCRIPTOR,
+  [DARWIN_X86_64_HOST_LANE]: MACOS_INTEL_GATEWAY_DESCRIPTOR,
+});
+
+/** The closed mandatory field set: exactly eight own enumerable fields. */
+const GATEWAY_DESCRIPTOR_FIELDS = Object.freeze(['repository', 'commit', 'version', 'packageName', 'artifactFileName', 'artifactSha256', 'binName', 'dependencies'] as const);
+const GATEWAY_DESCRIPTOR_STRING_FIELDS = Object.freeze(['repository', 'commit', 'version', 'packageName', 'artifactFileName', 'binName'] as const);
+const GATEWAY_DESCRIPTOR_FIELD_SET: ReadonlySet<string> = new Set(GATEWAY_DESCRIPTOR_FIELDS);
+
+/**
+ * Mandatory-field validation (fail-closed predicate). A descriptor is
+ * valid ONLY when it carries exactly the eight mandatory own enumerable
+ * fields (missing fields AND unexpected extra fields are both refused),
+ * all string fields are non-empty, commit is 40-hex, artifactSha256 is
+ * null or 64-hex, and `dependencies` is a plain non-array object whose
+ * keys are exactly the expected dependency package names with non-empty
+ * string values.
+ */
+export function isValidGatewayLaneDescriptor(value: unknown): value is GatewayLaneDescriptor {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const record = value as Readonly<Record<string, unknown>>;
+  // Exactly eight own enumerable fields — no missing, no extra.
+  const keys = Object.keys(record);
+  if (keys.length !== GATEWAY_DESCRIPTOR_FIELDS.length || !keys.every((key) => GATEWAY_DESCRIPTOR_FIELD_SET.has(key))) return false;
+  for (const field of GATEWAY_DESCRIPTOR_STRING_FIELDS) {
+    const v = record[field];
+    if (typeof v !== 'string' || v.length === 0) return false;
+  }
+  if (!(record['commit'] as string).match(/^[0-9a-f]{40}$/)) return false;
+  const sha = record['artifactSha256'];
+  if (sha !== null && (typeof sha !== 'string' || !sha.match(/^[0-9a-f]{64}$/))) return false;
+  // dependencies: plain non-array object; keys exactly the expected
+  // package names; values non-empty strings. Arrays fail here even
+  // though typeof [] === "object".
+  const deps = record['dependencies'];
+  if (typeof deps !== 'object' || deps === null || Array.isArray(deps)) return false;
+  const depKeys = Object.keys(deps);
+  if (depKeys.length !== GATEWAY_DEPENDENCY_PACKAGES.length || !depKeys.every((key) => GATEWAY_DEPENDENCY_PACKAGES.includes(key))) return false;
+  if (Object.entries(deps as Readonly<Record<string, unknown>>).some(([, v]) => typeof v !== 'string' || v.length === 0)) return false;
+  return true;
+}
+
+export type GatewayDescriptorResult =
+  | { readonly ok: true; readonly descriptor: GatewayLaneDescriptor }
+  | { readonly ok: false; readonly code: 'ERR-MANIFEST-NO-GATEWAY-LANE' | 'ERR-MANIFEST-INVALID-GATEWAY-DESCRIPTOR'; readonly message: string };
+
+/**
+ * Fail-closed Gateway identity selection for an accepted host lane.
+ * NEVER falls back to another lane: an unbound lane or a malformed
+ * descriptor is a typed refusal. A descriptor with artifactSha256 null
+ * is returned as identity only — consumers must never treat it as a
+ * verified or downloadable artifact.
+ */
+export function gatewayDescriptorForLane(lane: string): GatewayDescriptorResult {
+  const descriptor = GATEWAY_LANE_DESCRIPTORS[lane];
+  if (descriptor === undefined) {
+    return {
+      ok: false,
+      code: 'ERR-MANIFEST-NO-GATEWAY-LANE',
+      message: `no Gateway distribution descriptor is bound for host lane ${JSON.stringify(lane)}; bound lanes: ${Object.keys(GATEWAY_LANE_DESCRIPTORS).join(', ')}`,
+    };
+  }
+  if (!isValidGatewayLaneDescriptor(descriptor)) {
+    return {
+      ok: false,
+      code: 'ERR-MANIFEST-INVALID-GATEWAY-DESCRIPTOR',
+      message: `the Gateway distribution descriptor bound for host lane ${lane} is malformed; refusing to select it`,
+    };
+  }
+  return { ok: true, descriptor };
+}
+
+// ─── Transitional legacy aliases (ADR-002 A) ──────────────────────────────
+//
+// Derived EXCLUSIVELY from HISTORICAL_GATEWAY_DESCRIPTOR so untouched B/C
+// consumers keep compiling with byte-identical values. They MUST NOT
+// participate in lane selection — gatewayDescriptorForLane is the only
+// selector. Remaining consumers to migrate in later domains:
+//   - src/installer/install.ts        (GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT)
+//   - src/installer/release/envelope.ts (GATEWAY_DEPENDENCIES, GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT, COMPATIBILITY_MANIFEST gateway fields)
+//   - src/command/doctor.ts           (GATEWAY_PACKAGE_VERSION; GATEWAY_PACKAGE_NAME is local to components.ts)
+//   - src/command/help.ts             (versionText: GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT — lane-unaware until B/C)
+//   - src/installer/components.ts     (own local GATEWAY_PACKAGE_NAME / GATEWAY_ARTIFACT_FILE constants — not manifest-derived)
+//   - tests: manifest.test.ts, installer-flow.test.ts, doctor.test.ts, release-*.test.ts
+export const GATEWAY_PACKAGE_VERSION = HISTORICAL_GATEWAY_DESCRIPTOR.version;
+export const GATEWAY_PS1_BASELINE_COMMIT = HISTORICAL_GATEWAY_DESCRIPTOR.commit;
+export const GATEWAY_DEPENDENCIES = HISTORICAL_GATEWAY_DESCRIPTOR.dependencies;
+
 /** The closed compatibility-manifest shape (product-contract §6). */
 export interface CompatibilityManifest {
   readonly piShuttle: string;
+  /**
+   * TRANSITIONAL (ADR-002 A): legacy global Gateway identity fields,
+   * derived from HISTORICAL_GATEWAY_DESCRIPTOR for untouched B/C
+   * consumers. NOT lane-selection authority — `gatewayLanes` is.
+   */
   readonly gateway: string;
   readonly gatewayCommit: string;
   /** Computed at release (PS-3/PS-8); null = not yet known (truthful). */
@@ -82,23 +250,26 @@ export interface CompatibilityManifest {
   readonly supportedLanes: readonly string[];
   /** Host lanes targeted but NOT claimed (darwin lanes are gated behind the Gateway Darwin controlled-write correction). */
   readonly gatedLanes: readonly string[];
+  /** Per-host-lane Gateway distribution descriptors (ADR-002; the lane-selection authority). */
+  readonly gatewayLanes: Readonly<Record<string, GatewayLaneDescriptor>>;
 }
 
 /** The single pinned manifest. Frozen; the only claim source. */
 export const COMPATIBILITY_MANIFEST: CompatibilityManifest = Object.freeze({
   piShuttle: PI_SHUTTLE_VERSION,
-  gateway: GATEWAY_PACKAGE_VERSION,
-  gatewayCommit: GATEWAY_PS1_BASELINE_COMMIT,
-  gatewayArtifactSha256: null,
+  gateway: HISTORICAL_GATEWAY_DESCRIPTOR.version,
+  gatewayCommit: HISTORICAL_GATEWAY_DESCRIPTOR.commit,
+  gatewayArtifactSha256: HISTORICAL_GATEWAY_DESCRIPTOR.artifactSha256,
   piGuard: PI_GUARD_VERSION,
   piGuardCommit: PI_GUARD_COMMIT,
   piGuardArtifactSha256: null,
   piCompatibilityBaseline: PI_COMPATIBILITY_BASELINE,
   node: NODE_LANE_VERSION,
   git: GIT_LANE_VERSION,
-  gatewayDependencies: Object.freeze({ ...GATEWAY_DEPENDENCIES }),
+  gatewayDependencies: HISTORICAL_GATEWAY_DESCRIPTOR.dependencies,
   configurationVersion: CONFIGURATION_VERSION,
   configFormatVersion: CONFIG_FORMAT_VERSION,
   supportedLanes: Object.freeze([LINUX_HOST_LANE]),
   gatedLanes: Object.freeze([DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
+  gatewayLanes: GATEWAY_LANE_DESCRIPTORS,
 });
