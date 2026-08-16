@@ -29,14 +29,15 @@ import { existsSync, mkdirSync, readlinkSync, rmSync, symlinkSync } from 'node:f
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireLock, releaseLock } from '../persistence/lock.js';
-import { GATEWAY_PS1_BASELINE_COMMIT, GATEWAY_PACKAGE_VERSION, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { gatewayDescriptorForLane, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import type { GatewayLaneDescriptor } from '../compat/manifest.js';
 import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
 import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, checkTarPresent, classifyPiVersion, ensureWritableLayout, PI_RUNTIME_POLICY } from './preflight.js';
 import { runProcess, resolveExecutable } from './process.js';
-import { activatePackageRoot, componentDirName, extractArtifact, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, validateBinPath, verifyIdentity, GATEWAY_PACKAGE_NAME, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME } from './components.js';
-import type { ComponentResult, GatewayInstallResult, PiGuardInstallResult } from './components.js';
+import { activatePackageRoot, componentDirName, extractArtifact, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, validateBinPath, verifyIdentity, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME } from './components.js';
+import type { ComponentResult, GatewayComponentIdentity, GatewayInstallResult, PiGuardInstallResult } from './components.js';
 import { scanArtifactMembers } from './archive.js';
 import { findPackageRoot, readPackageIdentity } from './artifact.js';
 import { newReceipt, readReceipt, writeReceipt } from './receipt.js';
@@ -168,12 +169,46 @@ export function rollback(attempt: InstallAttempt): RollbackReport {
   };
 }
 
+/**
+ * C1: build the gateway receipt entry from the SELECTED per-lane
+ * descriptor — receipt version/commit are the descriptor's values, never
+ * the historical constants. Pure; exported for focused receipt tests.
+ */
+export function gatewayReceiptEntryFromResult(descriptor: GatewayLaneDescriptor, result: GatewayInstallResult): GatewayReceiptEntry {
+  return {
+    status: result.status,
+    version: descriptor.version,
+    commit: descriptor.commit,
+    commitVerified: false,
+    digestVerified: result.digestVerified,
+    artifactSha256: result.artifactSha256,
+    installPath: result.installPath,
+    binPath: result.binPath,
+    smoke: result.smoke,
+  };
+}
+
 /** Run the install flow. Pure orchestration; all I/O is installer-owned. */
 export async function runInstall(env: HostEnvironment, options: InstallOptions): Promise<InstallOutcome> {
   // 1. Platform/architecture lane.
   const laneCheck = checkPlatformLane(env);
   if (!laneCheck.ok) return { kind: 'UNSUPPORTED', reason: laneCheck.message };
   const lane = hostLane(env.platform, env.arch);
+
+  // C1: resolve the per-lane Gateway identity BEFORE any component
+  // decision. gatewayDescriptorForLane() is the ONLY lane-selection
+  // authority; a missing/invalid/unmapped identity fails closed here,
+  // before installing or reconciling any Gateway component.
+  const descriptorResult = gatewayDescriptorForLane(lane);
+  if (!descriptorResult.ok) {
+    return { kind: 'REFUSED', reason: `gateway identity is not bound for host lane ${lane} (${descriptorResult.code}); refusing before any component consumption` };
+  }
+  const gatewayDescriptor = descriptorResult.descriptor;
+  const gatewayIdentity: GatewayComponentIdentity = {
+    packageName: gatewayDescriptor.packageName,
+    artifactFileName: gatewayDescriptor.artifactFileName,
+    binName: gatewayDescriptor.binName,
+  };
 
   // 2. Node lane (the running interpreter is the installer's node).
   const nodeCheck = checkNodeLane();
@@ -208,14 +243,14 @@ export async function runInstall(env: HostEnvironment, options: InstallOptions):
     return { kind: 'REFUSED', reason: installLock.message };
   }
   try {
-    return await runInstallLocked(env, options, lane, attempt);
+    return await runInstallLocked(env, options, lane, gatewayDescriptor, gatewayIdentity, attempt);
   } finally {
     releaseLock(installLock.fd, installLockPath);
   }
 }
 
 /** The locked install body: all state decisions and mutations happen here. */
-async function runInstallLocked(env: HostEnvironment, options: InstallOptions, lane: string, attempt: InstallAttempt): Promise<InstallOutcome> {
+async function runInstallLocked(env: HostEnvironment, options: InstallOptions, lane: string, gatewayDescriptor: GatewayLaneDescriptor, gatewayIdentity: GatewayComponentIdentity, attempt: InstallAttempt): Promise<InstallOutcome> {
   const layout = attempt.layout;
 
   // Existing receipt state: foreign/incompatible receipts fail closed
@@ -363,12 +398,13 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   attempt.binLinkTarget = binLinkTarget;
   let gatewayResult: GatewayInstallResult | undefined;
   if (options.selections.gateway) {
-    const gatewayTarget = join(layout.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, GATEWAY_PACKAGE_VERSION));
+    const gatewayTarget = join(layout.packagesDir, componentDirName(gatewayIdentity.packageName, gatewayDescriptor.version));
     attempt.rollbackCandidates.push({ path: gatewayTarget, preExisting: existsSync(gatewayTarget) });
     const gateway = await installGatewayComponent({
       context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectGatewaySha256, platform: env.platform, pathEnv: env.pathEnv },
-      expectedVersion: GATEWAY_PACKAGE_VERSION,
-      expectedCommit: GATEWAY_PS1_BASELINE_COMMIT,
+      expectedVersion: gatewayDescriptor.version,
+      expectedCommit: gatewayDescriptor.commit,
+      identity: gatewayIdentity,
       tarExecutable: tar,
     });
     if (!gateway.ok) {
@@ -434,8 +470,8 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   // recorded — the receipt never disagrees with what is installed.
   const notes: string[] = [];
   if (gatewayResult === undefined && !options.selections.gateway) {
-    const gatewayTarget = join(layout.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, GATEWAY_PACKAGE_VERSION));
-    const inspected = await inspectExistingGateway(gatewayTarget, process.execPath);
+    const gatewayTarget = join(layout.packagesDir, componentDirName(gatewayIdentity.packageName, gatewayDescriptor.version));
+    const inspected = await inspectExistingGateway(gatewayTarget, process.execPath, gatewayIdentity, gatewayDescriptor.version);
     if (!inspected.ok) return { kind: 'REFUSED', reason: inspected.message };
     if (inspected.value !== null) {
       const priorEntry = prior.ok ? prior.receipt.components.gateway : null;
@@ -480,7 +516,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   }
 
   const omitted: string[] = [];
-  if (gatewayResult === undefined) omitted.push('project-gateway-mcp');
+  if (gatewayResult === undefined) omitted.push(gatewayIdentity.binName);
   if (piGuardResult === undefined) omitted.push('pi-guard');
   const notesForDigest: string[] = [];
   let allSelectedVerified = true;
@@ -505,17 +541,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   const result = omitted.length === 0 && allSelectedVerified ? 'COMPLETE' : 'PARTIAL';
 
   // Receipt — written LAST, only for finalized states.
-  const gatewayEntry: GatewayReceiptEntry | null = gatewayResult === undefined ? null : {
-    status: gatewayResult.status,
-    version: GATEWAY_PACKAGE_VERSION,
-    commit: GATEWAY_PS1_BASELINE_COMMIT,
-    commitVerified: false,
-    digestVerified: gatewayResult.digestVerified,
-    artifactSha256: gatewayResult.artifactSha256,
-    installPath: gatewayResult.installPath,
-    binPath: gatewayResult.binPath,
-    smoke: gatewayResult.smoke,
-  };
+  const gatewayEntry: GatewayReceiptEntry | null = gatewayResult === undefined ? null : gatewayReceiptEntryFromResult(gatewayDescriptor, gatewayResult);
   const piGuardEntry: PiGuardReceiptEntry | null = piGuardResult === undefined ? null : {
     status: piGuardResult.status,
     version: PI_GUARD_VERSION,

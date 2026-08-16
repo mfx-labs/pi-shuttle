@@ -184,9 +184,29 @@ function cleanupReservation(targetDir: string): void {
 
 // ─── Gateway component ────────────────────────────────────────────────────
 
+/**
+ * Historical legacy Gateway identity (pre-ADR-002). Retained ONLY as a
+ * compatibility export for lane-unaware out-of-scope consumers
+ * (doctor/help/release envelope — migrated in C3). The installer flow
+ * (C1) MUST NEVER consume these for installation: every consumption point
+ * derives from the per-lane descriptor selected by
+ * `gatewayDescriptorForLane()` (see GatewayComponentIdentity).
+ */
 export const GATEWAY_PACKAGE_NAME = '@project-gateway/artifact-core';
-/** Real npm-pack artifact name (hyphen form; SIR-PS3-004). */
+/** Real npm-pack artifact name (hyphen form; SIR-PS3-004) — historical lane only. */
 export const GATEWAY_ARTIFACT_FILE = 'project-gateway-artifact-core-0.1.0.tgz';
+
+/**
+ * C1: the Gateway identity the installer consumes, derived EXCLUSIVELY
+ * from the per-lane descriptor selected by `gatewayDescriptorForLane()`.
+ * The installer flow never consults the historical constants above; the
+ * descriptor is the only authority (ADR-002 A).
+ */
+export interface GatewayComponentIdentity {
+  readonly packageName: string;
+  readonly artifactFileName: string;
+  readonly binName: string;
+}
 
 /** pi-shuttle's own package name (release-lane self-activation). */
 export const PI_SHUTTLE_PACKAGE_NAME = 'pi-shuttle';
@@ -206,6 +226,8 @@ export interface GatewayInput {
   readonly context: ComponentInstallContext;
   readonly expectedVersion: string;
   readonly expectedCommit: string;
+  /** C1: selected per-lane identity (package/artifact/bin); never the historical constants. */
+  readonly identity: GatewayComponentIdentity;
   readonly tarExecutable: string;
 }
 
@@ -218,9 +240,9 @@ export interface GatewayInput {
  */
 export async function installGatewayComponent(input: GatewayInput): Promise<ComponentResult<GatewayInstallResult>> {
   const spec: ComponentArtifactSpec = {
-    name: GATEWAY_PACKAGE_NAME,
+    name: input.identity.packageName,
     version: input.expectedVersion,
-    fileName: GATEWAY_ARTIFACT_FILE,
+    fileName: input.identity.artifactFileName,
     expectedSha256: input.context.expectedSha256,
   };
   const artifact = await verifyArtifactFile(input.context.artifactDir, spec);
@@ -235,17 +257,17 @@ export async function installGatewayComponent(input: GatewayInput): Promise<Comp
   const extracted = await extractArtifact(artifact.value.path, input.context.stagingDir, 'gateway', input.tarExecutable);
   if (!extracted.ok) return extracted;
   const root = findPackageRoot(extracted.value);
-  const identityResult = verifyIdentity(root === null ? null : readPackageIdentity(root), GATEWAY_PACKAGE_NAME, input.expectedVersion, 'gateway');
+  const identityResult = verifyIdentity(root === null ? null : readPackageIdentity(root), input.identity.packageName, input.expectedVersion, 'gateway');
   if (!identityResult.ok) return identityResult;
   const identity = identityResult.value;
 
-  // Bin surface: the package must declare a `project-gateway-mcp` bin; the
-  // path is UNTRUSTED artifact content (SIR-PS3-003) and must resolve
+  // Bin surface: the package must declare the SELECTED descriptor's bin;
+  // the path is UNTRUSTED artifact content (SIR-PS3-003) and must resolve
   // strictly inside the package root to a regular file (lstat — never a
   // symlink/FIFO/device, never opened speculatively).
-  const binRelativeRaw = identity.bin['project-gateway-mcp'];
+  const binRelativeRaw = identity.bin[input.identity.binName];
   if (binRelativeRaw === undefined) {
-    return { ok: false, code: 'ERR-PS3-GATEWAY-BIN', message: 'gateway artifact does not declare the project-gateway-mcp bin' };
+    return { ok: false, code: 'ERR-PS3-GATEWAY-BIN', message: `gateway artifact does not declare the ${input.identity.binName} bin` };
   }
   const binCheck = validateBinPath(binRelativeRaw, root ?? extracted.value);
   if (!binCheck.ok) return binCheck;
@@ -255,10 +277,10 @@ export async function installGatewayComponent(input: GatewayInput): Promise<Comp
     return { ok: false, code: 'ERR-PS3-GATEWAY-BIN', message: `gateway bin file is missing or not a regular file: ${stagingBinPath}` };
   }
 
-  const targetDir = join(input.context.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, input.expectedVersion));
+  const targetDir = join(input.context.packagesDir, componentDirName(input.identity.packageName, input.expectedVersion));
   const verifyExisting = (existingRoot: string): ComponentResult<unknown> => {
     const existing = readPackageIdentity(existingRoot);
-    if (existing === null || existing.name !== GATEWAY_PACKAGE_NAME || existing.version !== input.expectedVersion) {
+    if (existing === null || existing.name !== input.identity.packageName || existing.version !== input.expectedVersion) {
       return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway installation at ${existingRoot} has incompatible identity; refusing to touch it` };
     }
     return { ok: true, value: undefined };
@@ -472,24 +494,37 @@ export function removeStaging(stagingDir: string): void {
 
 /**
  * Inspect an EXISTING gateway installation without modifying it: identity
- * (name/version), bin-path confinement, and a bounded `--help` smoke
- * against the activated bin. Used when the operator did not select the
- * gateway so the receipt still describes the ACTUAL final component state.
- * Returns null when the target is absent; fails closed with
+ * (name/version must EXACTLY match the selected descriptor identity —
+ * never inferred from the target directory name, the bin presence, or
+ * historical constants), bin-path confinement, and a bounded `--help`
+ * smoke against the activated bin. Used when the operator did not select
+ * the gateway so the receipt still describes the ACTUAL final component
+ * state. Returns null when the target is absent; fails closed with
  * ERR-PS3-EXISTING-FOREIGN when the target exists with incompatible
  * identity.
  */
-export async function inspectExistingGateway(targetDir: string, nodeExecutable: string): Promise<ComponentResult<{ readonly present: true; readonly status: 'installed-verified' | 'installed-unverified'; readonly installPath: string; readonly binPath: string; readonly smoke: 'passed' | 'not-run' } | null>> {
-  const identity = readPackageIdentity(targetDir);
-  if (identity === null) {
+export async function inspectExistingGateway(targetDir: string, nodeExecutable: string, identity: GatewayComponentIdentity, expectedVersion: string): Promise<ComponentResult<{ readonly present: true; readonly status: 'installed-verified' | 'installed-unverified'; readonly installPath: string; readonly binPath: string; readonly smoke: 'passed' | 'not-run' } | null>> {
+  const identityRead = readPackageIdentity(targetDir);
+  if (identityRead === null) {
     if (existsSync(targetDir)) {
       return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway installation at ${targetDir} has incompatible identity; refusing to touch it` };
     }
     return { ok: true, value: null };
   }
-  const binRaw = identity.bin['project-gateway-mcp'];
+  // C1 correction: the installed package metadata must EXACTLY match the
+  // selected descriptor (name + version) before reconciliation may accept
+  // it. Fail closed on any mismatch — identity is proven from package
+  // metadata only, never from the directory name or the bin's presence.
+  if (identityRead.name !== identity.packageName || identityRead.version !== expectedVersion) {
+    return {
+      ok: false,
+      code: 'ERR-PS3-EXISTING-FOREIGN',
+      message: `existing gateway installation at ${targetDir} has incompatible identity: expected ${identity.packageName}@${expectedVersion}, found ${identityRead.name}@${identityRead.version}; refusing to touch it`,
+    };
+  }
+  const binRaw = identityRead.bin[identity.binName];
   if (binRaw === undefined) {
-    return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway installation at ${targetDir} does not declare the project-gateway-mcp bin; refusing to touch it` };
+    return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway installation at ${targetDir} does not declare the ${identity.binName} bin; refusing to touch it` };
   }
   const binCheck = validateBinPath(binRaw, targetDir);
   if (!binCheck.ok) return binCheck;

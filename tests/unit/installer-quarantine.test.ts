@@ -19,7 +19,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { stripQuarantineAttribute, quarantinePresent, QUARANTINE_ATTRIBUTE } from '../../src/installer/quarantine.js';
-import { installGatewayComponent } from '../../src/installer/components.js';
+import { GATEWAY_ARTIFACT_FILE, GATEWAY_PACKAGE_NAME, installGatewayComponent } from '../../src/installer/components.js';
 import { buildTarball, cleanupEnv, gatewayFixtureFiles, GATEWAY_ARTIFACT_NAME } from '../helpers/installer-fixtures.js';
 import { resolveExecutable } from '../../src/process/runner.js';
 
@@ -179,6 +179,7 @@ test('quarantine: component digest mismatch never reaches the quarantine stage (
       },
       expectedVersion: '0.1.0',
       expectedCommit: '7f3b4afdb43704e7dac82da7b086d8367347c641',
+      identity: { packageName: GATEWAY_PACKAGE_NAME, artifactFileName: GATEWAY_ARTIFACT_FILE, binName: 'project-gateway-mcp' },
       tarExecutable: resolveExecutable('tar')!,
     });
     assert.equal(result.ok, false);
@@ -212,6 +213,7 @@ test('quarantine: darwin component install strips the attribute after digest ver
       },
       expectedVersion: '0.1.0',
       expectedCommit: '7f3b4afdb43704e7dac82da7b086d8367347c641',
+      identity: { packageName: GATEWAY_PACKAGE_NAME, artifactFileName: GATEWAY_ARTIFACT_FILE, binName: 'project-gateway-mcp' },
       tarExecutable: resolveExecutable('tar')!,
     });
     assert.equal(result.ok, true, JSON.stringify(result));
