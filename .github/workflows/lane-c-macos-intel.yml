@@ -9,12 +9,18 @@
 # green), direct executable/package checks, exact Git 2.45.4 provisioning
 # (digest-pinned kernel.org source, built version asserted), volume
 # case-sensitivity record, and the real-stack subsection built on the
-# runner from the EXACT component source commits (mfx-labs/project-gateway @
-# 55f764290a4567a20557f1db19d2a6fb97572a97 (PS-6I local baseline), mfx-labs/pi-guard @
-# 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2) via the committed
-# scripts/prepare-fixtures.sh boundary — no external fixture hosting, no
-# fixture_source input, no curl fixture download, no secrets (both
-# component repositories are public).
+# runner from the EXACT component source commits — the macOS Intel Gateway
+# fork (mfx-labs/project-gateway-macos @
+# a90284b06420effb1ec1eeef14e7ed82e02c64e9 = PGM-DIST-1 pinned
+# provenance-complete Git-tree candidate; the historical
+# mfx-labs/project-gateway pin is NEVER used
+# by Lane C) and mfx-labs/pi-guard @
+# 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2 — via the committed
+# scripts/prepare-fixtures.sh boundary with the lane passed EXPLICITLY
+# (--lane darwin-x86_64-posix-utf8-node22) and the C3B1 real-stack
+# handshake lane propagated EXPLICITLY (GATEWAY_LANE) — never ambient or
+# defaulted. No external fixture hosting, no fixture_source input, no curl
+# fixture download, no secrets (both component repositories are public).
 #
 # Component identities are repository-owned constants (this file), never
 # user-supplied workflow_dispatch refs; the checked-out HEAD of every
@@ -35,7 +41,13 @@ permissions:
 
 env:
   # Repository-owned exact component pins (PS-6 public multi-repo lane).
-  GATEWAY_COMMIT: 55f764290a4567a20557f1db19d2a6fb97572a97
+  # Lane C Gateway: the macOS Intel fork at the PGM-DIST-1 pinned
+  # provenance-complete Git-tree candidate commit (the first whose Git
+  # tree carries the tracked darwin-x64 addon required by the Intel
+  # runtime boundary). CI wiring consumes technical identity only —
+  # never a release, availability, or support claim. The checked-out
+  # fork HEAD is asserted against this pin before use.
+  GATEWAY_COMMIT: a90284b06420effb1ec1eeef14e7ed82e02c64e9
   PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
@@ -163,11 +175,16 @@ jobs:
 
       # Exact public component checkouts — full-SHA-pinned refs, never
       # branches/tags as authority. Public repositories: no credentials.
+      # Lane C materializes ONLY the macOS Intel fork at the pinned
+      # PGM-DIST-1 provenance-complete Git-tree commit (fetched from the
+      # public remote — an operational Git fact, not a release claim).
+      # The historical Gateway repository is never checked out by this
+      # lane.
       - name: Checkout Gateway exact commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: mfx-labs/project-gateway
-          ref: 55f764290a4567a20557f1db19d2a6fb97572a97
+          repository: mfx-labs/project-gateway-macos
+          ref: a90284b06420effb1ec1eeef14e7ed82e02c64e9
           path: gateway
           persist-credentials: false
 
@@ -183,7 +200,9 @@ jobs:
           persist-credentials: false
 
       # Independent exact-commit assertion: git rev-parse HEAD must equal
-      # the repository-owned pin for each component (fail closed).
+      # the repository-owned pin for each component (fail closed). The
+      # checked-out fork HEAD is verified against the pinned Intel
+      # candidate commit BEFORE any fixture build or use.
       - name: Assert exact component HEADs
         run: |
           set -euo pipefail
@@ -191,22 +210,25 @@ jobs:
           PG_HEAD="$(git -C "${{ github.workspace }}/pi-guard" rev-parse HEAD)"
           test "$GW_HEAD" = "$GATEWAY_COMMIT" || { echo "gateway HEAD mismatch: expected $GATEWAY_COMMIT got $GW_HEAD" >&2; exit 1; }
           test "$PG_HEAD" = "$PI_GUARD_COMMIT" || { echo "pi-guard HEAD mismatch: expected $PI_GUARD_COMMIT got $PG_HEAD" >&2; exit 1; }
-          echo "gateway HEAD == $GW_HEAD (exact public pin)"
+          echo "gateway HEAD == $GW_HEAD (exact pinned Intel fork candidate)"
           echo "pi-guard HEAD == $PG_HEAD (exact public pin, v0.1.2)"
 
       # The committed fixture builder: the authoritative artifact-build and
       # provenance boundary. Exact checkouts → clean build/package →
       # fixture-manifest.json + SHA-256. Wrong commit / dirty checkout
-      # fails closed inside the script.
+      # fails closed inside the script. The B preparation surface receives
+      # the Intel lane EXPLICITLY (--lane); an unknown/mismatched lane
+      # fails closed instead of silently preparing the historical Gateway.
       - name: Build fixtures from exact public checkouts
         run: |
           set -euo pipefail
           bash scripts/prepare-fixtures.sh \
             --gateway-checkout "${{ github.workspace }}/gateway" \
             --pi-guard-checkout "${{ github.workspace }}/pi-guard" \
-            --out "$RUNNER_TEMP/fixtures"
+            --out "$RUNNER_TEMP/fixtures" \
+            --lane darwin-x86_64-posix-utf8-node22
           test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
-          test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
+          test -f "$RUNNER_TEMP/fixtures/project-gateway-macos-core-0.1.0.tgz"
           test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
           cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
 
@@ -226,6 +248,10 @@ jobs:
           "$RUNNER_TEMP/pi-lane/node_modules/.bin/pi" --version
           test -f "$RUNNER_TEMP/pi-lane/node_modules/@earendil-works/pi-coding-agent/dist/core/extensions/loader.js"
 
+      # The C3B1 real-stack / handshake surface receives the Intel lane
+      # EXPLICITLY (GATEWAY_LANE): the sole identity selector of the
+      # exact-nine MCP handshake probe. Never ambient, never defaulted;
+      # an unknown/mismatched lane fails closed in the script/probe.
       - name: Real-stack evidence (installer → lifecycle → MCP → pi-guard)
         env:
           EVIDENCE_LABEL: "LANE C"
@@ -238,4 +264,5 @@ jobs:
           NODE_BIN: "${{ runner.temp }}/node/bin/node"
           GATEWAY_COMMIT: "${{ env.GATEWAY_COMMIT }}"
           PI_GUARD_COMMIT: "${{ env.PI_GUARD_COMMIT }}"
+          GATEWAY_LANE: darwin-x86_64-posix-utf8-node22
         run: bash scripts/ci-lane-b-real-stack.sh
