@@ -119,12 +119,13 @@ export const HISTORICAL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freez
 /**
  * macOS Intel fork descriptor (`mfx-labs/project-gateway-macos`): the
  * identity for the darwin-x86_64 lane only, bound to the PGM-DIST-1
- * locally baselined commit (packaging boundary closed; MAC-4 Intel
+ * provenance-complete commit — the first whose Git tree contains the
+ * accepted tracked x64 addon (packaging boundary closed; MAC-4 Intel
  * runtime accepted). Arm64 NEVER uses this descriptor.
  */
 export const MACOS_INTEL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freeze({
   repository: 'mfx-labs/project-gateway-macos',
-  commit: 'b6b50965ebd39aaebd0fa62c3e2ad7eb0f601af1',
+  commit: 'a90284b06420effb1ec1eeef14e7ed82e02c64e9',
   version: '0.1.0',
   packageName: '@project-gateway/macos-core',
   artifactFileName: 'project-gateway-macos-core-0.1.0.tgz',

@@ -74,7 +74,7 @@ test('darwin-x86_64 resolves ONLY to the macOS fork descriptor', () => {
     assert.equal(result.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR);
     assert.deepEqual({ ...result.descriptor, dependencies: { ...result.descriptor.dependencies } }, {
       repository: 'mfx-labs/project-gateway-macos',
-      commit: 'b6b50965ebd39aaebd0fa62c3e2ad7eb0f601af1',
+      commit: 'a90284b06420effb1ec1eeef14e7ed82e02c64e9',
       version: '0.1.0',
       packageName: '@project-gateway/macos-core',
       artifactFileName: 'project-gateway-macos-core-0.1.0.tgz',

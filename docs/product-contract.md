@@ -192,7 +192,7 @@ Contracted per-lane bindings:
 - `darwin-arm64-posix-utf8-node22` → historical `mfx-labs/project-gateway`
   (values above; UNCHANGED — the macOS fork is never selected for arm64).
 - `darwin-x86_64-posix-utf8-node22` → `mfx-labs/project-gateway-macos`,
-  commit `def4cef9a33ac5ced655d18c7a56ba2d8031a311`, version `0.1.0`,
+  commit `a90284b06420effb1ec1eeef14e7ed82e02c64e9`, version `0.1.0`,
   package `@project-gateway/macos-core`, artifact
   `project-gateway-macos-core-0.1.0.tgz`, bin `project-gateway-macos-mcp`,
   same three dependency pins.

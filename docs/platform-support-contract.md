@@ -14,7 +14,7 @@ evidence but is NOT v0.1.0 supported-product evidence.
 **Contracted distribution direction (ADR-002 — DECIDED, NOT implemented):**
 for a future macOS Intel distribution, the lane
 `darwin-x86_64-posix-utf8-node22` is bound to the accepted macOS Gateway
-fork (`mfx-labs/project-gateway-macos` @ `def4cef9a33ac5ced655d18c7a56ba2d8031a311`,
+fork (`mfx-labs/project-gateway-macos` @ `a90284b06420effb1ec1eeef14e7ed82e02c64e9`,
 package `@project-gateway/macos-core`, bin `project-gateway-macos-mcp`);
 the Linux and darwin-arm64 lanes remain bound to the historical Gateway.
 This is a contract decision only — NOT a support claim; the v0.1.0
