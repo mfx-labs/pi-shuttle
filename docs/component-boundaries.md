@@ -157,7 +157,11 @@ selected as an explicit trusted operand, plus macOS evidence gates (see
 platform-support-contract). Host lane participates in configuration
 identity → stores are lane-bound; cross-lane replay (including between
 darwin-arm64 and darwin-Intel) fails closed; stores are machine-local and
-never migrated.
+never migrated. These are Gateway-component lane mechanics (historical
+PS-6/PS-6I evidence), not pi-shuttle distribution claims: a future
+pi-shuttle Intel distribution is contracted (ADR-002) to consume the
+accepted macOS Gateway fork (`mfx-labs/project-gateway-macos`) — NOT
+implemented, not a support claim; darwin-arm64 selection is unchanged.
 
 ## 5. pi-guard: no source change required
 

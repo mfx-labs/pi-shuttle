@@ -64,7 +64,9 @@ until the omitted component is installed.
    on the current Linux host is **not** evidence and must not be claimed.
 9. Linux x86_64 is the v0.1.0 first-class target (human-approved
    Linux-only disposition); macOS arm64/Intel are deferred beyond v0.1.0
-   (PS8B-DEFECT-001) and are refused by the v0.1.0 installer.
+   (PS8B-DEFECT-001) and are refused by the v0.1.0 installer. A future
+   Intel distribution via the accepted macOS Gateway fork is CONTRACTED
+   (ADR-002) but NOT implemented — not a support claim.
 10. Default directory layout (both platforms, see platform-support-contract):
     `~/.local/share/pi-shuttle`, `~/.local/state/pi-shuttle`,
     `~/.config/pi-shuttle`, `~/.local/bin/pi-shuttle`.
@@ -158,6 +160,47 @@ pins the exact source closure for the packaged artifact; the packaged
 tarball is the pilot-proven `npm pack` artifact
 (`project-gateway-artifact-core-0.1.0.tgz` produced from the clean closure
 checkout).
+
+### 6.1 Per-lane Gateway descriptor (contracted — ADR-002; implementation NOT started)
+
+ADR-002 replaces the single global Gateway artifact identity above with a
+fail-closed per-host-lane Gateway descriptor map. This is a CONTRACTED
+model, not implemented code: until the ADR-002 implementation lands, the
+single-global shape above remains the shipped manifest model, and the
+v0.1.0 supported/refusal behavior is unchanged.
+
+Finalized descriptor shape (all fields mandatory; missing field = fail
+closed; `artifactSha256` is `null` until computed at release):
+
+```json
+{
+  "repository": "mfx-labs/project-gateway",
+  "commit": "55f764290a4567a20557f1db19d2a6fb97572a97",
+  "version": "0.1.0",
+  "packageName": "@project-gateway/artifact-core",
+  "artifactFileName": "project-gateway-artifact-core-0.1.0.tgz",
+  "artifactSha256": null,
+  "binName": "project-gateway-mcp",
+  "dependencies": { "@modelcontextprotocol/server": "2.0.0", "ajv": "8.20.0", "zod": "4.4.3" }
+}
+```
+
+Contracted per-lane bindings:
+
+- `linux-x86_64-posix-utf8-node22` → historical `mfx-labs/project-gateway`
+  (values above; UNCHANGED).
+- `darwin-arm64-posix-utf8-node22` → historical `mfx-labs/project-gateway`
+  (values above; UNCHANGED — the macOS fork is never selected for arm64).
+- `darwin-x86_64-posix-utf8-node22` → `mfx-labs/project-gateway-macos`,
+  commit `def4cef9a33ac5ced655d18c7a56ba2d8031a311`, version `0.1.0`,
+  package `@project-gateway/macos-core`, artifact
+  `project-gateway-macos-core-0.1.0.tgz`, bin `project-gateway-macos-mcp`,
+  same three dependency pins.
+
+Fail-closed: a host lane absent from the map, or a descriptor with any
+missing/mismatched identity, is refused — never another lane's identity,
+never a fallback. Fork-side prerequisite PGM-DIST-1 governs the Intel npm
+artifact packaging boundary (distribution-only; no arm64 claim).
 
 ## 7. Hard prohibitions (binding)
 

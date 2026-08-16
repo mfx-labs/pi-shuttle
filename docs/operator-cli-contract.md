@@ -49,7 +49,7 @@ Checks (minimum, in order):
 | 3 | Node | version probe >= 22.19.0 (minimum runtime; 22.23.2 is the validated CI baseline) |
 | 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version >= 2.30.0 (minimum; 2.45.4 is the validated CI baseline) |
 | 5 | Pi installation/version | `pi` discovery + version; 0.83.0 known-good; candidates >= 0.83.0 require the pi-guard compatibility probe PASS; below 0.83.0 = unsupported |
-| 6 | Project Gateway component | installed package path, manifest version match, `bin/project-gateway-mcp` executable |
+| 6 | Project Gateway component | installed package path, manifest version match, `bin/project-gateway-mcp` executable (contracted ADR-002: per-lane descriptor bin name — `project-gateway-mcp` for Linux/arm64, `project-gateway-macos-mcp` for the Intel fork lane; NOT implemented, current v0.1.0 check uses the historical bin) |
 | 7 | pi-guard component/version | Pi package store discovery (read-only), extension entry, version == 0.1.2, ADR-037 predicate spot-checks |
 | 8 | trusted store integrity/readiness | per registered project: `bootstrap` replay-style verification (or the Gateway's verification path) — INITIALIZED=ready; ABSENT=missing; PARTIAL/UNSUPPORTED_VERSION/FOREIGN=broken (fail closed, no repair) |
 | 9 | runtime configuration | `~/.config/pi-shuttle/runtime.json` parseable, closed fields, matches installed manifest, 0600 |

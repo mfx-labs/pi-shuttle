@@ -11,13 +11,24 @@ doctor reports macOS as unsupported (exit 2). Historical macOS
 engineering evidence (PS-6/PS-6I, ADR-042/043) remains valid historical
 evidence but is NOT v0.1.0 supported-product evidence.
 
+**Contracted distribution direction (ADR-002 — DECIDED, NOT implemented):**
+for a future macOS Intel distribution, the lane
+`darwin-x86_64-posix-utf8-node22` is bound to the accepted macOS Gateway
+fork (`mfx-labs/project-gateway-macos` @ `def4cef9a33ac5ced655d18c7a56ba2d8031a311`,
+package `@project-gateway/macos-core`, bin `project-gateway-macos-mcp`);
+the Linux and darwin-arm64 lanes remain bound to the historical Gateway.
+This is a contract decision only — NOT a support claim; the v0.1.0
+refusal behavior is unchanged until the fork artifact passes clean-install
+acceptance. Fork-side prerequisite: PGM-DIST-1 (npm artifact packaging
+boundary; distribution-only, no arm64 claim).
+
 ## 1. v0.1.0 support matrix (claims are evidence-bound)
 
 | Platform | Arch | Status | Evidence required |
 |---|---|---|---|
 | Linux | x86_64 | **supported** (first-class) | Lane A physical/local E2E on the exact lane |
 | macOS | arm64 (Apple Silicon) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real arm64 lane evidence (future) |
-| macOS | Intel (x86_64) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real Intel lane evidence (future) |
+| macOS | Intel (x86_64) | **deferred** (NOT supported in v0.1.0; installer refuses) | Gateway Darwin controlled-write correction + real Intel lane evidence (future); distribution contracted via `mfx-labs/project-gateway-macos` (ADR-002) — NOT started, no support claim until clean-install acceptance |
 | anything else (incl. Windows) | — | **unsupported** (installer refuses; doctor exit 2) | none |
 
 Supported lane constants (inherited, never reinterpreted):

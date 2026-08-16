@@ -181,7 +181,9 @@ so what you run is exactly what was reviewed.
 v0.1.0 currently supports Linux x86_64. macOS support is deferred while
 the Gateway controlled-write boundary is being made portable without
 weakening its security guarantees; the installer refuses macOS in
-v0.1.0.
+v0.1.0. A future macOS Intel distribution through the accepted macOS
+Gateway fork (`mfx-labs/project-gateway-macos`) is contracted (ADR-002)
+but NOT implemented — it is not a support claim.
 
 Runtime versions are minimums, not exact pins: the validated CI
 baselines (Node 22.23.2, Git 2.45.4, Pi 0.83.0) are evidence, not

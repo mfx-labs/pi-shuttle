@@ -62,6 +62,9 @@ required flags; no silent defaults in batch mode for components 1–2.
   claimed lane); macOS arm64 / macOS Intel/x86_64 → **refused in v0.1.0**
   with a message that macOS is not supported in v0.1.0 (deferred until
   the Gateway controlled-write boundary is portable; PS8B-DEFECT-001);
+  a future Intel distribution via `mfx-labs/project-gateway-macos` is
+  contracted (ADR-002) but NOT implemented — refusal unchanged until
+  clean-install acceptance;
   anything
   else → **refuse with a clear message** (do not claim support).
 - Node: minimum runtime `22.19.0`; versions at/above the minimum are
