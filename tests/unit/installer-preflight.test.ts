@@ -14,18 +14,23 @@ import { COMPATIBILITY_MANIFEST, DARWIN_X86_64_HOST_LANE, LINUX_HOST_LANE, DARWI
 
 const LINUX = { home: '/tmp/x', platform: 'linux', arch: 'x64' };
 
-test('preflight: platform lane classification — v0.1.0 supports Linux x64 only; darwin arm64/x64 and windows refused', () => {
-  assert.equal(checkPlatformLane(LINUX).ok, true, 'Linux x86_64 is the v0.1.0 supported lane');
+test('preflight: descriptor-bound Linux and Darwin targets are runtime-eligible; unknown targets fail closed', () => {
+  assert.equal(checkPlatformLane(LINUX).ok, true, 'Linux x86_64 has a valid Gateway descriptor');
   const mac = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'arm64' });
-  assert.equal(mac.ok, false, 'macOS arm64 is NOT supported in v0.1.0 (deferred)');
-  if (!mac.ok) assert.match(mac.message, /macOS .* not supported in v0\.1\.0/, 'the refusal must say macOS is not supported in v0.1.0');
+  assert.equal(mac.ok, true, 'macOS arm64 has a valid Gateway descriptor');
   const intel = checkPlatformLane({ home: '/tmp/x', platform: 'darwin', arch: 'x64' });
-  assert.equal(intel.ok, false, 'macOS Intel is NOT supported in v0.1.0 (deferred)');
-  if (!intel.ok) assert.match(intel.message, /macOS .* not supported in v0\.1\.0/, 'the refusal must say macOS is not supported in v0.1.0');
-  assert.equal(checkPlatformLane({ home: '/tmp/x', platform: 'win32', arch: 'x64' }).ok, false);
+  assert.equal(intel.ok, true, 'macOS Intel has a valid Gateway descriptor');
+  for (const target of [{ platform: 'win32', arch: 'x64' }, { platform: 'linux', arch: 'arm64' }, { platform: 'darwin', arch: 'ia32' }, { platform: '', arch: '' }]) {
+    const unknown = checkPlatformLane({ home: '/tmp/x', ...target });
+    assert.equal(unknown.ok, false, `${target.platform}/${target.arch} must fail closed`);
+    if (!unknown.ok) {
+      assert.equal(unknown.code, 'ERR-PS3-UNSUPPORTED-PLATFORM');
+      assert.ok(unknown.message.includes('ERR-MANIFEST-NO-GATEWAY-LANE'), unknown.message);
+    }
+  }
 });
 
-test('preflight: manifest claims ONLY the Linux lane; darwin lanes are gated (v0.1.0 Linux-only disposition)', () => {
+test('preflight: normative support metadata remains Linux-only and is not the runtime allowlist', () => {
   assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
   assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false);
   assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), false);

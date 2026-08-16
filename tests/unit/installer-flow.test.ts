@@ -359,6 +359,17 @@ test('installer: unsupported platform fails closed at the pure orchestration lay
   assert.equal(outcome.kind, 'UNSUPPORTED');
 });
 
+test('installer: both descriptor-bound Darwin targets enter the technical path and retain later preflight gates', async () => {
+  for (const arch of ['x64', 'arm64']) {
+    const outcome = await runInstall(
+      { home: '/tmp/unused', platform: 'darwin', arch },
+      { selections: { gateway: true, piGuard: true }, uid: 0 },
+    );
+    assert.equal(outcome.kind, 'REFUSED', `darwin/${arch} must pass platform eligibility and reach the root guard`);
+    if (outcome.kind === 'REFUSED') assert.ok(outcome.reason.includes('root privileges'), outcome.reason);
+  }
+});
+
 test('installer: interactive prompts route project configuration to deferred guidance', async () => {
   const env = makeEnv();
   try {

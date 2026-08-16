@@ -284,6 +284,27 @@ test('start: unsupported platform (windows) exits 2 without composing a Gateway 
   }
 });
 
+test('start: both descriptor-bound Darwin targets pass shared platform preflight and retain the receipt gate', async () => {
+  const env = makeEnv();
+  try {
+    const layout = resolveLayout(env);
+    const pathEnv = fixturePathEnv(env);
+    for (const arch of ['x64', 'arm64']) {
+      const outcome = await runStartCommand({
+        env: { home: env, platform: 'darwin', arch },
+        layout,
+        nodeExecutable: process.execPath,
+        pathEnv,
+      });
+      assert.equal(outcome.exitCode, 1, `darwin/${arch} must reach the later receipt gate`);
+      assert.ok(outcome.stderr.includes('ERR-PS4-RECEIPT-ABSENT'), outcome.stderr);
+      assert.ok(!outcome.stderr.includes('ERR-PS4-PREFLIGHT-PLATFORM'), outcome.stderr);
+    }
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
 test('start: no receipt refuses (fail closed; never infers from disk)', async () => {
   const env = makeEnv();
   try {

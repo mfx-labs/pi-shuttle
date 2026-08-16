@@ -8,13 +8,14 @@
  * `partial installation`.
  *
  * Probe discipline:
- *   - platform/architecture claims are manifest-bound (v0.1.0: Linux
- *     x86_64 ONLY — the darwin lanes are DEFERRED (PS8B-DEFECT-001) and
- *     reported unsupported; Windows never claimed);
+ *   - platform/architecture runtime eligibility is descriptor-bound;
+ *     `supportedLanes` remains separate normative support metadata. A
+ *     descriptor-bound but unpromoted target is technically eligible and
+ *     reported `installed but unverified`, never `supported`;
  *   - Node is the running interpreter (same rule as the installer);
  *     runtime minimum >= 22.19.0 (22.23.2 is the validated CI baseline,
  *     reported never gating); the retained darwin-arm64 architecture
- *     check (native arm64) applies only on the deferred darwin lane;
+ *     check (native arm64) applies on the darwin-arm64 target;
  *   - Git is discovered through PATH (never `/usr/bin/git`); runtime
  *     minimum >= 2.30.0 (2.45.4 is the validated CI baseline, reported
  *     never gating); presence ≠ lane evidence;
@@ -202,19 +203,26 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   const checks: DoctorCheck[] = [];
   const notes: string[] = [];
 
-  // 1. Platform / architecture (manifest-bound claim; gate §13).
-  checks.push(check('platform', 'platform', supportedLane ? 'supported' : 'unsupported', `${ctx.env.platform} ${ctx.env.arch} (lane ${lane})`));
+  // 1. Platform / architecture: descriptor selection gates technical
+  //    eligibility; supportedLanes remains a separate normative claim.
+  const platformDetail = `${ctx.env.platform} ${ctx.env.arch} (lane ${lane})`;
+  if (!laneDescriptor.ok) {
+    checks.push(check('platform', 'platform', 'unsupported', `${platformDetail} — ${laneDescriptor.message}`));
+  } else if (supportedLane) {
+    checks.push(check('platform', 'platform', 'supported', `${platformDetail} — descriptor-bound and product-support promoted`));
+  } else {
+    checks.push(check('platform', 'platform', 'installed but unverified', `${platformDetail} — technically eligible via a valid Gateway descriptor; not a product-support claim`));
+  }
 
   // 2. Node (the running interpreter is the runtime node; PS-6R minimum
   //    >= 22.19.0 — exact baseline 22.23.2 is reporting, never a gate).
   const nodeRun = await runProcess(nodeExecutable, ['--version'], { env: ctx.pathEnv, timeoutMs: 10_000 });
   const nodeVersion = nodeRun.exitCode === 0 ? nodeRun.stdout.trim().replace(/^v/, '') : '';
   const nodeClassification = nodeVersion === '' ? 'malformed' : classifyNodeRuntime(nodeVersion);
-  // PS-6 darwin lane check (RETAINED, deferred): on the darwin-arm64 host
+  // PS-6 darwin lane check (RETAINED): on the darwin-arm64 host
   // lane the ACTUAL Node executable must be arm64 — a Rosetta/x64 Node
-  // cannot satisfy the first-class darwin-arm64 lane. The darwin lanes are
-  // NOT v0.1.0 supported claims (Linux-only disposition); this check is
-  // retained for the deferred lane and never affects Linux behavior. The
+  // cannot satisfy the darwin-arm64 target. The darwin lanes are NOT v0.1.0
+  // supported claims; this technical check never affects Linux behavior. The
   // architecture requirement applies to ANY version-compatible runtime.
   const requiresNativeArm64Node = ctx.env.platform === 'darwin' && ctx.env.arch === 'arm64';
   let nodeArch = '';

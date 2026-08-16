@@ -231,6 +231,23 @@ test('project add: unsupported platform (windows) exits 2 before any Gateway wor
   }
 });
 
+test('project add: both descriptor-bound Darwin targets pass shared platform preflight and retain the receipt gate', async () => {
+  const env = makeEnv();
+  try {
+    const root = makeProjectRoot(env);
+    const baseContext = contextFor(env);
+    for (const arch of ['x64', 'arm64']) {
+      const ctx = { ...baseContext, env: { home: env, platform: 'darwin', arch } };
+      const outcome = await addProject(ctx, root);
+      assert.equal(outcome.exitCode, 1, `darwin/${arch} must reach the later receipt gate`);
+      assert.ok(outcome.stderr.includes('ERR-PS4-RECEIPT-ABSENT'), outcome.stderr);
+      assert.ok(!outcome.stderr.includes('ERR-PS4-PREFLIGHT-PLATFORM'), outcome.stderr);
+    }
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
 test('project add: exact re-add is an idempotent no-op (same identity, one registry entry, byte-identical replay)', async () => {
   const env = makeEnv();
   try {
