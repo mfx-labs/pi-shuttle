@@ -9,7 +9,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:f
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn } from 'node:child_process';
-import { GATEWAY_PACKAGE_VERSION, PI_GUARD_VERSION } from '../../src/compat/manifest.js';
+import { GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT, PI_GUARD_VERSION } from '../../src/compat/manifest.js';
 import { canonicalizePath, resolveLayout } from '../../src/host/environment.js';
 import { componentDirName, GATEWAY_PACKAGE_NAME } from '../../src/installer/components.js';
 import { writeReceipt, newReceipt } from '../../src/installer/receipt.js';
@@ -163,7 +163,7 @@ export function fixturePathEnv(env: string, extra: NodeJS.ProcessEnv = {}): Node
 
 export interface ReceiptFixtureOptions {
   readonly result?: 'COMPLETE' | 'PARTIAL';
-  readonly gateway?: { readonly status: ComponentStatus; readonly installPath: string; readonly binPath: string; readonly smoke?: GatewaySmoke } | null;
+  readonly gateway?: { readonly status: ComponentStatus; readonly installPath: string; readonly binPath: string; readonly smoke?: GatewaySmoke; readonly version?: string; readonly commit?: string } | null;
   readonly piGuard?: { readonly status: ComponentStatus; readonly installPath: string } | null;
   readonly omitted?: readonly string[];
   readonly notes?: readonly string[];
@@ -192,8 +192,8 @@ export function writeReceiptFixture(env: string, options: ReceiptFixtureOptions 
     binDir: layout.binDir,
     gateway: gateway === null ? null : {
       status: gateway.status,
-      version: GATEWAY_PACKAGE_VERSION,
-      commit: '7f3b4afdb43704e7dac82da7b086d8367347c641',
+      version: gateway.version ?? GATEWAY_PACKAGE_VERSION,
+      commit: gateway.commit ?? GATEWAY_PS1_BASELINE_COMMIT,
       commitVerified: false,
       digestVerified: false,
       artifactSha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',

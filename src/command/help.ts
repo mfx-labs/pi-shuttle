@@ -2,7 +2,9 @@
  * Deterministic help/version text (PS-2). Works with zero initialized
  * product state (help/version never touch the filesystem or config).
  */
-import { GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION, gatewayDescriptorForLane } from '../compat/manifest.js';
+import type { HostEnvironment } from '../host/environment.js';
+import { hostLane } from '../host/environment.js';
 
 /** Closed help text: the exact public grammar and the closed exit-code model. */
 export function helpText(): string {
@@ -29,11 +31,25 @@ export function helpText(): string {
   ].join('\n') + '\n';
 }
 
-/** Deterministic version text: CLI version + the manifest's pinned components. */
-export function versionText(): string {
+/**
+ * Deterministic version text (C2): the Gateway line is LANE-SELECTED via
+ * hostLane() → gatewayDescriptorForLane() — the historical commit is never
+ * presented as universal. Without a resolvable host environment the line
+ * states that no lane claim is made (SIR-PS2-010: --version works without
+ * HOME); an unmapped lane fails closed without any Linux fallback.
+ */
+export function versionText(env?: HostEnvironment): string {
+  const gatewayLine = (() => {
+    if (env === undefined) return 'gateway identity not resolved (host environment unavailable; no lane claim) ';
+    const lane = hostLane(env.platform, env.arch);
+    const selected = gatewayDescriptorForLane(lane);
+    if (!selected.ok) return `gateway identity not bound for host lane ${lane} (no fallback to another lane identity) `;
+    const d = selected.descriptor;
+    return `gateway ${d.version} (commit ${d.commit}) — lane ${lane}: ${d.repository} (${d.packageName}, bin ${d.binName}) `;
+  })();
   return [
     `pi-shuttle ${PI_SHUTTLE_VERSION} (pre-release, unpublished)`,
-    `gateway ${GATEWAY_PACKAGE_VERSION} (commit ${GATEWAY_PS1_BASELINE_COMMIT})`,
+    gatewayLine,
     `pi-guard ${PI_GUARD_VERSION} (commit ${PI_GUARD_COMMIT})`,
     `pi compatibility baseline ${PI_COMPATIBILITY_BASELINE}`,
   ].join('\n') + '\n';

@@ -15,15 +15,24 @@ import type { HostEnvironment } from './host/environment.js';
 
 const argv = process.argv.slice(2);
 const parsed = parseCommand(argv);
-const needsEnvironment = parsed.ok && parsed.command.kind !== 'help' && parsed.command.kind !== 'version';
+// C2: --help/--version resolve the host lane when the environment is
+// available so version text can be lane-selected; they remain usable
+// WITHOUT HOME (SIR-PS2-010 — the lane line then makes no lane claim).
+const stateFree = parsed.ok && (parsed.command.kind === 'help' || parsed.command.kind === 'version');
+const needsEnvironment = parsed.ok && !stateFree;
 let env: HostEnvironment | undefined;
-if (needsEnvironment) {
+let hostFailure = '';
+if (needsEnvironment || stateFree) {
   const host = hostEnvironmentFromProcess();
-  if (!host.ok) {
-    process.stderr.write(`pi-shuttle: ${host.message}\n`);
-    process.exit(2);
+  if (host.ok) {
+    env = host.environment;
+  } else {
+    hostFailure = host.message;
   }
-  env = host.environment;
+}
+if (needsEnvironment && env === undefined) {
+  process.stderr.write(`pi-shuttle: ${hostFailure}\n`);
+  process.exit(2);
 }
 const outcome = await run(argv, { ...(env !== undefined ? { env } : {}), forwardSignals: true });
 if (outcome.stdout.length > 0) process.stdout.write(outcome.stdout);

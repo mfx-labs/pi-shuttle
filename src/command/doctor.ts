@@ -47,7 +47,7 @@
 import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { COMPATIBILITY_MANIFEST, GATEWAY_PACKAGE_VERSION, GIT_LANE_VERSION, GIT_RUNTIME_MINIMUM, NODE_LANE_VERSION, NODE_RUNTIME_MINIMUM, PI_COMPATIBILITY_BASELINE, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM } from '../compat/manifest.js';
+import { COMPATIBILITY_MANIFEST, GIT_LANE_VERSION, GIT_RUNTIME_MINIMUM, NODE_LANE_VERSION, NODE_RUNTIME_MINIMUM, PI_COMPATIBILITY_BASELINE, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM, gatewayDescriptorForLane } from '../compat/manifest.js';
 import { classifyAgainstMinimum, parseVersionTriple } from '../compat/versions.js';
 import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
 import { classifyNodeRuntime } from '../installer/preflight.js';
@@ -56,7 +56,7 @@ import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { canonicalizePath, hostLane, resolveLayout } from '../host/environment.js';
 import { readPackageIdentity } from '../installer/artifact.js';
 import { regularFileOrNull } from '../installer/archive.js';
-import { componentDirName, GATEWAY_PACKAGE_NAME, PI_GUARD_PACKAGE_NAME, piListConfirmsSource } from '../installer/components.js';
+import { componentDirName, PI_GUARD_PACKAGE_NAME, piListConfirmsSource, validateBinPath } from '../installer/components.js';
 import { readReceipt } from '../installer/receipt.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
 import { projectLockPath } from '../lifecycle/state.js';
@@ -194,6 +194,10 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   const layout = ctx.layout;
   const nodeExecutable = ctx.nodeExecutable ?? process.execPath;
   const lane = hostLane(ctx.env.platform, ctx.env.arch);
+  // C2: the SELECTED lane descriptor is the only Gateway identity doctor
+  // validates against — no historical global constants, no other lane's
+  // identity. Unbound lanes fail closed for the gateway check.
+  const laneDescriptor = gatewayDescriptorForLane(lane);
   const supportedLane = COMPATIBILITY_MANIFEST.supportedLanes.includes(lane);
   const checks: DoctorCheck[] = [];
   const notes: string[] = [];
@@ -317,8 +321,14 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     }
   }
 
-  // 6. Gateway component (receipt + installed package, read-only).
-  if (receipt.ok && receipt.receipt.components.gateway !== null) {
+  // 6. Gateway component (receipt + installed package, read-only; C2:
+  //    validated against the SELECTED lane descriptor — never the
+  //    historical global package/version assumptions, never another
+  //    lane's package identity).
+  if (!laneDescriptor.ok) {
+    checks.push(check('gateway', 'gateway component', 'missing', `gateway identity is not bound for host lane ${lane}; refusing to validate any installed package (no fallback to another lane identity)`));
+  } else if (receipt.ok && receipt.receipt.components.gateway !== null) {
+    const descriptor = laneDescriptor.descriptor;
     const gatewayEntry = receipt.receipt.components.gateway;
     if (gatewayEntry.status === 'failed') {
       checks.push(check('gateway', 'gateway component', 'missing', 'installation receipt records a failed Gateway install; re-run the installer'));
@@ -332,25 +342,39 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
         } else {
           checks.push(check('gateway', 'gateway component', 'missing', `installed package directory no longer present: ${gatewayEntry.installPath}; re-run the installer`));
         }
-      } else if (identity.name !== GATEWAY_PACKAGE_NAME || identity.version !== GATEWAY_PACKAGE_VERSION) {
-        checks.push(check('gateway', 'gateway component', 'installed but unverified', `package identity drifted: found ${identity.name}@${identity.version}, receipt records ${GATEWAY_PACKAGE_NAME}@${GATEWAY_PACKAGE_VERSION}`));
-      } else if (!regularFileOrNull(gatewayEntry.binPath)) {
-        checks.push(check('gateway', 'gateway component', 'missing', `installed Gateway bin missing or not a regular file: ${gatewayEntry.binPath}; re-run the installer`));
+      } else if (identity.name !== descriptor.packageName || identity.version !== descriptor.version) {
+        checks.push(check('gateway', 'gateway component', 'installed but unverified', `package identity drifted: found ${identity.name}@${identity.version}, selected lane ${lane} expects ${descriptor.packageName}@${descriptor.version}`));
+      } else if (gatewayEntry.commit !== descriptor.commit) {
+        checks.push(check('gateway', 'gateway component', 'installed but unverified', `gateway commit drifted: receipt records ${gatewayEntry.commit}, selected lane ${lane} expects ${descriptor.commit}`));
       } else {
-        const smoke = await runProcess(nodeExecutable, [gatewayEntry.binPath, '--help'], { env: ctx.pathEnv, timeoutMs: 10_000 });
-        const missingDeps = smoke.stderr.includes('Cannot find module') || smoke.stderr.includes('MODULE_NOT_FOUND') || smoke.stderr.includes('ERR_MODULE_NOT_FOUND');
-        if (smoke.exitCode === 0 && smoke.signal === null && !smoke.timedOut) {
-          checks.push(check('gateway', 'gateway component', 'supported', `${gatewayEntry.binPath} — identity verified, bounded --help smoke passed`));
-        } else if (missingDeps) {
-          checks.push(check('gateway', 'gateway component', 'installed but unverified', `${gatewayEntry.binPath} — bin smoke cannot run: Gateway dependency materialization is pending release; re-run the installer`));
+        const declaredBin = identity.bin[descriptor.binName];
+        let binResolved: string | null = null;
+        if (declaredBin !== undefined) {
+          const binCheck = validateBinPath(declaredBin, gatewayEntry.installPath);
+          binResolved = binCheck.ok ? join(gatewayEntry.installPath, declaredBin) : null;
+        }
+        if (binResolved === null || binResolved !== gatewayEntry.binPath) {
+          checks.push(check('gateway', 'gateway component', 'installed but unverified', `gateway bin drifted: selected lane ${lane} requires the ${descriptor.binName} bin resolving exactly to ${gatewayEntry.binPath}`));
+        } else if (!regularFileOrNull(gatewayEntry.binPath)) {
+          checks.push(check('gateway', 'gateway component', 'missing', `installed Gateway bin missing or not a regular file: ${gatewayEntry.binPath}; re-run the installer`));
         } else {
-          checks.push(check('gateway', 'gateway component', 'installed but unverified', `${gatewayEntry.binPath} — bounded --help smoke failed (exit ${smoke.exitCode ?? 'unknown'}${smoke.timedOut ? ', timed out' : ''})`));
+          const smoke = await runProcess(nodeExecutable, [gatewayEntry.binPath, '--help'], { env: ctx.pathEnv, timeoutMs: 10_000 });
+          const missingDeps = smoke.stderr.includes('Cannot find module') || smoke.stderr.includes('MODULE_NOT_FOUND') || smoke.stderr.includes('ERR_MODULE_NOT_FOUND');
+          if (smoke.exitCode === 0 && smoke.signal === null && !smoke.timedOut) {
+            checks.push(check('gateway', 'gateway component', 'supported', `${gatewayEntry.binPath} — lane ${lane} identity verified (${descriptor.packageName}@${descriptor.version}, commit ${descriptor.commit}), bounded --help smoke passed`));
+          } else if (missingDeps) {
+            checks.push(check('gateway', 'gateway component', 'installed but unverified', `${gatewayEntry.binPath} — bin smoke cannot run: Gateway dependency materialization is pending release; re-run the installer`));
+          } else {
+            checks.push(check('gateway', 'gateway component', 'installed but unverified', `${gatewayEntry.binPath} — bounded --help smoke failed (exit ${smoke.exitCode ?? 'unknown'}${smoke.timedOut ? ', timed out' : ''})`));
+          }
         }
       }
     }
   } else {
-    // No receipt entry: truthful disk observation only (never a claim).
-    const packageDir = join(layout.packagesDir, componentDirName(GATEWAY_PACKAGE_NAME, GATEWAY_PACKAGE_VERSION));
+    // No receipt entry: descriptor-scoped disk observation only (never a
+    // claim, never another lane's package directory).
+    const descriptor = laneDescriptor.descriptor;
+    const packageDir = join(layout.packagesDir, componentDirName(descriptor.packageName, descriptor.version));
     if (existsSync(packageDir)) {
       checks.push(check('gateway', 'gateway component', 'installed but unverified', `package present at ${packageDir} but not recorded in a valid installation receipt`));
     } else {

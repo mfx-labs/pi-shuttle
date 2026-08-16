@@ -53,7 +53,7 @@ export async function run(argv: readonly string[], deps: AppDeps): Promise<Comma
     case 'help':
       return { exitCode: 0, stdout: helpText(), stderr: '' };
     case 'version':
-      return { exitCode: 0, stdout: versionText(), stderr: '' };
+      return { exitCode: 0, stdout: versionText(deps.env), stderr: '' };
     case 'doctor': {
       if (deps.env === undefined) return noHome();
       const result = await runDoctor({ env: deps.env, layout: resolveLayout(deps.env.home), nodeExecutable: process.execPath, pathEnv: deps.env.pathEnv });
