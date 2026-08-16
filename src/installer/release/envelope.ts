@@ -12,10 +12,22 @@
  * untrusted manifest content can name a host.
  *
  * Closed schema: every object rejects unknown keys; every value is
- * type-checked; version/commit/policy fields must EQUAL the compiled-in
- * constants (a release built from different pins cannot validate).
+ * type-checked; version/commit/tag/policy fields must EQUAL the
+ * compiled-in constants (a release built from different pins cannot
+ * validate).
+ *
+ * C3A lane scoping: the envelope is validated FOR an explicit accepted
+ * target lane (gatewayDescriptorForLane is the sole Gateway identity
+ * authority). The gateway version/commit/fileName/dependencies must
+ * equal the SELECTED lane descriptor — never the transitional historical
+ * aliases, never another lane's identity. The schema itself is unchanged:
+ * packageName/binName/repository/lane are not representable in schema v1
+ * and remain descriptor-derived at consumption time (reported limitation,
+ * not silently widened). `descriptor.artifactSha256` (null in A) is NEVER
+ * consulted here: the envelope's own sha256 remains the authoritative
+ * release artifact digest input.
  */
-import { COMPATIBILITY_MANIFEST, GATEWAY_DEPENDENCIES, GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT, GIT_RUNTIME_MINIMUM, NODE_RUNTIME_MINIMUM, PI_GUARD_COMMIT, PI_GUARD_TAG, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM, PI_SHUTTLE_VERSION } from '../../compat/manifest.js';
+import { COMPATIBILITY_MANIFEST, GIT_RUNTIME_MINIMUM, NODE_RUNTIME_MINIMUM, PI_GUARD_COMMIT, PI_GUARD_TAG, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM, PI_SHUTTLE_VERSION, gatewayDescriptorForLane } from '../../compat/manifest.js';
 import { parseJsonRejectingDuplicates } from '../../config/json.js';
 
 export const ENVELOPE_SCHEMA_VERSION = 1;
@@ -111,8 +123,20 @@ function sameStringSet(a: readonly string[], b: readonly string[]): boolean {
   return a.every((v) => bSet.has(v));
 }
 
-/** Validate a parsed release envelope against the closed schema + exact pins. */
-export function validateEnvelope(raw: unknown): EnvelopeResult<ReleaseEnvelopeV1> {
+/**
+ * Validate a parsed release envelope against the closed schema + exact
+ * pins for the EXPLICIT target lane (C3A). Unbound/invalid lanes fail
+ * closed before any field is trusted; the selected descriptor's
+ * version/commit/artifact-file-name/dependencies are the only accepted
+ * gateway pins — no fallback to the historical identity.
+ */
+export function validateEnvelope(raw: unknown, lane: string): EnvelopeResult<ReleaseEnvelopeV1> {
+  const descriptorResult = gatewayDescriptorForLane(lane);
+  if (!descriptorResult.ok) {
+    return fail('ERR-REL-ENVELOPE-LANE', `release envelope target lane is not bound: ${lane} (${descriptorResult.message}; no fallback to another lane identity)`);
+  }
+  const gatewayDescriptor = descriptorResult.descriptor;
+
   const root = closedObject(raw, ['schemaVersion', 'releaseVersion', 'piShuttle', 'gateway', 'piGuard', 'policy'], 'envelope');
   if (root === null) return fail('ERR-REL-ENVELOPE-SCHEMA', 'release envelope must be a closed object with exactly schemaVersion/releaseVersion/piShuttle/gateway/piGuard/policy');
 
@@ -158,8 +182,11 @@ export function validateEnvelope(raw: unknown): EnvelopeResult<ReleaseEnvelopeV1
   }
   const gatewayVersion = requireString(gateway, 'packageVersion');
   const gatewayCommit = requireString(gateway, 'sourceCommit');
-  if (typeof gatewayVersion !== 'string' || typeof gatewayCommit !== 'string' || gatewayVersion !== GATEWAY_PACKAGE_VERSION || gatewayCommit !== GATEWAY_PS1_BASELINE_COMMIT) {
-    return fail('ERR-REL-ENVELOPE-PIN', `gateway pin mismatch: envelope ${gatewayVersion ?? '(missing)'}@${gatewayCommit ?? '(missing)'}, pinned ${GATEWAY_PACKAGE_VERSION}@${GATEWAY_PS1_BASELINE_COMMIT}`);
+  if (typeof gatewayVersion !== 'string' || typeof gatewayCommit !== 'string' || gatewayVersion !== gatewayDescriptor.version || gatewayCommit !== gatewayDescriptor.commit) {
+    return fail('ERR-REL-ENVELOPE-PIN', `gateway pin mismatch for lane ${lane}: envelope ${gatewayVersion ?? '(missing)'}@${gatewayCommit ?? '(missing)'}, pinned ${gatewayDescriptor.version}@${gatewayDescriptor.commit}`);
+  }
+  if (gatewayAsset.fileName !== gatewayDescriptor.artifactFileName) {
+    return fail('ERR-REL-ENVELOPE-PIN', `gateway artifact file name mismatch for lane ${lane}: envelope ${gatewayAsset.fileName}, pinned ${gatewayDescriptor.artifactFileName}`);
   }
   const piGuardVersion = requireString(piGuard, 'version');
   const piGuardCommit = requireString(piGuard, 'sourceCommit');
@@ -170,10 +197,10 @@ export function validateEnvelope(raw: unknown): EnvelopeResult<ReleaseEnvelopeV1
 
   const gatewayDependencies = requireStringRecord(policy, 'gatewayDependencies');
   if (gatewayDependencies === null) return fail('ERR-REL-ENVELOPE-SCHEMA', 'policy.gatewayDependencies must be a string map');
-  const dependencyKeys = Object.keys(GATEWAY_DEPENDENCIES);
+  const dependencyKeys = Object.keys(gatewayDescriptor.dependencies);
   const envelopeKeys = Object.keys(gatewayDependencies);
-  if (dependencyKeys.length !== envelopeKeys.length || dependencyKeys.some((k) => gatewayDependencies[k] !== GATEWAY_DEPENDENCIES[k])) {
-    return fail('ERR-REL-ENVELOPE-PIN', 'policy.gatewayDependencies must equal the pinned gateway dependency set exactly');
+  if (dependencyKeys.length !== envelopeKeys.length || dependencyKeys.some((k) => gatewayDependencies[k] !== gatewayDescriptor.dependencies[k])) {
+    return fail('ERR-REL-ENVELOPE-PIN', `policy.gatewayDependencies must equal the selected lane (${lane}) gateway dependency pins exactly`);
   }
 
   const configurationVersion = requireString(policy, 'configurationVersion');
@@ -224,11 +251,11 @@ export function validateEnvelope(raw: unknown): EnvelopeResult<ReleaseEnvelopeV1
   };
 }
 
-/** Parse + validate the envelope document. */
-export function parseEnvelope(text: string): EnvelopeResult<ReleaseEnvelopeV1> {
+/** Parse + validate the envelope document for the explicit target lane. */
+export function parseEnvelope(text: string, lane: string): EnvelopeResult<ReleaseEnvelopeV1> {
   const parsed = parseJsonRejectingDuplicates(text);
   if (!parsed.ok) {
     return fail('ERR-REL-ENVELOPE-MALFORMED', `release envelope is not valid JSON: ${parsed.message}`);
   }
-  return validateEnvelope(parsed.value);
+  return validateEnvelope(parsed.value, lane);
 }

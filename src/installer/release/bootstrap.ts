@@ -158,7 +158,7 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
   } catch (err) {
     return refuse('ERR-REL-ENVELOPE-UNAVAILABLE', `release envelope could not be read (${(err as NodeJS.ErrnoException).code ?? 'unknown error'})`);
   }
-  const envelopeResult = parseEnvelope(envelopeText);
+  const envelopeResult = parseEnvelope(envelopeText, hostLane(env.platform, env.arch));
   if (!envelopeResult.ok) {
     return refuse(envelopeResult.code, envelopeResult.message);
   }

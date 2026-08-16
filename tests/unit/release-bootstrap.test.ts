@@ -40,7 +40,10 @@ function sha256(buf: Buffer): string {
 }
 
 function envFor(home: string): HostEnvironment {
-  return { home, platform: process.platform, arch: process.arch, pathEnv: process.env };
+  // C3A: the release envelope is validated FOR the host lane; pin the
+  // fixture host to the v0.1.0 supported linux lane so the historical
+  // harness envelope validates deterministically on any development host.
+  return { home, platform: 'linux', arch: 'x64', pathEnv: process.env };
 }
 
 interface Harness {
