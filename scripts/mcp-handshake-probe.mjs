@@ -14,17 +14,60 @@
  *   HOME       = isolated operator home (with runtime.json + receipt)
  *   PATH       = operator PATH (node/git/pi as required)
  *   PSHUTTLE   = absolute path to the installed pi-shuttle executable
+ *   GATEWAY_LANE                 optional accepted host lane; absent, the
+ *                                intentional historical compatibility
+ *                                default is selected
+ *   EXPECTED_GATEWAY_PACKAGE     optional consistency ASSERTION only — it
+ *                                never selects or overrides identity
+ *
+ * C3B1 correction: GATEWAY_LANE is the SOLE identity selector.
+ * EXPECTED_GATEWAY_PACKAGE may only assert agreement with the
+ * already-selected package; a conflict fails closed (exit 2), including
+ * the absent-lane default. Invalid explicit lanes fail closed without
+ * falling back to the historical identity or to a caller-supplied
+ * package. The lane→package mapping below is the smallest
+ * parameterization of the authoritative A/B descriptor values
+ * (tests/unit/c3b1-* asserts equality); it is not an independent
+ * identity authority.
  *
  * Exit: 0 = handshake green; 1 = assertion failed; 2 = usage error.
  */
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 
+const LANE_GATEWAY_PACKAGE = Object.freeze({
+  'linux-x86_64-posix-utf8-node22': '@project-gateway/artifact-core',
+  'darwin-arm64-posix-utf8-node22': '@project-gateway/artifact-core',
+  'darwin-x86_64-posix-utf8-node22': '@project-gateway/macos-core',
+});
+const GATEWAY_PACKAGE_VERSION = '0.1.0';
+
 const home = process.env.HOME;
 const pathEnv = process.env.PATH;
 const cli = process.env.PSHUTTLE;
 if (!home || !pathEnv || !cli) {
   console.error('HOME / PATH / PSHUTTLE are required');
+  process.exit(2);
+}
+
+// GATEWAY_LANE alone selects the expected identity; absent → the
+// intentional historical compatibility default.
+const lane = process.env.GATEWAY_LANE ?? '';
+let expectedPackage;
+if (lane === '') {
+  expectedPackage = '@project-gateway/artifact-core';
+} else {
+  const lanePackage = LANE_GATEWAY_PACKAGE[lane];
+  if (lanePackage === undefined) {
+    console.error(`unknown gateway lane: ${lane} (no historical fallback)`);
+    process.exit(2);
+  }
+  expectedPackage = lanePackage;
+}
+// EXPECTED_GATEWAY_PACKAGE asserts consistency only — never selects.
+const expectedAssert = process.env.EXPECTED_GATEWAY_PACKAGE ?? '';
+if (expectedAssert !== '' && expectedAssert !== expectedPackage) {
+  console.error(`expected gateway package ${expectedAssert} conflicts with the lane-selected identity ${expectedPackage} (GATEWAY_LANE=${lane === '' ? '(absent — historical compatibility default)' : lane})`);
   process.exit(2);
 }
 
@@ -92,8 +135,8 @@ if (init === null) fail('initialize timed out');
 else if (init.error !== undefined) fail(`initialize error: ${JSON.stringify(init.error)}`);
 else {
   const serverInfo = init.result?.serverInfo;
-  if (serverInfo?.name !== '@project-gateway/artifact-core' || serverInfo?.version !== '0.1.0') {
-    fail(`unexpected serverInfo: ${JSON.stringify(serverInfo)}`);
+  if (serverInfo?.name !== expectedPackage || serverInfo?.version !== GATEWAY_PACKAGE_VERSION) {
+    fail(`unexpected serverInfo: ${JSON.stringify(serverInfo)} (expected ${expectedPackage}@${GATEWAY_PACKAGE_VERSION})`);
   }
 }
 // MCP notification (JSON-RPC notifications carry NO id — an id-bearing

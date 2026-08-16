@@ -38,6 +38,30 @@ for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE
   if [ -z "${!v:-}" ]; then echo "real-stack: $v is required" >&2; exit 2; fi
 done
 
+# C3B1 lane-aware Gateway identity. GATEWAY_LANE is OPTIONAL: absent, the
+# historical identity is preserved byte-for-byte (existing frozen Lane A/B/C
+# workflows). An explicit lane must be one of the three accepted lanes and
+# NEVER falls back to the historical identity; the Intel lane derives its
+# package/bin identity here and its artifact name/commit/sha from the B
+# fixture manifest (single authoritative source — no independent table).
+GATEWAY_LANE="${GATEWAY_LANE:-}"
+case "$GATEWAY_LANE" in
+  ''|linux-x86_64-posix-utf8-node22|darwin-arm64-posix-utf8-node22)
+    GATEWAY_PACKAGE="@project-gateway/artifact-core"
+    GATEWAY_BIN="project-gateway-mcp"
+    GATEWAY_ARTIFACT="project-gateway-artifact-core-0.1.0.tgz"
+    ;;
+  darwin-x86_64-posix-utf8-node22)
+    GATEWAY_PACKAGE="@project-gateway/macos-core"
+    GATEWAY_BIN="project-gateway-macos-mcp"
+    GATEWAY_ARTIFACT="project-gateway-macos-core-0.1.0.tgz"
+    ;;
+  *)
+    echo "real-stack: unknown gateway lane: $GATEWAY_LANE (no historical fallback)" >&2
+    exit 2
+    ;;
+esac
+
 NODE_DIR="$(dirname "$NODE_BIN")"
 export HOME="$WORK_ROOT/home"
 export PATH="$PI_LANE_BIN:$NODE_DIR:$PATH"
@@ -56,7 +80,14 @@ test "$PI_GUARD_MANIFEST_COMMIT" = "$PI_GUARD_COMMIT" || { echo "real-stack: man
 echo "real-stack: fixture manifest commits match the repository-owned pins"
 GATEWAY_SHA="$(node -e "console.log(require('$MANIFEST').gateway.sha256)")"
 PI_GUARD_SHA="$(node -e "console.log(require('$MANIFEST').piGuard.sha256)")"
-echo "$GATEWAY_SHA  $FIXTURE_DIR/project-gateway-artifact-core-0.1.0.tgz" | shasum -a 256 -c - >/dev/null
+if [ -n "$GATEWAY_LANE" ]; then
+  # The B fixture manifest is the authority for the explicit lane: its lane
+  # and artifact name must agree with the requested lane (fail closed).
+  MANIFEST_LANE="$(node -e "console.log(require('$MANIFEST').lane)")"
+  test "$MANIFEST_LANE" = "$GATEWAY_LANE" || { echo "real-stack: fixture lane mismatch: expected $GATEWAY_LANE, manifest $MANIFEST_LANE" >&2; exit 1; }
+  GATEWAY_ARTIFACT="$(node -e "console.log(require('$MANIFEST').gateway.artifact)")"
+fi
+echo "$GATEWAY_SHA  $FIXTURE_DIR/$GATEWAY_ARTIFACT" | shasum -a 256 -c - >/dev/null
 echo "$PI_GUARD_SHA  $FIXTURE_DIR/pi-guard-0.1.2.tgz" | shasum -a 256 -c - >/dev/null
 echo "real-stack: fixture digests verified against fixture-manifest.json"
 
@@ -81,10 +112,13 @@ echo "real-stack: installer run 1 exit $RUN1 (PARTIAL expected pre-materializati
 grep -q "PARTIAL" "$WORK_ROOT/install-run1.log" || { echo "real-stack: run 1 was not PARTIAL:"; cat "$WORK_ROOT/install-run1.log"; exit 1; }
 
 # 4. Gateway dependency materialization (exact contract pins; PS5-LINUX-003).
-GATEWAY_PKG="$HOME/.local/share/pi-shuttle/packages/project-gateway-artifact-core@0.1.0"
+#    The on-disk package directory name derives from the lane artifact name
+#    (componentDirName layout: <name>@<version> = <artifact>.tgz minus .tgz).
+GATEWAY_PKG_DIR="${GATEWAY_ARTIFACT%.tgz}"
+GATEWAY_PKG="$HOME/.local/share/pi-shuttle/packages/$GATEWAY_PKG_DIR"
 "$NODE_DIR/npm" install --no-save --omit=dev --prefix "$GATEWAY_PKG" \
   @modelcontextprotocol/server@2.0.0 ajv@8.20.0 zod@4.4.3 > "$WORK_ROOT/materialize.log" 2>&1
-echo "real-stack: gateway dependencies materialized (exact pins)"
+echo "real-stack: gateway dependencies materialized (exact pins; package $GATEWAY_PACKAGE)"
 
 # 5. Installer run 2 → COMPLETE.
 bash "$PSHUTTLE_REPO/install.sh" --batch --gateway yes --pi-guard yes \
@@ -128,7 +162,10 @@ grep -q "verification-replay" "$WORK_ROOT/add3.log" || { cat "$WORK_ROOT/add3.lo
 echo "real-stack: lifecycle green (add → list → exact re-add → doctor → remove → re-add)"
 
 # 9. Real MCP handshake through `pi-shuttle start` (nine-tool surface).
-HOME="$HOME" PATH="$PATH" PSHUTTLE="$PSHUTTLE" "$NODE_BIN" "$PSHUTTLE_REPO/scripts/mcp-handshake-probe.mjs"
+#    GATEWAY_LANE is passed EXPLICITLY from the lane this script already
+#    selected (the probe's sole identity selector — never ambient state);
+#    EXPECTED_GATEWAY_PACKAGE asserts consistency with that selection.
+HOME="$HOME" PATH="$PATH" PSHUTTLE="$PSHUTTLE" GATEWAY_LANE="$GATEWAY_LANE" EXPECTED_GATEWAY_PACKAGE="$GATEWAY_PACKAGE" "$NODE_BIN" "$PSHUTTLE_REPO/scripts/mcp-handshake-probe.mjs"
 
 # 10. Volume/arch facts record (Lane B evidence).
 echo "real-stack: volume case-sensitivity record:"
