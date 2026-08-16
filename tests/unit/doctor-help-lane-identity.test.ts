@@ -6,10 +6,10 @@
  *
  *   - linux doctor expects the historical package identity;
  *   - darwin-x86_64 doctor expects ONLY the macOS fork identity
- *     (@project-gateway/macos-core 0.1.0 @ a90284b…, bin
+ *     (@project-gateway/macos-core 0.1.0 @ a18bd2…, bin
  *     project-gateway-macos-mcp) — name/version/commit/bin drift are
  *     findings under the closed taxonomy;
- *   - darwin-arm64 stays historical;
+ *   - darwin-arm64 shares the macOS descriptor;
  *   - unknown/unmapped lanes fail closed (doctor: missing, no fallback;
  *     version: no identity claim);
  *   - version text is lane-selected; state-free invocation makes no lane
@@ -26,7 +26,7 @@ import { resolveLayout } from '../../src/host/environment.js';
 import { cleanupEnv, fixturePathEnv, installFixtureGateway, makeEnv, writeReceiptFixture } from '../helpers/lifecycle-fixtures.js';
 import { GATEWAY_FIXTURE_BIN } from '../helpers/installer-fixtures.js';
 
-const INTEL_COMMIT = 'a90284b06420effb1ec1eeef14e7ed82e02c64e9';
+const INTEL_COMMIT = 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1';
 const HISTORICAL_COMMIT = '55f764290a4567a20557f1db19d2a6fb97572a97';
 
 function verdicts(report: { readonly checks: readonly DoctorCheck[] }): Record<string, string> {
@@ -140,15 +140,15 @@ test('C2 doctor: darwin-x86_64 wrong bin declaration is a drift finding', async 
   }
 });
 
-test('C2 doctor: darwin-arm64 remains on the historical Gateway identity', async () => {
+test('C2 doctor: darwin-arm64 expects the shared macOS Gateway identity', async () => {
   const env = makeEnv();
   try {
-    installFixtureGateway(env);
-    writeReceiptFixture(env);
+    const { installPath, binPath } = writeIntelGatewayPackage(env);
+    writeReceiptFixture(env, { gateway: { status: 'installed-verified', installPath, binPath, version: '0.1.0', commit: INTEL_COMMIT } });
     const { verdict, report } = await gatewayVerdictFor(ctx(env, 'darwin', 'arm64'));
     assert.equal(verdict, 'supported', report);
-    assert.ok(report.includes(HISTORICAL_COMMIT), report);
-    assert.ok(!report.includes('macos-core'), 'arm64 must never see the fork identity');
+    assert.ok(report.includes(INTEL_COMMIT), report);
+    assert.ok(report.includes('macos-core'), report);
   } finally {
     cleanupEnv(env);
   }

@@ -39,19 +39,19 @@ for v in FIXTURE_DIR WORK_ROOT PSHUTTLE_REPO PI_LANE_BIN PI_LOADER GIT_2454 NODE
 done
 
 # C3B1 lane-aware Gateway identity. GATEWAY_LANE is OPTIONAL: absent, the
-# historical identity is preserved byte-for-byte (existing frozen Lane A/B/C
-# workflows). An explicit lane must be one of the three accepted lanes and
-# NEVER falls back to the historical identity; the Intel lane derives its
+# historical identity is preserved byte-for-byte for Linux compatibility.
+# An explicit lane must be one of the three accepted lanes and NEVER falls
+# back to the historical identity; either Darwin lane derives its macOS
 # package/bin identity here and its artifact name/commit/sha from the B
 # fixture manifest (single authoritative source — no independent table).
 GATEWAY_LANE="${GATEWAY_LANE:-}"
 case "$GATEWAY_LANE" in
-  ''|linux-x86_64-posix-utf8-node22|darwin-arm64-posix-utf8-node22)
+  ''|linux-x86_64-posix-utf8-node22)
     GATEWAY_PACKAGE="@project-gateway/artifact-core"
     GATEWAY_BIN="project-gateway-mcp"
     GATEWAY_ARTIFACT="project-gateway-artifact-core-0.1.0.tgz"
     ;;
-  darwin-x86_64-posix-utf8-node22)
+  darwin-arm64-posix-utf8-node22|darwin-x86_64-posix-utf8-node22)
     GATEWAY_PACKAGE="@project-gateway/macos-core"
     GATEWAY_BIN="project-gateway-macos-mcp"
     GATEWAY_ARTIFACT="project-gateway-macos-core-0.1.0.tgz"

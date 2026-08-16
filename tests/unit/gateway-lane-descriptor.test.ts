@@ -34,7 +34,7 @@ test('descriptor map binds exactly the three accepted host lanes and is frozen',
   );
   assert.ok(Object.isFrozen(GATEWAY_LANE_DESCRIPTORS), 'descriptor map must be frozen');
   assert.ok(Object.isFrozen(HISTORICAL_GATEWAY_DESCRIPTOR), 'historical descriptor must be frozen');
-  assert.ok(Object.isFrozen(MACOS_INTEL_GATEWAY_DESCRIPTOR), 'Intel fork descriptor must be frozen');
+  assert.ok(Object.isFrozen(MACOS_INTEL_GATEWAY_DESCRIPTOR), 'shared macOS descriptor must be frozen');
 });
 
 test('linux resolves to the historical descriptor, byte-for-byte preserved', () => {
@@ -55,15 +55,14 @@ test('linux resolves to the historical descriptor, byte-for-byte preserved', () 
   }
 });
 
-test('darwin-arm64 resolves to the SAME historical descriptor — never the macOS fork', () => {
+test('darwin-arm64 resolves to the SAME macOS descriptor as darwin-x86_64', () => {
   const result = gatewayDescriptorForLane(DARWIN_ARM64_HOST_LANE);
   assert.ok(result.ok);
   if (result.ok) {
-    assert.equal(result.descriptor, HISTORICAL_GATEWAY_DESCRIPTOR, 'arm64 must share the frozen historical descriptor');
-    assert.equal(result.descriptor.repository, 'mfx-labs/project-gateway');
-    assert.equal(result.descriptor.packageName, '@project-gateway/artifact-core');
-    assert.equal(result.descriptor.binName, 'project-gateway-mcp');
-    assert.notEqual(result.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR, 'arm64 must never resolve to the macOS fork');
+    assert.equal(result.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR, 'arm64 must share the frozen macOS descriptor');
+    assert.equal(result.descriptor.repository, 'mfx-labs/project-gateway-macos');
+    assert.equal(result.descriptor.packageName, '@project-gateway/macos-core');
+    assert.equal(result.descriptor.binName, 'project-gateway-macos-mcp');
   }
 });
 
@@ -74,7 +73,7 @@ test('darwin-x86_64 resolves ONLY to the macOS fork descriptor', () => {
     assert.equal(result.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR);
     assert.deepEqual({ ...result.descriptor, dependencies: { ...result.descriptor.dependencies } }, {
       repository: 'mfx-labs/project-gateway-macos',
-      commit: 'a90284b06420effb1ec1eeef14e7ed82e02c64e9',
+      commit: 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1',
       version: '0.1.0',
       packageName: '@project-gateway/macos-core',
       artifactFileName: 'project-gateway-macos-core-0.1.0.tgz',
@@ -138,7 +137,7 @@ test('dependencies validation: plain non-array object with exactly the expected 
 
 test('nested dependency state remains frozen', () => {
   assert.ok(Object.isFrozen(HISTORICAL_GATEWAY_DESCRIPTOR.dependencies), 'historical descriptor dependencies must be frozen');
-  assert.ok(Object.isFrozen(MACOS_INTEL_GATEWAY_DESCRIPTOR.dependencies), 'Intel fork descriptor dependencies must be frozen');
+  assert.ok(Object.isFrozen(MACOS_INTEL_GATEWAY_DESCRIPTOR.dependencies), 'macOS descriptor dependencies must be frozen');
   assert.ok(Object.isFrozen(GATEWAY_DEPENDENCY_PACKAGES), 'dependency package name list must be frozen');
   assert.deepEqual([...GATEWAY_DEPENDENCY_PACKAGES].sort(), ['@modelcontextprotocol/server', 'ajv', 'zod'].sort());
 });
@@ -162,7 +161,7 @@ test('transitional legacy aliases derive from the historical descriptor with the
 test('the closed manifest exposes the descriptor map as the lane-selection authority', () => {
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes, GATEWAY_LANE_DESCRIPTORS);
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[LINUX_HOST_LANE], HISTORICAL_GATEWAY_DESCRIPTOR);
-  assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[DARWIN_ARM64_HOST_LANE], HISTORICAL_GATEWAY_DESCRIPTOR);
+  assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[DARWIN_ARM64_HOST_LANE], MACOS_INTEL_GATEWAY_DESCRIPTOR);
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[DARWIN_X86_64_HOST_LANE], MACOS_INTEL_GATEWAY_DESCRIPTOR);
   // Support claims unchanged by A: v0.1.0 Linux-only; darwin lanes gated.
   assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);

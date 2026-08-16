@@ -37,7 +37,7 @@ import { createInterface } from 'node:readline';
 
 const LANE_GATEWAY_PACKAGE = Object.freeze({
   'linux-x86_64-posix-utf8-node22': '@project-gateway/artifact-core',
-  'darwin-arm64-posix-utf8-node22': '@project-gateway/artifact-core',
+  'darwin-arm64-posix-utf8-node22': '@project-gateway/macos-core',
   'darwin-x86_64-posix-utf8-node22': '@project-gateway/macos-core',
 });
 const GATEWAY_PACKAGE_VERSION = '0.1.0';

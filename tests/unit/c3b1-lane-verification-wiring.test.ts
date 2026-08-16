@@ -5,7 +5,7 @@
  * they carry the smallest parameterization of the authoritative A/B
  * descriptor values. These tests prove that parameterization EQUALS the
  * descriptors (never an independent identity table), that unknown explicit
- * lanes fail closed, that the Intel lane expects ONLY the macOS fork server
+ * lanes fail closed, that both Darwin lanes expect the macOS fork server
  * identity, that the nine-tool surface stays exact, and that a synthetic
  * MCP exchange through the real probe wiring behaves lane-correctly.
  */
@@ -93,7 +93,7 @@ function scratch(): string {
 test('C3B1 probe: the lane→package parameterization equals the authoritative A descriptors', () => {
   const text = probeText();
   assert.ok(text.includes(`'${LINUX_LANE}': '${HISTORICAL_GATEWAY_DESCRIPTOR.packageName}'`), 'linux lane must bind the historical package');
-  assert.ok(text.includes(`'${ARM64_LANE}': '${HISTORICAL_GATEWAY_DESCRIPTOR.packageName}'`), 'arm64 lane must bind the historical package (never the fork)');
+  assert.ok(text.includes(`'${ARM64_LANE}': '${MACOS_INTEL_GATEWAY_DESCRIPTOR.packageName}'`), 'arm64 lane must bind the shared macOS package');
   assert.ok(text.includes(`'${INTEL_LANE}': '${MACOS_INTEL_GATEWAY_DESCRIPTOR.packageName}'`), 'Intel lane must bind the fork package');
   assert.ok(text.includes('0.1.0'), 'the expected server version is the descriptor version');
   assert.ok(text.includes('unknown gateway lane') && text.includes('no historical fallback'), 'unknown-lane fail-closed message present');
@@ -129,6 +129,17 @@ test('C3B1 probe: Intel lane accepts @project-gateway/macos-core with the exact 
   const dir = scratch();
   try {
     const run = runProbe(dir, { GATEWAY_LANE: INTEL_LANE, FAKE_SERVER_NAME: '@project-gateway/macos-core' });
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.ok(run.stdout.includes('9/9 tools'), run.stdout);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('C3B1 probe: arm64 lane accepts @project-gateway/macos-core with the exact nine tools', () => {
+  const dir = scratch();
+  try {
+    const run = runProbe(dir, { GATEWAY_LANE: ARM64_LANE, EXPECTED_GATEWAY_PACKAGE: '@project-gateway/macos-core', FAKE_SERVER_NAME: '@project-gateway/macos-core' });
     assert.equal(run.code, 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes('9/9 tools'), run.stdout);
   } finally {
@@ -210,14 +221,15 @@ test('C3B1 probe: an explicit package conflicting with the lane fails closed (ex
 
 test('C3B1 real-stack: package/artifact/bin selection is lane-aware and equals the descriptors', () => {
   const text = realStackText();
-  // Historical branch (default + linux + arm64): never the fork.
-  const historicalCase = text.match(/''\|linux-x86_64-posix-utf8-node22\|darwin-arm64-posix-utf8-node22\)\n\s*GATEWAY_PACKAGE="[^"]*"\n\s*GATEWAY_BIN="[^"]*"\n\s*GATEWAY_ARTIFACT="[^"]*"/);
-  assert.ok(historicalCase !== null, 'the default/linux/arm64 case must bind the historical identity');
+  // Historical branch (default + linux only).
+  const historicalCase = text.match(/''\|linux-x86_64-posix-utf8-node22\)\n\s*GATEWAY_PACKAGE="[^"]*"\n\s*GATEWAY_BIN="[^"]*"\n\s*GATEWAY_ARTIFACT="[^"]*"/);
+  assert.ok(historicalCase !== null, 'the default/linux case must bind the historical identity');
   assert.ok(historicalCase![0].includes('@project-gateway/artifact-core'));
   assert.ok(historicalCase![0].includes('project-gateway-mcp'));
   assert.ok(historicalCase![0].includes('project-gateway-artifact-core-0.1.0.tgz'));
-  assert.ok(!historicalCase![0].includes('macos'), 'arm64/default must never bind the fork identity');
-  // Intel branch.
+  assert.ok(!historicalCase![0].includes('macos'), 'default/Linux must not bind the macOS identity');
+  // Shared Darwin branch.
+  assert.ok(text.includes('darwin-arm64-posix-utf8-node22|darwin-x86_64-posix-utf8-node22)'), 'both Darwin lanes share one selection branch');
   assert.ok(text.includes('GATEWAY_PACKAGE="@project-gateway/macos-core"'), 'Intel package identity present');
   assert.ok(text.includes('GATEWAY_BIN="project-gateway-macos-mcp"'), 'Intel bin identity present');
   assert.ok(text.includes('GATEWAY_ARTIFACT="project-gateway-macos-core-0.1.0.tgz"'), 'Intel artifact name present');
@@ -248,11 +260,11 @@ test('C3B1 real-stack: unknown explicit lane fails closed (exit 2) before any ac
   assert.ok(`${run.stderr}`.includes('unknown gateway lane'), run.stderr ?? '');
 });
 
-test('C3B1 real-stack: darwin-arm64 remains historical (never the macOS fork)', () => {
+test('C3B1 real-stack: darwin-arm64 shares the macOS package/artifact/bin branch', () => {
   const text = realStackText();
-  // arm64 appears ONLY in the historical case line; the Intel branch must
-  // never mention arm64.
-  const intelBranch = text.match(/darwin-x86_64-posix-utf8-node22\)\n\s*GATEWAY_PACKAGE="[^"]*"/);
-  assert.ok(intelBranch !== null, 'Intel branch present');
-  assert.ok(!intelBranch![0].includes('arm64'), 'the Intel branch must not bind arm64');
+  const macosBranch = text.match(/darwin-arm64-posix-utf8-node22\|darwin-x86_64-posix-utf8-node22\)\n\s*GATEWAY_PACKAGE="[^"]*"\n\s*GATEWAY_BIN="[^"]*"\n\s*GATEWAY_ARTIFACT="[^"]*"/);
+  assert.ok(macosBranch !== null, 'shared Darwin branch present');
+  assert.ok(macosBranch![0].includes('@project-gateway/macos-core'));
+  assert.ok(macosBranch![0].includes('project-gateway-macos-mcp'));
+  assert.ok(macosBranch![0].includes('project-gateway-macos-core-0.1.0.tgz'));
 });

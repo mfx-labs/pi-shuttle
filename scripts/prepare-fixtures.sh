@@ -16,16 +16,15 @@
 #                                     @ 55f764290a4567a20557f1db19d2a6fb97572a97
 #                                     package @project-gateway/artifact-core
 #                                     artifact project-gateway-artifact-core-0.1.0.tgz
-#   darwin-arm64-posix-utf8-node22    → EXACTLY the same historical identity
-#                                     (the macOS fork is NEVER selected)
-#   darwin-x86_64-posix-utf8-node22   → mfx-labs/project-gateway-macos
-#                                     @ a90284b06420effb1ec1eeef14e7ed82e02c64e9
+#   darwin-arm64-posix-utf8-node22    → mfx-labs/project-gateway-macos
+#   darwin-x86_64-posix-utf8-node22   → SAME macOS Gateway identity
+#                                     @ a18bd287c9ccada7fd31932dbe9937062d0b6bc1
 #                                     package @project-gateway/macos-core
 #                                     artifact project-gateway-macos-core-0.1.0.tgz
 #                                     bin project-gateway-macos-mcp
 #
 # An unknown/unmapped lane fails closed (exit 2) — never a fallback.
-# The Intel tarball is verified AFTER packing: required runtime boundary
+# The macOS tarball is verified AFTER packing: required runtime boundary
 # entries present, forbidden entries absent, package/bin identity exact.
 # The artifact digest recorded here is FIXTURE evidence only: the
 # authoritative manifest digest stays null until an authorized release
@@ -49,24 +48,24 @@
 #             (ADR-043); supersedes the PS-6R public baseline
 #             28f1d3a12382bc145376c8d8a2d87d89495785ec; the public
 #             repository is updated by a separate human-gated push)
-#   Gateway (Intel fork) : commit a90284b06420effb1ec1eeef14e7ed82e02c64e9
-#             (mfx-labs/project-gateway-macos PGM-DIST-1 provenance-complete
-#             local baseline — the first commit whose Git tree contains the
-#             accepted tracked x64 addon; MAC-4 accepted Intel runtime)
+#   Gateway (macOS) : commit a18bd287c9ccada7fd31932dbe9937062d0b6bc1
+#             (mfx-labs/project-gateway-macos PGM-DIST-2 provenance-complete
+#             dual-architecture distributable candidate; no arm64 runtime or
+#             support claim)
 #   pi-guard: tag v0.1.2 @ commit 7a7580cc4cbd7926797564c72269394fc29a860a
 #
 # Output:
-#   <fixture-dir>/project-gateway-artifact-core-0.1.0.tgz   (linux + darwin-arm64)
-#   <fixture-dir>/project-gateway-macos-core-0.1.0.tgz      (darwin-x86_64)
+#   <fixture-dir>/project-gateway-artifact-core-0.1.0.tgz   (linux)
+#   <fixture-dir>/project-gateway-macos-core-0.1.0.tgz      (both darwin targets)
 #   <fixture-dir>/pi-guard-0.1.2.tgz
 #   <fixture-dir>/fixture-manifest.json
 set -euo pipefail
 
 # ─── Lane-bound Gateway identities (authoritative: src/compat/manifest.ts) ──
 # The historical pin literal GATEWAY_COMMIT="55f76429..." is asserted by
-# tests/unit/manifest.test.ts — it is the linux + darwin-arm64 identity.
+# tests/unit/manifest.test.ts — it remains the linux identity.
 GATEWAY_COMMIT="55f764290a4567a20557f1db19d2a6fb97572a97"
-GATEWAY_COMMIT_MACOS_INTEL="a90284b06420effb1ec1eeef14e7ed82e02c64e9"
+GATEWAY_COMMIT_MACOS="a18bd287c9ccada7fd31932dbe9937062d0b6bc1"
 PI_GUARD_COMMIT="7a7580cc4cbd7926797564c72269394fc29a860a"
 PI_GUARD_TAG="v0.1.2"
 
@@ -104,17 +103,15 @@ GATEWAY_PACKAGE="@project-gateway/artifact-core"
 GATEWAY_ARTIFACT="project-gateway-artifact-core-0.1.0.tgz"
 GATEWAY_BIN="project-gateway-mcp"
 GATEWAY_COMMIT_EFFECTIVE="$GATEWAY_COMMIT"
-LANE_IS_INTEL=0
-if [ "$LANE" = "$DARWIN_X86_64_HOST_LANE" ]; then
+LANE_IS_MACOS=0
+if [ "$LANE" = "$DARWIN_ARM64_HOST_LANE" ] || [ "$LANE" = "$DARWIN_X86_64_HOST_LANE" ]; then
   GATEWAY_REPOSITORY="mfx-labs/project-gateway-macos"
   GATEWAY_PACKAGE="@project-gateway/macos-core"
   GATEWAY_ARTIFACT="project-gateway-macos-core-0.1.0.tgz"
   GATEWAY_BIN="project-gateway-macos-mcp"
-  GATEWAY_COMMIT_EFFECTIVE="$GATEWAY_COMMIT_MACOS_INTEL"
-  LANE_IS_INTEL=1
-elif [ "$LANE" = "$LINUX_HOST_LANE" ] || [ "$LANE" = "$DARWIN_ARM64_HOST_LANE" ]; then
-  # linux and darwin-arm64: the SAME historical identity. The macOS fork
-  # is NEVER selected for arm64 (ADR-002 decision 2).
+  GATEWAY_COMMIT_EFFECTIVE="$GATEWAY_COMMIT_MACOS"
+  LANE_IS_MACOS=1
+elif [ "$LANE" = "$LINUX_HOST_LANE" ]; then
   GATEWAY_COMMIT_EFFECTIVE="$GATEWAY_COMMIT"
 else
   echo "fixture: unknown gateway lane: $LANE (accepted: $LINUX_HOST_LANE, $DARWIN_ARM64_HOST_LANE, $DARWIN_X86_64_HOST_LANE)" >&2
@@ -161,29 +158,30 @@ trap 'rm -rf "$WORK"' EXIT
 # Gateway artifact: exact lockfile install + build + pack in a scratch clone.
 git clone -q --no-local "$GATEWAY_CHECKOUT" "$WORK/gateway"
 
-# PGM-DIST-1 provenance correction (a90284b): the accepted Intel addon is a
-# TRACKED file in the pinned Git tree — the clean clone carries it and no
-# external addon staging exists. Prove the addon is tracked in the scratch
-# clone, present in its working tree, and byte-identical to the accepted
-# digest. Fail closed on any violation — never copy, rebuild, regenerate,
-# or substitute the addon.
-if [ "$LANE_IS_INTEL" -eq 1 ]; then
-  ADDON_REL="native/darwin-x64/gateway_fs.node"
-  ADDON_SHA256="0667af87eaf541a92fa299cd21cd2202dc825c6af9da650fd96cebf4553f6382"
-  if ! git -C "$WORK/gateway" ls-files --error-unmatch -- "$ADDON_REL" >/dev/null 2>&1; then
-    echo "fixture: Intel lane requires $ADDON_REL as a TRACKED file in the pinned Git tree (missing; refusing — no external addon staging)" >&2
-    exit 1
-  fi
-  if [ ! -f "$WORK/gateway/$ADDON_REL" ]; then
-    echo "fixture: Intel tracked addon absent from the clean checkout working tree: $ADDON_REL (refusing)" >&2
-    exit 1
-  fi
-  ADDON_ACTUAL="$(shasum -a 256 "$WORK/gateway/$ADDON_REL" | awk '{print $1}')"
-  if [ "$ADDON_ACTUAL" != "$ADDON_SHA256" ]; then
-    echo "fixture: Intel tracked addon digest mismatch: expected $ADDON_SHA256, got $ADDON_ACTUAL (refusing)" >&2
-    exit 1
-  fi
-  echo "fixture: Intel addon proven tracked in the pinned clean tree (sha256 $ADDON_ACTUAL)"
+# PGM-DIST-2 provenance boundary: both native candidates are TRACKED files
+# in the pinned Git tree. The clean clone carries them; no external/local
+# addon staging exists. Fail closed on missing, untracked, or drifted bytes.
+if [ "$LANE_IS_MACOS" -eq 1 ]; then
+  for ADDON_SPEC in \
+    "native/darwin-x64/gateway_fs.node:0667af87eaf541a92fa299cd21cd2202dc825c6af9da650fd96cebf4553f6382" \
+    "native/darwin-arm64/gateway_fs.node:f43705523b6859dc33283b75391e0ebf7cddf0779a877ee2edf7767152a946be"; do
+    ADDON_REL="${ADDON_SPEC%%:*}"
+    ADDON_SHA256="${ADDON_SPEC#*:}"
+    if ! git -C "$WORK/gateway" ls-files --error-unmatch -- "$ADDON_REL" >/dev/null 2>&1; then
+      echo "fixture: macOS lane requires $ADDON_REL as a TRACKED file in the pinned Git tree (missing; refusing — no external addon staging)" >&2
+      exit 1
+    fi
+    if [ ! -f "$WORK/gateway/$ADDON_REL" ]; then
+      echo "fixture: macOS tracked addon absent from the clean checkout working tree: $ADDON_REL (refusing)" >&2
+      exit 1
+    fi
+    ADDON_ACTUAL="$(shasum -a 256 "$WORK/gateway/$ADDON_REL" | awk '{print $1}')"
+    if [ "$ADDON_ACTUAL" != "$ADDON_SHA256" ]; then
+      echo "fixture: macOS tracked addon digest mismatch for $ADDON_REL: expected $ADDON_SHA256, got $ADDON_ACTUAL (refusing)" >&2
+      exit 1
+    fi
+    echo "fixture: macOS addon proven tracked in the pinned clean tree ($ADDON_REL, sha256 $ADDON_ACTUAL)"
+  done
 fi
 
 ( cd "$WORK/gateway" && npm ci --ignore-scripts >/dev/null && npm run build >/dev/null )
@@ -197,27 +195,39 @@ mv "$PI_GUARD_CHECKOUT/$PI_GUARD_TGZ" "$OUT/pi-guard-0.1.2.tgz"
 GATEWAY_SHA="$(shasum -a 256 "$OUT/$GATEWAY_ARTIFACT" | awk '{print $1}')"
 PI_GUARD_SHA="$(shasum -a 256 "$OUT/pi-guard-0.1.2.tgz" | awk '{print $1}')"
 
-# ─── Intel artifact verification (darwin-x86_64 ONLY; PGM-DIST-1 boundary) ──
-# Prove the produced tarball carries the accepted Intel runtime boundary:
+# ─── macOS artifact verification (both Darwin targets; PGM-DIST-2 boundary) ──
+# Prove the produced tarball carries the dual-architecture runtime boundary:
 # required entries present, forbidden entries absent, package/bin identity
 # exact. Fail closed on ANY mismatch. Never applied to historical artifacts.
-if [ "$LANE_IS_INTEL" -eq 1 ]; then
+if [ "$LANE_IS_MACOS" -eq 1 ]; then
   TARBALL="$OUT/$GATEWAY_ARTIFACT"
   ENTRIES="$(tar -tzf "$TARBALL")"
 
-  for p in "package/package.json" "package/native/index.mjs" "package/native/darwin-x64/gateway_fs.node"; do
+  for p in "package/package.json" "package/native/index.mjs" "package/native/darwin-x64/gateway_fs.node" "package/native/darwin-arm64/gateway_fs.node"; do
     if ! printf '%s\n' "$ENTRIES" | grep -Fxq "$p"; then
-      echo "fixture: Intel tarball missing required entry: $p" >&2
+      echo "fixture: macOS tarball missing required entry: $p" >&2
       exit 1
     fi
   done
   if ! printf '%s\n' "$ENTRIES" | grep -q '^package/dist/'; then
-    echo "fixture: Intel tarball missing required entry: package/dist/" >&2
+    echo "fixture: macOS tarball missing required entry: package/dist/" >&2
     exit 1
   fi
-  for p in "package/native/darwin-arm64/gateway_fs.node" "package/native/src" "package/native/build" "package/native/test"; do
+  for p in "package/native/src" "package/native/build" "package/native/test"; do
     if printf '%s\n' "$ENTRIES" | grep -qE "^${p}(/|\$)"; then
-      echo "fixture: Intel tarball contains forbidden entry: $p" >&2
+      echo "fixture: macOS tarball contains forbidden entry: $p" >&2
+      exit 1
+    fi
+  done
+
+  for ADDON_SPEC in \
+    "package/native/darwin-x64/gateway_fs.node:0667af87eaf541a92fa299cd21cd2202dc825c6af9da650fd96cebf4553f6382" \
+    "package/native/darwin-arm64/gateway_fs.node:f43705523b6859dc33283b75391e0ebf7cddf0779a877ee2edf7767152a946be"; do
+    ADDON_REL="${ADDON_SPEC%%:*}"
+    ADDON_SHA256="${ADDON_SPEC#*:}"
+    ADDON_ACTUAL="$(tar -xOf "$TARBALL" "$ADDON_REL" | shasum -a 256 | awk '{print $1}')"
+    if [ "$ADDON_ACTUAL" != "$ADDON_SHA256" ]; then
+      echo "fixture: macOS packed addon digest mismatch for $ADDON_REL: expected $ADDON_SHA256, got $ADDON_ACTUAL (refusing)" >&2
       exit 1
     fi
   done
@@ -227,22 +237,24 @@ if [ "$LANE_IS_INTEL" -eq 1 ]; then
     process.stdin.on("data", (d) => { s += d; });
     process.stdin.on("end", () => {
       const p = JSON.parse(s);
-      const fail = (m) => { console.error("fixture: Intel artifact identity mismatch: " + m); process.exit(1); };
+      const fail = (m) => { console.error("fixture: macOS artifact identity mismatch: " + m); process.exit(1); };
       if (p.name !== "@project-gateway/macos-core") fail("name " + p.name);
       if (p.version !== "0.1.0") fail("version " + p.version);
       if (p.bin === undefined || p.bin["project-gateway-macos-mcp"] !== "./dist/runtime/mcp/cli.js") fail("bin project-gateway-macos-mcp");
     });
   ' || exit 1
 
-  echo "fixture: Intel tarball boundary verified (required entries present; arm64 addon, native/src, native/build, native/test absent)"
-  echo "fixture: Intel artifact identity verified (@project-gateway/macos-core@0.1.0, bin project-gateway-macos-mcp -> ./dist/runtime/mcp/cli.js)"
+  echo "fixture: macOS tarball boundary verified (both native addons present with exact digests; native/src, native/build, native/test absent)"
+  echo "fixture: macOS artifact identity verified (@project-gateway/macos-core@0.1.0, bin project-gateway-macos-mcp -> ./dist/runtime/mcp/cli.js)"
 
   # Six-export loader verification: the EXTRACTED package's native loader
   # must load the extracted tracked addon and expose exactly the six
-  # accepted primitives (fork PGM-DIST-1 boundary; MAC-4 accepted surface).
-  mkdir -p "$WORK/intel-pkg"
-  tar -xzf "$TARBALL" -C "$WORK/intel-pkg"
-  cat > "$WORK/intel-loader-check.mjs" <<'NODE'
+  # accepted primitives on the already-accepted Intel target. This routing
+  # gate does not add an arm64 native-load/acceptance assertion.
+  if [ "$LANE" = "$DARWIN_X86_64_HOST_LANE" ]; then
+    mkdir -p "$WORK/intel-pkg"
+    tar -xzf "$TARBALL" -C "$WORK/intel-pkg"
+    cat > "$WORK/intel-loader-check.mjs" <<'NODE'
 import { pathToFileURL } from 'node:url';
 const mod = await import(pathToFileURL(process.argv[2]).href);
 const addon = mod.loadGatewayFs();
@@ -254,7 +266,8 @@ if (keys !== expected) {
 }
 console.log('fixture: Intel loader exposed exactly the six accepted primitives');
 NODE
-  node "$WORK/intel-loader-check.mjs" "$WORK/intel-pkg/package/native/index.mjs" || exit 1
+    node "$WORK/intel-loader-check.mjs" "$WORK/intel-pkg/package/native/index.mjs" || exit 1
+  fi
 fi
 
 cat > "$OUT/fixture-manifest.json" << EOF

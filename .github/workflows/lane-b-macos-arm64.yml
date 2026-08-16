@@ -1,14 +1,14 @@
 # PS-6 Lane B — macOS arm64 first-class evidence (public multi-repo lane).
 #
-# Purpose: first-class darwin arm64 support evidence: exact Node 22.23.2
+# Purpose: first-class darwin arm64 host-target evidence: exact Node 22.23.2
 # arm64 (architecture ASSERTED), deterministic install, build, typecheck,
 # full test suite, the dedicated mandatory APFS evidence invocation (skips
 # make the evidence job RED, never a silent green), direct
 # executable/package checks, exact Git 2.45.4 provisioning (digest-pinned
 # kernel.org source, built version asserted), volume case-sensitivity
 # record, and the real-stack subsection built on the runner from the
-# EXACT component source commits (mfx-labs/project-gateway @
-# 55f764290a4567a20557f1db19d2a6fb97572a97 (PS-6I local baseline), mfx-labs/pi-guard @
+# EXACT component source commits (mfx-labs/project-gateway-macos @
+# a18bd287c9ccada7fd31932dbe9937062d0b6bc1 (PGM-DIST-2 candidate), mfx-labs/pi-guard @
 # 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2) via the committed
 # scripts/prepare-fixtures.sh boundary — no external fixture hosting, no
 # fixture_source input, no curl fixture download, no secrets (both
@@ -30,11 +30,10 @@ permissions:
 
 env:
   # Repository-owned exact component pins (PS-6 public multi-repo lane).
-  # Gateway: product-contract §6 — "gatewayCommit pins the exact source
-  # closure for the packaged artifact" (mfx-labs/project-gateway, PS-6R
-  # baseline).
+  # Gateway: product-contract §6 exact source closure for the shared macOS
+  # dual-architecture distributable candidate. This is not a support claim.
   # pi-guard: v0.1.2 exact commit.
-  GATEWAY_COMMIT: 55f764290a4567a20557f1db19d2a6fb97572a97
+  GATEWAY_COMMIT: a18bd287c9ccada7fd31932dbe9937062d0b6bc1
   PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
@@ -89,7 +88,7 @@ jobs:
 
       # SIR-PS6-004: mandatory Lane B APFS evidence — a DEDICATED
       # invocation that distinguishes PASS from NOT EXECUTED/SKIPPED.
-      # Any skip makes this evidence job RED: first-class support evidence
+      # Any skip makes this evidence job RED: first-class host-target evidence
       # never silently converts a missing APFS evidence test into green.
       - name: Lane B APFS evidence (mandatory — no silent skip)
         run: |
@@ -170,8 +169,8 @@ jobs:
       - name: Checkout Gateway exact commit
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
-          repository: mfx-labs/project-gateway
-          ref: 55f764290a4567a20557f1db19d2a6fb97572a97
+          repository: mfx-labs/project-gateway-macos
+          ref: a18bd287c9ccada7fd31932dbe9937062d0b6bc1
           path: gateway
           persist-credentials: false
 
@@ -208,9 +207,10 @@ jobs:
           bash scripts/prepare-fixtures.sh \
             --gateway-checkout "${{ github.workspace }}/gateway" \
             --pi-guard-checkout "${{ github.workspace }}/pi-guard" \
-            --out "$RUNNER_TEMP/fixtures"
+            --out "$RUNNER_TEMP/fixtures" \
+            --lane darwin-arm64-posix-utf8-node22
           test -f "$RUNNER_TEMP/fixtures/fixture-manifest.json"
-          test -f "$RUNNER_TEMP/fixtures/project-gateway-artifact-core-0.1.0.tgz"
+          test -f "$RUNNER_TEMP/fixtures/project-gateway-macos-core-0.1.0.tgz"
           test -f "$RUNNER_TEMP/fixtures/pi-guard-0.1.2.tgz"
           cat "$RUNNER_TEMP/fixtures/fixture-manifest.json"
 
@@ -241,4 +241,5 @@ jobs:
           NODE_BIN: "${{ runner.temp }}/node/bin/node"
           GATEWAY_COMMIT: "${{ env.GATEWAY_COMMIT }}"
           PI_GUARD_COMMIT: "${{ env.PI_GUARD_COMMIT }}"
+          GATEWAY_LANE: darwin-arm64-posix-utf8-node22
         run: bash scripts/ci-lane-b-real-stack.sh

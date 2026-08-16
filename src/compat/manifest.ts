@@ -117,15 +117,14 @@ export const HISTORICAL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freez
 });
 
 /**
- * macOS Intel fork descriptor (`mfx-labs/project-gateway-macos`): the
- * identity for the darwin-x86_64 lane only, bound to the PGM-DIST-1
- * provenance-complete commit — the first whose Git tree contains the
- * accepted tracked x64 addon (packaging boundary closed; MAC-4 Intel
- * runtime accepted). Arm64 NEVER uses this descriptor.
+ * macOS Gateway descriptor (`mfx-labs/project-gateway-macos`): the shared
+ * distribution identity for both Darwin host targets, bound to the
+ * PGM-DIST-2 provenance-complete dual-architecture candidate. This is a
+ * distribution binding only, not a macOS support or runtime-acceptance claim.
  */
 export const MACOS_INTEL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.freeze({
   repository: 'mfx-labs/project-gateway-macos',
-  commit: 'a90284b06420effb1ec1eeef14e7ed82e02c64e9',
+  commit: 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1',
   version: '0.1.0',
   packageName: '@project-gateway/macos-core',
   artifactFileName: 'project-gateway-macos-core-0.1.0.tgz',
@@ -137,7 +136,7 @@ export const MACOS_INTEL_GATEWAY_DESCRIPTOR: GatewayLaneDescriptor = Object.free
 /** The authoritative per-host-lane Gateway descriptor map (ADR-002; the ONLY lane-selection authority). */
 export const GATEWAY_LANE_DESCRIPTORS: Readonly<Record<string, GatewayLaneDescriptor>> = Object.freeze({
   [LINUX_HOST_LANE]: HISTORICAL_GATEWAY_DESCRIPTOR,
-  [DARWIN_ARM64_HOST_LANE]: HISTORICAL_GATEWAY_DESCRIPTOR,
+  [DARWIN_ARM64_HOST_LANE]: MACOS_INTEL_GATEWAY_DESCRIPTOR,
   [DARWIN_X86_64_HOST_LANE]: MACOS_INTEL_GATEWAY_DESCRIPTOR,
 });
 

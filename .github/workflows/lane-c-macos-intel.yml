@@ -11,8 +11,8 @@
 # case-sensitivity record, and the real-stack subsection built on the
 # runner from the EXACT component source commits — the macOS Intel Gateway
 # fork (mfx-labs/project-gateway-macos @
-# a90284b06420effb1ec1eeef14e7ed82e02c64e9 = PGM-DIST-1 pinned
-# provenance-complete Git-tree candidate; the historical
+# a18bd287c9ccada7fd31932dbe9937062d0b6bc1 = PGM-DIST-2 pinned
+# provenance-complete dual-architecture candidate; the historical
 # mfx-labs/project-gateway pin is NEVER used
 # by Lane C) and mfx-labs/pi-guard @
 # 7a7580cc4cbd7926797564c72269394fc29a860a = v0.1.2 — via the committed
@@ -41,13 +41,12 @@ permissions:
 
 env:
   # Repository-owned exact component pins (PS-6 public multi-repo lane).
-  # Lane C Gateway: the macOS Intel fork at the PGM-DIST-1 pinned
-  # provenance-complete Git-tree candidate commit (the first whose Git
-  # tree carries the tracked darwin-x64 addon required by the Intel
-  # runtime boundary). CI wiring consumes technical identity only —
+  # Lane C Gateway: the macOS fork at the PGM-DIST-2 pinned
+  # provenance-complete dual-architecture candidate commit. CI wiring
+  # consumes technical identity only —
   # never a release, availability, or support claim. The checked-out
   # fork HEAD is asserted against this pin before use.
-  GATEWAY_COMMIT: a90284b06420effb1ec1eeef14e7ed82e02c64e9
+  GATEWAY_COMMIT: a18bd287c9ccada7fd31932dbe9937062d0b6bc1
   PI_GUARD_COMMIT: 7a7580cc4cbd7926797564c72269394fc29a860a
 
 jobs:
@@ -176,7 +175,7 @@ jobs:
       # Exact public component checkouts — full-SHA-pinned refs, never
       # branches/tags as authority. Public repositories: no credentials.
       # Lane C materializes ONLY the macOS Intel fork at the pinned
-      # PGM-DIST-1 provenance-complete Git-tree commit (fetched from the
+      # PGM-DIST-2 provenance-complete Git-tree commit (fetched from the
       # public remote — an operational Git fact, not a release claim).
       # The historical Gateway repository is never checked out by this
       # lane.
@@ -184,7 +183,7 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
           repository: mfx-labs/project-gateway-macos
-          ref: a90284b06420effb1ec1eeef14e7ed82e02c64e9
+          ref: a18bd287c9ccada7fd31932dbe9937062d0b6bc1
           path: gateway
           persist-credentials: false
 

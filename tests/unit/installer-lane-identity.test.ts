@@ -5,8 +5,8 @@
  *
  *   - linux:        historical descriptor → artifact-core/artifact-core tgz/
  *                   project-gateway-mcp bin, byte-identical behavior;
- *   - darwin-arm64: the SAME historical descriptor — never the fork;
- *   - darwin-x86_64: the macOS fork descriptor (macos-core identity, Intel
+ *   - darwin-arm64 and darwin-x86_64: the SAME macOS fork descriptor
+ *                   (macos-core identity, dual-architecture
  *                   artifact filename, macos-mcp bin) — a fixture carrying
  *                   ONLY the Intel identity proves no historical
  *                   package/artifact/bin constant is consumed;
@@ -32,7 +32,7 @@ import { buildTarball, cleanupEnv, GATEWAY_ARTIFACT_NAME, GATEWAY_FIXTURE_BIN, g
 const LINUX_LANE = 'linux-x86_64-posix-utf8-node22';
 const ARM64_LANE = 'darwin-arm64-posix-utf8-node22';
 const INTEL_LANE = 'darwin-x86_64-posix-utf8-node22';
-const INTEL_COMMIT = 'a90284b06420effb1ec1eeef14e7ed82e02c64e9';
+const INTEL_COMMIT = 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1';
 const INTEL_ARTIFACT_NAME = 'project-gateway-macos-core-0.1.0.tgz';
 const INTEL_IDENTITY = { packageName: '@project-gateway/macos-core', artifactFileName: INTEL_ARTIFACT_NAME, binName: 'project-gateway-macos-mcp' };
 const HISTORICAL_IDENTITY = { packageName: '@project-gateway/artifact-core', artifactFileName: GATEWAY_ARTIFACT_NAME, binName: 'project-gateway-mcp' };
@@ -84,13 +84,13 @@ test('C1: linux lane selects the historical descriptor and installs the historic
   }
 });
 
-test('C1: darwin-arm64 keeps the SAME historical descriptor — never the macOS fork', () => {
+test('C1: darwin-arm64 shares the macOS descriptor with darwin-x86_64', () => {
   const selected = gatewayDescriptorForLane(ARM64_LANE);
   assert.ok(selected.ok);
   if (!selected.ok) return;
-  assert.equal(selected.descriptor, HISTORICAL_GATEWAY_DESCRIPTOR, 'arm64 must resolve to the frozen historical descriptor');
-  assert.notEqual(selected.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR, 'arm64 must never resolve to the macOS fork');
-  assert.equal(selected.descriptor.binName, 'project-gateway-mcp');
+  assert.equal(selected.descriptor, MACOS_INTEL_GATEWAY_DESCRIPTOR, 'arm64 must resolve to the frozen macOS descriptor');
+  assert.equal(selected.descriptor.packageName, '@project-gateway/macos-core');
+  assert.equal(selected.descriptor.binName, 'project-gateway-macos-mcp');
 });
 
 test('C1: darwin-x86_64 selects ONLY the macOS fork descriptor with the Intel identity', () => {

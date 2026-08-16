@@ -8,11 +8,9 @@
  *
  *   - Lane A (Linux) carries no Gateway wiring at all — historical
  *     self-contained regression lane, untouched;
- *   - Lane B (arm64) stays on the historical mfx-labs/project-gateway
- *     pin with NO lane propagation (the macOS fork is never selected);
- *   - Lane C (Intel x64) checks out ONLY mfx-labs/project-gateway-macos
- *     at the pinned PGM-DIST-1 provenance-complete Git-tree candidate
- *     commit, passes its lane EXPLICITLY to
+ *   - Lane B (arm64) and Lane C (Intel x64) check out the same
+ *     mfx-labs/project-gateway-macos PGM-DIST-2 candidate commit and pass
+ *     their host-target lanes EXPLICITLY to
  *     the fixture builder (--lane) and to the real-stack/handshake
  *     surface (GATEWAY_LANE), and verifies the checked-out fork HEAD
  *     against the exact pin before any use.
@@ -29,7 +27,8 @@ const REPO = join(fileURLToPath(new URL('..', import.meta.url)), '..', '..');
 const WORKFLOWS = join(REPO, '.github', 'workflows');
 
 const HISTORICAL_COMMIT = '55f764290a4567a20557f1db19d2a6fb97572a97';
-const INTEL_COMMIT = 'a90284b06420effb1ec1eeef14e7ed82e02c64e9';
+const MACOS_COMMIT = 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1';
+const ARM64_LANE = 'darwin-arm64-posix-utf8-node22';
 const INTEL_LANE = 'darwin-x86_64-posix-utf8-node22';
 
 function laneText(name: string): string {
@@ -47,27 +46,26 @@ test('C3B2 lane A: Linux regression carries no Gateway fixture/real-stack wiring
   assert.ok(!text.includes('ci-lane-b-real-stack'), 'lane A must not run the real-stack orchestrator');
   assert.ok(!text.includes('GATEWAY_LANE'), 'lane A must not propagate a Gateway lane');
   assert.ok(!text.includes('--lane'), 'lane A must not pass a fixture lane');
-  assert.ok(!text.includes(INTEL_COMMIT), 'lane A must not reference the fork commit');
+  assert.ok(!text.includes(MACOS_COMMIT), 'lane A must not reference the macOS commit');
   assert.ok(!text.includes(HISTORICAL_COMMIT), 'lane A must not reference the historical commit');
 });
 
-test('C3B2 lane B: darwin-arm64 remains on the historical Gateway pin — never the fork', () => {
+test('C3B2 lane B: darwin-arm64 routes to the pinned macOS Gateway candidate', () => {
   const text = laneB();
-  assert.ok(text.includes(`GATEWAY_COMMIT: ${HISTORICAL_COMMIT}`), 'lane B workflow pin stays the historical commit');
-  assert.ok(text.includes('repository: mfx-labs/project-gateway\n'), 'lane B checks out the historical Gateway repository');
-  assert.ok(text.includes(`ref: ${HISTORICAL_COMMIT}`), 'lane B checkout ref stays the historical commit');
-  assert.ok(!text.includes(INTEL_COMMIT), 'lane B must never reference the fork commit');
-  assert.ok(!text.includes('project-gateway-macos'), 'lane B must never reference the macOS fork');
-  assert.ok(!text.includes('--lane'), 'lane B keeps the historical default (no --lane propagation)');
-  assert.ok(!text.includes('GATEWAY_LANE'), 'lane B keeps the historical default (no GATEWAY_LANE propagation)');
+  assert.ok(text.includes(`GATEWAY_COMMIT: ${MACOS_COMMIT}`), 'lane B workflow pin is the macOS candidate commit');
+  assert.ok(text.includes('repository: mfx-labs/project-gateway-macos\n'), 'lane B checks out the macOS Gateway repository');
+  assert.ok(text.includes(`ref: ${MACOS_COMMIT}`), 'lane B checkout ref is the exact macOS candidate commit');
+  assert.ok(!text.includes(HISTORICAL_COMMIT), 'lane B must not reference the historical Gateway commit');
+  assert.ok(text.includes(`--lane ${ARM64_LANE}`), 'lane B passes the arm64 host-target explicitly to fixture preparation');
+  assert.ok(text.includes(`GATEWAY_LANE: ${ARM64_LANE}`), 'lane B passes the arm64 host-target explicitly to the real stack');
   assert.ok(!text.includes(INTEL_LANE), 'lane B must never carry the Intel lane literal');
 });
 
 test('C3B2 lane C: Intel materialization comes from the pinned provenance-complete fork candidate commit', () => {
   const text = laneC();
-  assert.ok(text.includes(`GATEWAY_COMMIT: ${INTEL_COMMIT}`), 'lane C workflow pin is the pinned provenance-complete fork candidate');
+  assert.ok(text.includes(`GATEWAY_COMMIT: ${MACOS_COMMIT}`), 'lane C workflow pin is the pinned provenance-complete fork candidate');
   assert.ok(text.includes('repository: mfx-labs/project-gateway-macos\n'), 'lane C checks out only the macOS Intel fork');
-  assert.ok(text.includes(`ref: ${INTEL_COMMIT}`), 'lane C checkout ref is the exact pinned fork candidate commit');
+  assert.ok(text.includes(`ref: ${MACOS_COMMIT}`), 'lane C checkout ref is the exact pinned fork candidate commit');
   assert.ok(!text.includes(HISTORICAL_COMMIT), 'lane C must never reference the historical commit');
   assert.ok(!text.includes('repository: mfx-labs/project-gateway\n'), 'lane C must never check out the historical Gateway repository');
 });
@@ -109,10 +107,10 @@ test('C3B2 lane C: no historical Gateway package/commit hardcoding remains for I
   }
 });
 
-test('C3B2 lane wiring: no workflow promotes arm64 to the fork and no workflow writes artifact SHA authority', () => {
+test('C3B2 lane wiring: both Darwin workflows use the shared candidate without writing artifact SHA authority', () => {
   const arm64 = laneB();
   assert.ok(!arm64.includes('darwin-x86_64-posix-utf8-node22'), 'arm64 workflow must not carry the Intel lane');
-  assert.ok(!arm64.includes('project-gateway-macos'), 'arm64 workflow must not reference the fork');
+  assert.ok(arm64.includes('project-gateway-macos'), 'arm64 workflow must reference the shared macOS candidate');
   for (const name of ['lane-a-linux-regression.yml', 'lane-b-macos-arm64.yml', 'lane-c-macos-intel.yml']) {
     const text = laneText(name);
     assert.ok(!text.includes('artifactSha256'), `${name}: workflows never write artifact SHA authority (B digest is run evidence only)`);

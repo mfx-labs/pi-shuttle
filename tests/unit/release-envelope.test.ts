@@ -29,7 +29,7 @@ const SHA = 'a'.repeat(64);
 const LINUX_LANE = 'linux-x86_64-posix-utf8-node22';
 const ARM64_LANE = 'darwin-arm64-posix-utf8-node22';
 const INTEL_LANE = 'darwin-x86_64-posix-utf8-node22';
-const INTEL_COMMIT = 'a90284b06420effb1ec1eeef14e7ed82e02c64e9';
+const INTEL_COMMIT = 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1';
 const INTEL_ARTIFACT = 'project-gateway-macos-core-0.1.0.tgz';
 
 /** A structurally valid envelope (mutable for mutation tests). */
@@ -72,12 +72,12 @@ test('envelope: linux lane validates the historical gateway identity', () => {
   }
 });
 
-test('envelope: darwin-arm64 lane remains exactly historical — never the fork', () => {
-  const result = validateEnvelope(validEnvelope(), ARM64_LANE);
-  assert.equal(result.ok, true, 'the historical envelope must validate for arm64');
-  const fork = validateEnvelope(validIntelEnvelope(), ARM64_LANE);
-  assert.equal(fork.ok, false, 'the Intel envelope must never validate for arm64');
-  if (!fork.ok) assert.equal(fork.code, 'ERR-REL-ENVELOPE-PIN');
+test('envelope: darwin-arm64 lane validates only the shared macOS identity', () => {
+  const result = validateEnvelope(validIntelEnvelope(), ARM64_LANE);
+  assert.equal(result.ok, true, 'the shared macOS envelope must validate for arm64');
+  const historical = validateEnvelope(validEnvelope(), ARM64_LANE);
+  assert.equal(historical.ok, false, 'the historical envelope must not validate for arm64');
+  if (!historical.ok) assert.equal(historical.code, 'ERR-REL-ENVELOPE-PIN');
 });
 
 test('envelope: darwin-x86_64 lane validates only the macOS fork identity', () => {
