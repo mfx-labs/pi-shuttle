@@ -35,13 +35,17 @@ Register a project:
 pi-shuttle project add /path/to/project
 ```
 
-Start the Project Gateway MCP server:
+At this point, choose how your MCP client will connect.
+
+### Direct/local MCP client
+
+For a local MCP client that can launch or attach to a stdio MCP server, use:
 
 ```bash
 pi-shuttle start
 ```
 
-That is the normal workflow:
+`pi-shuttle start` launches Project Gateway as a **foreground stdio MCP server**. Its stdin/stdout are reserved for the MCP protocol, so running it directly in a terminal can look idle while it waits for an MCP client. That is expected behavior, not a hang.
 
 ```text
 install
@@ -50,10 +54,39 @@ doctor
    ↓
 project add
    ↓
-start
+pi-shuttle start
    ↓
-AI client ↔ Project Gateway ↔ registered project
+local MCP client ↔ Project Gateway ↔ registered project
 ```
+
+### ChatGPT through Secure MCP Tunnel
+
+For ChatGPT, **do not keep a separate `pi-shuttle start` process running yourself**. Configure OpenAI Secure MCP Tunnel and set the local stdio MCP command to:
+
+```text
+pi-shuttle start
+```
+
+`tunnel-client` then spawns pi-shuttle when needed and carries the MCP protocol over the private outbound tunnel.
+
+```text
+install
+   ↓
+doctor
+   ↓
+project add
+   ↓
+configure Secure MCP Tunnel
+   ↓
+tunnel-client run
+   └── spawns: pi-shuttle start
+                  ↓
+             Project Gateway
+                  ↓
+           registered project
+```
+
+See [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md) for the complete ChatGPT onboarding flow.
 
 The installer detects the host internally, selects the appropriate release envelope, downloads the pinned components, and verifies their SHA-256 digests before installation. End users do not need to clone Project Gateway or pi-guard, run `prepare-fixtures.sh`, or provide `--artifact-dir`.
 
@@ -148,11 +181,13 @@ pi-shuttle project list
 # Remove a registered project
 pi-shuttle project remove /path/to/project
 
-# Start the MCP server
+# Start the foreground stdio MCP server for a direct/local MCP client
 pi-shuttle start
 ```
 
-`project add` registers an operator-selected Git repository. Re-adding the same canonical project is safe. `start` launches the Gateway using the verified installed component recorded in the pi-shuttle receipt.
+`project add` registers an operator-selected Git repository. Re-adding the same canonical project is safe.
+
+`start` launches the Gateway using the verified installed component recorded in the pi-shuttle receipt. It remains in the foreground and waits for MCP traffic over stdin/stdout. For ChatGPT through Secure MCP Tunnel, `tunnel-client` should spawn `pi-shuttle start`; you do not run a second standalone copy yourself.
 
 ## Security model
 
