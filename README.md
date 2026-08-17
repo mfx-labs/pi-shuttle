@@ -1,214 +1,253 @@
 # pi-shuttle
 
-pi-shuttle is the local operator layer that composes **Project Gateway**
-and **pi-guard** into one product, so you can let AI clients work with
-your coding projects through small, deliberate, bounded interfaces —
-instead of handing them a shell, a filesystem, or your Git push access.
+**A local, bounded way to connect AI coding agents to your projects.**
 
-It is built around one idea: useful project access should not require
-dangerous access. pi-shuttle registers the projects you choose, installs
-and verifies the components that serve them, checks that your
-environment is healthy, and starts the gateway that AI clients talk to.
-All of that happens on your machine, under your control.
+pi-shuttle packages **Project Gateway** and **pi-guard** into one operator-facing product. It installs and verifies the reviewed components, registers only the projects you choose, checks that the environment is healthy, and starts a constrained MCP gateway — without giving an AI agent a general-purpose shell, unrestricted filesystem access, or Git push authority.
 
-The design deliberately does **not** expose:
+> **v0.1.0 is available now.**
+>
+> Product-supported: **Linux x86_64** and **macOS Intel x86_64**.
+> Apple Silicon follows the same macOS installation path, but is not yet product-supported.
 
-- **arbitrary shell execution** — there is no generic shell/exec surface;
-- **unrestricted filesystem access** — access is scoped to registered
-  projects through containment rules;
-- **Git mutation / push authority** — Git interaction is read-only
-  inspection, never push or rewrite;
-- **AI self-approval / self-issued authority** — the system has no
-  approve/issue/activate surface for an AI client to grant itself power.
+## Install
 
-## Status
+Requirements:
 
-**Pre-release and under active development.** There is no stable
-production release yet, no published one-line installer URL, and no
-package-manager distribution. The installer and CLI work today from a
-developer checkout with locally built, digest-verified component
-artifacts.
+- **Node.js >= 22.19.0**
+- **Git >= 2.30.0**
+- **Pi >= 0.83.0**
 
-v0.1.0 currently supports **Linux x86_64 only**. macOS support is
-deferred while the controlled-write boundary is being made portable
-without weakening its security guarantees. Windows and anything else are
-unsupported (the installer refuses). See [Supported
-platforms](#supported-platforms) for the full matrix and requirements.
-
-Runtime requirements: **Node >= 22.19.0**, **Git >= 2.30.0**, and
-**Pi 0.83.0+** (0.83.0 is the known-good baseline; newer Pi versions are
-accepted only when the committed pi-guard compatibility probe passes).
-
-## Official release (v0.1.0) — after the publication gate
-
-The future one-command install uses a VERSION-SPECIFIC installer URL
-(no floating `latest`), conceptually:
+Install the version-pinned release:
 
 ```bash
 curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.0/install.sh | bash
 ```
 
-**This URL is not live yet.** It becomes available only after the
-separate publication gate (release hosting, artifact distribution
-authorization, and the v0.1.0 license decision). The release installer
-downloads and digest-verifies every component itself — the end user
-never clones Project Gateway or pi-guard, runs `prepare-fixtures.sh`,
-or passes `--artifact-dir`. After installing:
+Then verify the installation:
 
 ```bash
-pi-shuttle doctor               # health check
-pi-shuttle project add <path>   # register a project
-pi-shuttle start                # start the Project Gateway MCP server
+pi-shuttle doctor
 ```
 
-See [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md)
-for the ChatGPT integration path. Release-candidate assets are built
-locally with `scripts/build-release.mjs` into `dist-release/v0.1.0/`.
+Register a project:
+
+```bash
+pi-shuttle project add /path/to/project
+```
+
+Start the Project Gateway MCP server:
+
+```bash
+pi-shuttle start
+```
+
+That is the normal workflow:
+
+```text
+install
+   ↓
+doctor
+   ↓
+project add
+   ↓
+start
+   ↓
+AI client ↔ Project Gateway ↔ registered project
+```
+
+The installer detects the host internally, selects the appropriate release envelope, downloads the pinned components, and verifies their SHA-256 digests before installation. End users do not need to clone Project Gateway or pi-guard, run `prepare-fixtures.sh`, or provide `--artifact-dir`.
+
+## What pi-shuttle does
+
+Three components work together:
+
+- **pi-shuttle** — the operator layer for installation, project registration, health checks, and startup.
+- **Project Gateway** — the bounded MCP/project-access component. It exposes exactly nine public MCP tools for validation, inspection, verification, controlled artifact drafting/persistence, and change inspection.
+- **pi-guard** — the Pi-side enforcement component that keeps the same boundaries meaningful inside the coding-agent environment.
+
+pi-shuttle pins the component identities used by a release and verifies downloaded artifacts before activation.
+
+## Why it exists
+
+Giving an AI coding agent access to a project often means giving it much more authority than the task actually needs.
+
+pi-shuttle takes the opposite approach:
+
+```text
+useful project access
+        ≠
+unrestricted machine access
+```
+
+| Boundary | pi-shuttle model |
+|---|---|
+| Arbitrary shell execution | No generic shell or exec MCP tool |
+| Filesystem access | Confined to registered project boundaries |
+| Git mutation | Inspection only; no push/rebase/rewrite authority |
+| Self-issued authority | AI clients cannot approve or grant themselves authority |
+| Component identity | Version- and digest-verified |
+| Installation state | Per-user, operator-owned |
+| Unsupported environments | Fail closed instead of silently falling back |
+
+## Supported platforms
+
+| Platform | Architecture | v0.1.0 |
+|---|---|---|
+| Linux | x86_64 | **Supported** |
+| macOS | Intel x86_64 | **Supported** |
+| macOS | Apple Silicon arm64 | **Not product-supported yet** |
+| Windows | — | Unsupported |
+
+### Apple Silicon
+
+Apple Silicon uses the **same normal macOS installation journey** as Intel Macs. There is no public architecture, lane, target, experimental, or acceptance selector.
+
+The v0.1.0 macOS Gateway package contains both x86_64 and arm64 native candidates, and the installer can structurally route an arm64 Mac to the shared macOS release. Physical Apple Silicon runtime acceptance has not yet been completed.
+
+Therefore:
+
+- arm64 is **not product-supported in v0.1.0**;
+- arm64 is **not known incompatible**;
+- no Apple Silicon physical/runtime acceptance is claimed.
+
+## One installer, platform-specific verified components
+
+A single `install.sh` detects the host internally:
+
+```text
+                     install.sh
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+        Linux x86_64              macOS
+              │                     │
+      Linux release envelope   macOS release envelope
+              │                     │
+      Project Gateway          shared macOS Gateway
+                                   │
+                          ┌────────┴────────┐
+                          │                 │
+                        x86_64            arm64
+                       supported      candidate path
+```
+
+The installer selects the correct release envelope, verifies its digest, verifies the component artifacts it references, and refuses target or identity mismatches. Bootstrap validation then derives the actual host target again before activation.
+
+## Common commands
+
+```bash
+# Inspect installation and environment health
+pi-shuttle doctor
+
+# Register a Git project
+pi-shuttle project add /path/to/project
+
+# List registered projects
+pi-shuttle project list
+
+# Remove a registered project
+pi-shuttle project remove /path/to/project
+
+# Start the MCP server
+pi-shuttle start
+```
+
+`project add` registers an operator-selected Git repository. Re-adding the same canonical project is safe. `start` launches the Gateway using the verified installed component recorded in the pi-shuttle receipt.
+
+## Security model
+
+### Bounded MCP surface
+
+Project Gateway exposes exactly nine public tools rather than a generic command runner:
+
+- `validate-artifact`
+- `inspect-stored-record`
+- `inspect-registry`
+- `inspect-audit-history`
+- `verify-record`
+- `enumerate-class`
+- `draft-artifact`
+- `persist-artifact`
+- `inspect-changes`
+
+There is no general shell tool, Git push tool, or AI-facing approval/grant surface.
+
+### Workspace confinement
+
+Project access is tied to projects explicitly registered by the operator. Path resolution and containment checks prevent arbitrary filesystem locations from being treated as part of the workspace.
+
+### Read-only Git inspection
+
+Git is used for inspection and project identity, not mutation. The Gateway does not provide AI clients with push, rebase, history-rewrite, or equivalent repository authority.
+
+### Verified installation
+
+Release artifacts are bound to release envelopes and SHA-256 digests. The installer refuses mismatched artifacts rather than silently accepting another package or platform variant.
+
+### Per-user state
+
+Installation and trusted state are operator-owned and per-user. `pi-shuttle doctor` inspects state but does not silently repair or mutate it.
+
+### Fail closed
+
+Unknown platforms, target/envelope mismatches, component drift, invalid receipts, integrity failures, and incompatible runtime conditions are surfaced as failures instead of falling back to another target.
+
+## macOS distribution note
+
+v0.1.0 is **not code-signed or Apple-notarized** and must not be described as signed or notarized distribution.
+
+On macOS, quarantine handling occurs after artifact digest verification and before activation.
+
+## Release
+
+Current release: **[pi-shuttle v0.1.0](https://github.com/mfx-labs/pi-shuttle/releases/tag/v0.1.0)**
+
+The public release contains one combined multi-platform inventory:
+
+```text
+install.sh
+pi-shuttle-0.1.0-linux-x86_64.json
+pi-shuttle-0.1.0-macos.json
+pi-shuttle-0.1.0.tgz
+project-gateway-artifact-core-0.1.0.tgz
+project-gateway-macos-core-0.1.0.tgz
+pi-guard-0.1.2.tgz
+SHA256SUMS
+```
+
+Use `SHA256SUMS` to independently verify downloaded release assets.
 
 ## Development from source
 
-Current pre-release path: build pi-shuttle from source, then install the
-composed product with locally built component artifacts.
+The public release is the recommended installation path. For development:
 
 ```bash
 git clone https://github.com/mfx-labs/pi-shuttle.git
 cd pi-shuttle
 npm ci
 npm run build
+npm test
 ```
 
-### Local artifact lane
-
-```bash
-bash scripts/prepare-fixtures.sh \
-  --gateway-checkout <path-to-project-gateway-checkout> \
-  --pi-guard-checkout <path-to-pi-guard-checkout> \
-  --out <artifact-dir>
-```
-
-Then run the installer in batch mode (interactive mode prompts for the
-same choices):
-
-```bash
-./install.sh --batch --gateway yes --pi-guard yes --artifact-dir <artifact-dir>
-```
-
-This installs the `pi-shuttle` command into `~/.local/bin`, verifies
-every component, and writes an installation receipt. From there:
-
-```bash
-pi-shuttle doctor               # health check: platform, Node, Git, Pi,
-                                # components, config, registered projects
-pi-shuttle project add <path>   # register a coding project
-pi-shuttle project list         # show registered projects
-pi-shuttle start                # start the Project Gateway MCP server
-```
-
-`pi-shuttle project add <path>` registers a Git repository you choose;
-re-adding the same path is a safe no-op replay. `pi-shuttle start` keeps
-stdout as pure MCP protocol for the AI client. See
-[`docs/installation-contract.md`](docs/installation-contract.md) and
-[`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) for the
-full contract.
-
-## What is pi-shuttle?
-
-Three components work together:
-
-- **pi-shuttle** — the end-user layer: installation, project
-  registration, health checks (`doctor`), and startup (`start`);
-- **Project Gateway** — the bounded MCP/project-access component: a
-  read-and-inspect MCP server that serves exactly nine tools for
-  registered projects (validate, inspect, verify, enumerate, draft,
-  persist, change tracking) — no shell, no push, no approval surface;
-- **pi-guard** — the Pi-side enforcement component that makes the same
-  boundaries real inside the Pi environment.
-
-```text
-User / AI client
-       |
-       v
-Project Gateway
-       |
-   registered project
-
-pi-shuttle
-  ├─ installs / verifies Gateway
-  ├─ installs / verifies pi-guard
-  ├─ project management
-  ├─ doctor
-  └─ start
-
-Pi
- └─ pi-guard
-```
-
-Project Gateway and pi-guard are separate, independently versioned
-repositories (mfx-labs/project-gateway, mfx-labs/pi-guard); pi-shuttle
-pins exact versions of both and verifies their digests at install time,
-so what you run is exactly what was reviewed.
-
-## Security boundaries
-
-- **Bounded tool surface.** The Gateway exposes exactly nine public MCP
-  tools for inspection, validation, and controlled artifact
-  drafting/persistence. There is no generic shell/exec tool and no
-  approve/issue/grant surface — an AI client cannot invoke arbitrary
-  commands and cannot issue itself authority.
-- **Workspace confinement.** Access resolves against registered
-  projects only; containment rules keep reads inside the workspace.
-- **Read-only Git.** Git interaction is read-only inspection
-  (ownership, mode, and fingerprint checks included) — never push,
-  rebase, or rewrite.
-- **Digest-verified installation.** Components are installed from
-  artifacts verified against pinned SHA-256 digests; the installer
-  refuses unknown or mismatched artifacts.
-- **Per-user, operator-owned state.** Installation is per-user under
-  `~/.local`, never root; stores and configuration are created with
-  owner-only permissions; `doctor` never mutates state.
-- **Fail-closed health.** `pi-shuttle doctor` reports unsupported
-  platforms, missing components, and failed compatibility probes as
-  failures (exit 2 / exit 1), never as silent success.
-
-## Supported platforms
-
-| Platform | Architecture | Requirement |
-|---|---|---|
-| Linux | x86_64 | Node >= 22.19.0, Git >= 2.30.0, Pi 0.83.0+ |
-| macOS | arm64 / Intel | **not supported in v0.1.0** (deferred) |
-| Windows | — | not supported |
-
-v0.1.0 currently supports Linux x86_64. macOS support is deferred while
-the Gateway controlled-write boundary is being made portable without
-weakening its security guarantees; the installer refuses macOS in
-v0.1.0. A future macOS Intel distribution through the accepted macOS
-Gateway fork (`mfx-labs/project-gateway-macos`) is contracted (ADR-002)
-but NOT implemented — it is not a support claim.
-
-Runtime versions are minimums, not exact pins: the validated CI
-baselines (Node 22.23.2, Git 2.45.4, Pi 0.83.0) are evidence, not
-requirements.
+The repository also contains release-engineering tooling for building from exact, provenance-bound Project Gateway and pi-guard checkouts. Normal users do not need to clone those component repositories themselves.
 
 ## Documentation
 
-- [`docs/product-contract.md`](docs/product-contract.md) — what the
-  product is and is not, composition and authority separation
-- [`docs/installation-contract.md`](docs/installation-contract.md) —
-  installer behavior, version pinning, preflight refusals
-- [`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) —
-  the exact `pi-shuttle` command surface and `doctor` status vocabulary
-- [`docs/platform-support-contract.md`](docs/platform-support-contract.md) —
-  the platform support matrix and its evidence
-- [`docs/component-boundaries.md`](docs/component-boundaries.md) — what
-  each repository owns
-- [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md) —
-  ChatGPT integration: Secure MCP Tunnel onboarding (Business/
-  Enterprise/Edu workspace + developer mode + custom MCP app)
+- [`docs/product-contract.md`](docs/product-contract.md) — product boundaries and composition
+- [`docs/platform-support-contract.md`](docs/platform-support-contract.md) — platform support and evidence policy
+- [`docs/installation-contract.md`](docs/installation-contract.md) — installer and verification behavior
+- [`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) — operator command surface
+- [`docs/component-boundaries.md`](docs/component-boundaries.md) — repository ownership boundaries
+- [`docs/chatgpt-secure-mcp-tunnel.md`](docs/chatgpt-secure-mcp-tunnel.md) — ChatGPT / Secure MCP Tunnel integration
 - [`docs/decisions/`](docs/decisions/) — architecture decision records
-- [`docs/reports/`](docs/reports/) — gate implementation and evidence
-  reports
+- [`docs/reports/`](docs/reports/) — implementation and acceptance evidence
+
+## Component repositories
+
+- [mfx-labs/project-gateway](https://github.com/mfx-labs/project-gateway) — Linux Gateway
+- [mfx-labs/project-gateway-macos](https://github.com/mfx-labs/project-gateway-macos) — shared macOS Gateway
+- [mfx-labs/pi-guard](https://github.com/mfx-labs/pi-guard) — Pi-side guard
 
 ## License
 
-UNLICENSED, pre-release, unpublished. See `package.json` for the current
-package state.
+`pi-shuttle` v0.1.0 is currently **UNLICENSED**. See [`package.json`](package.json) for the authoritative package metadata.
