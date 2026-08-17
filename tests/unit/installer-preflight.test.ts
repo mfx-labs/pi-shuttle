@@ -30,12 +30,11 @@ test('preflight: descriptor-bound Linux and Darwin targets are runtime-eligible;
   }
 });
 
-test('preflight: normative support metadata remains Linux-only and is not the runtime allowlist', () => {
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
+test('preflight: normative support metadata promotes x86_64 only and is not the runtime allowlist', () => {
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
   assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false);
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), false);
-  // Retained constants + gated lanes (historical/component-level meaning):
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), true);
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE]);
   assert.equal(LINUX_HOST_LANE, 'linux-x86_64-posix-utf8-node22');
   assert.equal(DARWIN_ARM64_HOST_LANE, 'darwin-arm64-posix-utf8-node22');
   assert.equal(DARWIN_X86_64_HOST_LANE, 'darwin-x86_64-posix-utf8-node22');

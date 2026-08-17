@@ -221,9 +221,10 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   const nodeClassification = nodeVersion === '' ? 'malformed' : classifyNodeRuntime(nodeVersion);
   // PS-6 darwin lane check (RETAINED): on the darwin-arm64 host
   // lane the ACTUAL Node executable must be arm64 — a Rosetta/x64 Node
-  // cannot satisfy the darwin-arm64 target. The darwin lanes are NOT v0.1.0
-  // supported claims; this technical check never affects Linux behavior. The
-  // architecture requirement applies to ANY version-compatible runtime.
+  // cannot satisfy the darwin-arm64 target. That target remains technically
+  // eligible but is not support-promoted; this check never affects Linux or
+  // darwin-x86_64 behavior. The architecture requirement applies to ANY
+  // version-compatible runtime.
   const requiresNativeArm64Node = ctx.env.platform === 'darwin' && ctx.env.arch === 'arm64';
   let nodeArch = '';
   if (requiresNativeArm64Node && nodeClassification === 'supported') {

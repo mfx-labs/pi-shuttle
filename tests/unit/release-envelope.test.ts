@@ -231,17 +231,20 @@ test('envelope: gateway dependency set must match exactly (no additions, no drif
   assert.equal(validateEnvelope(env2, LINUX_LANE).ok, false);
 });
 
-test('envelope: supported lanes must equal the manifest lane set (v0.1.0: Linux only)', () => {
+test('envelope: supported lanes must equal Linux plus promoted Darwin x86_64 exactly', () => {
   const env = validEnvelope();
   (env.policy as Record<string, unknown>).supportedLanes = [...COMPATIBILITY_MANIFEST.supportedLanes, 'darwin-arm64-posix-utf8-node22'];
-  assert.equal(validateEnvelope(env, LINUX_LANE).ok, false, 'a darwin lane addition must not validate against the Linux-only manifest');
+  assert.equal(validateEnvelope(env, LINUX_LANE).ok, false, 'unpromoted arm64 must not validate as supported');
   const env2 = validEnvelope();
   (env2.policy as Record<string, unknown>).supportedLanes = [...COMPATIBILITY_MANIFEST.supportedLanes, 'windows-x86_64'];
   assert.equal(validateEnvelope(env2, LINUX_LANE).ok, false);
-  // The exact v0.1.0 lane set (Linux only) validates:
+  // The exact promoted target set validates:
   const env3 = validEnvelope();
-  (env3.policy as Record<string, unknown>).supportedLanes = ['linux-x86_64-posix-utf8-node22'];
-  assert.equal(validateEnvelope(env3, LINUX_LANE).ok, true, 'the Linux-only lane set equals the v0.1.0 manifest claim');
+  (env3.policy as Record<string, unknown>).supportedLanes = [LINUX_LANE, INTEL_LANE];
+  assert.equal(validateEnvelope(env3, LINUX_LANE).ok, true, 'Linux plus Darwin x86_64 equals the promoted manifest claim');
+  const prePromotion = validEnvelope();
+  (prePromotion.policy as Record<string, unknown>).supportedLanes = [LINUX_LANE];
+  assert.equal(validateEnvelope(prePromotion, LINUX_LANE).ok, false, 'a pre-promotion Linux-only envelope is incompatible');
 });
 
 test('envelope: policy facts must equal the runtime compatibility manifest', () => {

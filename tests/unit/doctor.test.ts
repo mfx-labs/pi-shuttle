@@ -344,7 +344,7 @@ test('doctor: stale coordination lock artifacts are detected with recovery guida
   }
 });
 
-test('doctor: descriptor-bound Darwin targets are technically eligible but not support-promoted; windows fails closed', async () => {
+test('doctor: x86_64 is support-promoted, arm64 remains technically eligible but unpromoted, and windows fails closed', async () => {
   const { env, ctx } = healthyContext();
   try {
     const arm64Node = writeFakeNode(env, 'arm64');
@@ -359,8 +359,8 @@ test('doctor: descriptor-bound Darwin targets are technically eligible but not s
     const intel = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'x64' } });
     assert.equal(intel.ok, true);
     if (!intel.ok) return;
-    assert.equal(verdicts(intel.report)['platform'], 'installed but unverified', 'Intel is eligible but must not be reported supported');
-    assert.equal(intel.exitCode, 1, 'unpromoted eligibility is a finding, not an unsupported-platform exit');
+    assert.equal(verdicts(intel.report)['platform'], 'supported', 'physically accepted Intel must be reported supported');
+    assert.ok(intel.report.checks.find((c) => c.id === 'platform')!.detail.includes('product-support promoted'));
     const windows = await runDoctor({ ...ctx, env: { home: env, platform: 'win32', arch: 'x64' } });
     assert.equal(windows.ok, true);
     if (!windows.ok) return;

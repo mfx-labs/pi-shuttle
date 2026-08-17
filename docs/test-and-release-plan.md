@@ -3,7 +3,7 @@
 ## 1. Validation lanes
 
 ### Lane A — Linux x86_64 (physical/local, `chef@Lab`)
-Full release evidence on the exact supported lane: Linux x86_64, Node
+Full release evidence on the original supported target: Linux x86_64, Node
 22.23.2, Git 2.45.4, **Pi 0.83.0** (the host currently runs Pi 0.84.1 —
 Lane A must provision/verify the 0.83.0 lane; the 0.84.1 host state is NOT
 evidence, Gateway P3A-WP15-006), pi-guard 0.1.2, UTF-8.
@@ -14,28 +14,29 @@ artifact persistence → workspace confinement → read-only Git inspection →
 absence of trusted authority tools → persistence/restart → safe
 malformed-input handling → **zero-state pilot** (fresh HOME, one command).
 
-### Lane B — macOS arm64 (GitHub Actions) — DEFERRED beyond v0.1.0
-CI lane for the deferred darwin-arm64 product support (requires the
-Gateway Darwin controlled-write correction first): installer (batch
+### Lane B — macOS arm64 (GitHub Actions) — TARGET EVIDENCE, NOT SUPPORT
+CI lane for the technically eligible but not support-promoted
+darwin-arm64 target: installer (batch
 mode), CLI, package integrity, filesystem/confinement (store owner/mode,
 no-follow, canonical paths, /tmp canonicalization), focused E2E
 (handshake + nine tools + persist/replay), storage crash suite on APFS,
-record volume case-sensitivity and exact node arch. NOT a v0.1.0 release
-prerequisite (macOS is not in the v0.1.0 supported set).
+record volume case-sensitivity and exact node arch. This CI evidence is
+not physical Apple Silicon acceptance and creates no support claim.
 
-### Lane C — macOS Intel (GitHub Actions) — DEFERRED beyond v0.1.0
-Historical first-class darwin Intel/x64 evidence plan (PS-6I): exact
+### Lane C — macOS Intel (GitHub Actions) — SUPPORTED TARGET EVIDENCE
+First-class darwin Intel/x64 evidence plan (PS-6I): exact
 Node 22.23.2 (darwin-x64, architecture ASSERTED x64), build + typecheck
 + full test suite, mandatory APFS evidence invocation, exact Git 2.45.4
-provision, and the real-stack subsection. NOT a v0.1.0 release
-prerequisite; deferred with macOS product support.
+provision, and the real-stack subsection. It remains supporting automated
+evidence for the x86_64 target promoted by E1.
 
-### Lane D — macOS arm64 (physical) — DEFERRED beyond v0.1.0
-`Lane D deferred with macOS product support beyond v0.1.0.`
-The final manual user journey (install → add project → Pi + pi-guard →
-start Gateway → Secure MCP Tunnel → ChatGPT → inspect / draft / persist)
-remains the authoritative future macOS evidence and is NOT a v0.1.0
-release prerequisite.
+### Lane D — macOS Intel x86_64 (physical) — ACCEPTED
+The normal descriptor-bound journey ran on a physical MacBookPro13,3:
+clean install → doctor → project add / trusted-store bootstrap and replay
+→ start → exact nine-tool MCP handshake. The committed D report is the
+authoritative physical evidence for the E1 x86_64 support promotion.
+Apple Silicon execution and MAC-5 remain separate future physical
+evidence work and are not implied by Lane D.
 
 ### Gateway regression lanes (reused, not duplicated)
 The Gateway's own Phase 3C lanes 0–6 remain the component-level gate
@@ -75,16 +76,20 @@ target if the closure commit is re-verified.
    ADR-041 recorded. *Human:* review of the verb's authority surface
    (operator-only confirmation).
 2. **PS-5 gate (Linux)**: Lane A green on the installed product.
-3. **PS-6 gate (macOS)**: HISTORICAL (PS-6/PS-6I) — the darwin lanes are
-   DEFERRED beyond v0.1.0 (see §0 of the platform-support contract); the
-   v0.1.0 release does not require Lane B/C/D evidence.
-4. **PS-8 gate (release readiness)**: zero-state pilot green on Lane A
-   (Linux x86_64 — the v0.1.0 supported set); manifest finalized with
+3. **PS-6 / D / E1 gates (macOS):** Darwin routing and execution
+   eligibility are implemented; Lane D physical Intel acceptance is
+   recorded; E1 promotes only Darwin x86_64. arm64 remains technically
+   eligible but not support-promoted pending physical evidence.
+4. **PS-8 gate (release readiness)**: the historical Linux zero-state
+   pilot remains valid. Any release after E1 must freshly materialize a
+   manifest/envelope whose supported target set is Linux x86_64 plus
+   Darwin x86_64; pre-promotion Linux-only envelopes are incompatible.
+   Release artifacts require
    real artifact SHAs; docs complete;
    `doctor` honesty audit (no false `supported` claims); P3A-WP15-006
    closed or explicitly qualified in the release evidence; PS-7
    documentation/transport readiness accepted (PS-7R) and applicable to
-   the supported Linux product. Live ChatGPT
+   the supported product targets. Live ChatGPT
    custom-app E2E, when not yet exercised, must be blocked solely by
    external workspace eligibility and explicitly qualified as
    `EXTERNAL QUALIFIED ACCEPTANCE EVIDENCE` — never claimed as passed.
@@ -96,7 +101,7 @@ target if the closure commit is re-verified.
    - public installer URL + artifact hosting decision;
    - GitHub repository creation for pi-shuttle (if any);
    - push/tag/publish/deploy of pi-shuttle v0.1.0;
-   - publication/distribution of the private `@project-gateway/artifact-core`
+   - publication/distribution of the target-selected private Gateway
      artifact (license question — currently `UNLICENSED`/private);
    - OpenAI/Secure MCP Tunnel documentation verification (official
      sources) — satisfied at PS-7/PS-7R (verified 2026-08-14; see

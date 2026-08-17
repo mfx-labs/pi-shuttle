@@ -17,13 +17,10 @@
  *   pi-guard v0.1.2 (commit 7a7580cc4cbd7926797564c72269394fc29a860a)
  *   Pi compatibility baseline 0.83.0 (SUPPORTED_PI_LANE)
  *
- * v0.1.0 support decision (human-approved Linux-only disposition):
- *   pi-shuttle v0.1.0 SHALL support Linux x86_64 only. Darwin support is
- *   DEFERRED until Project Gateway has a reviewed, contract-preserving
- *   Darwin descriptor-relative controlled-write primitive (PS8B-DEFECT-001;
- *   Gateway escalation report). The darwin host-lane constants below are
- *   retained for historical/component-level meaning and as gated lanes;
- *   they are NOT v0.1.0 supported claims.
+ * Current support decision (human-approved E1 promotion):
+ *   pi-shuttle supports Linux x86_64 and macOS x86_64. The darwin-arm64
+ *   target remains technically eligible and distribution-bound but is NOT
+ *   support-promoted because physical Apple Silicon evidence is pending.
  *
  * ADR-002 fault domain A (per-lane Gateway distribution identity):
  *   the single global Gateway identity is superseded by the authoritative
@@ -32,8 +29,8 @@
  *   legacy global Gateway constants/fields remain ONLY as transitional
  *   aliases derived from the historical descriptor so untouched B/C
  *   consumers keep compiling; they MUST NOT participate in lane
- *   selection. Lane support claims (supportedLanes/gatedLanes) are NOT
- *   changed by A: v0.1.0 remains Linux-only, darwin lanes stay gated.
+ *   selection. Lane support claims remain target-scoped and independent
+ *   from runtime eligibility.
  */
 export const PI_SHUTTLE_VERSION = '0.1.0';
 export const PI_GUARD_VERSION = '0.1.2';
@@ -59,9 +56,9 @@ export const CONFIG_FORMAT_VERSION = 1;
 
 /** Gateway host lanes (inherited constants; the Gateway owns their semantics). */
 export const LINUX_HOST_LANE = 'linux-x86_64-posix-utf8-node22';
-/** darwin arm64 lane (PS-6, Gateway ADR-042): retained; NOT a v0.1.0 claim (deferred). */
+/** darwin arm64 target (PS-6, Gateway ADR-042): technically eligible; NOT support-promoted. */
 export const DARWIN_ARM64_HOST_LANE = 'darwin-arm64-posix-utf8-node22';
-/** darwin Intel/x64 lane (PS-6I, Gateway ADR-043): retained; NOT a v0.1.0 claim (deferred). */
+/** darwin Intel/x64 target (PS-6I, Gateway ADR-043): physically accepted and support-promoted. */
 export const DARWIN_X86_64_HOST_LANE = 'darwin-x86_64-posix-utf8-node22';
 
 // ─── ADR-002 A: per-host-lane Gateway distribution descriptors ────────────
@@ -246,9 +243,9 @@ export interface CompatibilityManifest {
   readonly gatewayDependencies: Readonly<Record<string, string>>;
   readonly configurationVersion: string;
   readonly configFormatVersion: number;
-  /** Host lanes claimed as supported (evidence-bound). v0.1.0: Linux x86_64 only. */
+  /** Host targets claimed as supported (evidence-bound). */
   readonly supportedLanes: readonly string[];
-  /** Host lanes targeted but NOT claimed (darwin lanes are gated behind the Gateway Darwin controlled-write correction). */
+  /** Descriptor-bound host targets that are technically eligible but NOT support-promoted. */
   readonly gatedLanes: readonly string[];
   /** Per-host-lane Gateway distribution descriptors (ADR-002; the lane-selection authority). */
   readonly gatewayLanes: Readonly<Record<string, GatewayLaneDescriptor>>;
@@ -269,7 +266,7 @@ export const COMPATIBILITY_MANIFEST: CompatibilityManifest = Object.freeze({
   gatewayDependencies: HISTORICAL_GATEWAY_DESCRIPTOR.dependencies,
   configurationVersion: CONFIGURATION_VERSION,
   configFormatVersion: CONFIG_FORMAT_VERSION,
-  supportedLanes: Object.freeze([LINUX_HOST_LANE]),
-  gatedLanes: Object.freeze([DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
+  supportedLanes: Object.freeze([LINUX_HOST_LANE, DARWIN_X86_64_HOST_LANE]),
+  gatedLanes: Object.freeze([DARWIN_ARM64_HOST_LANE]),
   gatewayLanes: GATEWAY_LANE_DESCRIPTORS,
 });

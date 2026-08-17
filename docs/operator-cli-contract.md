@@ -15,8 +15,8 @@ pi-shuttle --version
 Nothing else. No admin commands, no config-editing commands, no update
 commands. `--help`/`--version` are hygiene, not features.
 
-Unified macOS user journey (ADR-003 — contracted, NOT implemented): the
-intended macOS installation journey is the SAME one-line installer
+Unified macOS user journey (ADR-003 — implemented): the macOS
+installation journey is the SAME one-line installer
 (`install.sh`) for both architectures, and the post-install CLI surface
 is the SAME command set (`pi-shuttle doctor`, `pi-shuttle start`,
 existing project commands), with NO public `--experimental`,
@@ -35,7 +35,7 @@ semantics** — all of that stays in the Gateway package behind the
 Exit codes: `0` all supported checks pass; `1` findings (missing/partial/
 unverified); `2` unsupported platform/architecture (fail closed).
 
-Unified macOS journey (ADR-003 — contracted, NOT implemented): doctor is
+Unified macOS journey (ADR-003 — implemented): doctor is
 identical for both macOS architectures and takes NO public experimental
 or acceptance flags. Physical evidence state NEVER gates doctor
 execution: absent physical evidence means only that physical behavior
@@ -46,23 +46,24 @@ execution block. Formal acceptance evidence is collected by the same
 doctor journey on real hardware through the internal engineering/
 evidence workflow (no separate public UX).
 
-Doctor concern separation (future unified macOS model — NOT
-implemented): doctor keeps three concerns conceptually distinct —
+Doctor concern separation: doctor keeps three concerns conceptually distinct —
 technical/runtime health (passing checks), physical-evidence state
 (reported truthfully), and normative support claim (manifest). A known
 macOS target with a valid distributable runtime and passing technical
 checks is not execution-refused solely because formal support promotion
-has not occurred. The current v0.1.0 refusal behavior remains
-historical until the migration is implemented.
+has not occurred. macOS x86_64 is support-promoted; arm64 remains
+technically eligible but not support-promoted.
 
 Status vocabulary (used exactly, never embellished):
 
 - **supported** — matches the manifest lane and verifies;
-- **unsupported** — not a claimed lane (e.g. Windows, Pi below the
+- **unsupported** — an unknown/unbound target or failed required technical
+  condition (e.g. Windows, Pi below the
   0.83.0 minimum, Node below the 22.19.0 minimum, a failed required
   compatibility probe, case-insensitive filesystem where the lane contract
   requires evidence);
-- **installed but unverified** — present, version cannot be confirmed
+- **installed but unverified** — technically eligible but not
+  support-promoted, or present with a version that cannot be confirmed
   against the manifest or compatibility predicate (e.g. unknown pi-guard
   version);
 - **missing** — not installed;
@@ -73,12 +74,12 @@ Checks (minimum, in order):
 
 | # | Check | Verdict sources |
 |---|---|---|
-| 1 | platform | OS/arch vs manifest matrix (v0.1.0: linux-x64 only; darwin lanes deferred) |
+| 1 | platform | Descriptor-bound target eligibility + manifest support claim (Linux/x64 and Darwin/x86_64 supported; Darwin/arm64 technically eligible but unpromoted) |
 | 2 | architecture | same |
 | 3 | Node | version probe >= 22.19.0 (minimum runtime; 22.23.2 is the validated CI baseline) |
 | 4 | Git executable + version | PATH discovery (never `/usr/bin/git`), version >= 2.30.0 (minimum; 2.45.4 is the validated CI baseline) |
 | 5 | Pi installation/version | `pi` discovery + version; 0.83.0 known-good; candidates >= 0.83.0 require the pi-guard compatibility probe PASS; below 0.83.0 = unsupported |
-| 6 | Project Gateway component | installed package path, manifest version match, and the descriptor-selected Gateway executable (`bin/project-gateway-mcp` on the historical Linux target, `bin/project-gateway-macos-mcp` on the Intel target; implemented C2 — doctor validates against the per-target descriptor bin name; the target-model semantic migration is NOT started) |
+| 6 | Project Gateway component | installed package path, manifest version match, and the descriptor-selected Gateway executable (`bin/project-gateway-mcp` on the historical Linux target, `bin/project-gateway-macos-mcp` on both Darwin targets; doctor validates against the per-target descriptor bin name) |
 | 7 | pi-guard component/version | Pi package store discovery (read-only), extension entry, version == 0.1.2, ADR-037 predicate spot-checks |
 | 8 | trusted store integrity/readiness | per registered project: `bootstrap` replay-style verification (or the Gateway's verification path) — INITIALIZED=ready; ABSENT=missing; PARTIAL/UNSUPPORTED_VERSION/FOREIGN=broken (fail closed, no repair) |
 | 9 | runtime configuration | `~/.config/pi-shuttle/runtime.json` parseable, closed fields, matches installed manifest, 0600 |
@@ -116,7 +117,7 @@ The operator bootstrap path (product-contract §5). Steps:
    target-selected Gateway executable
    `bootstrap --config <file> --output <resolved>` (pinned node +
    installed CLI; the historical Linux target resolves to
-   `project-gateway-mcp`, the Intel target currently resolves to
+   `project-gateway-mcp`, and both Darwin targets resolve to
    `project-gateway-macos-mcp` — descriptor-selected, never hardcoded),
    require exit 0 and state `INITIALIZED`.
 6. **Verify**: run `bootstrap` a second time — the committed replay path
@@ -174,7 +175,7 @@ projects" and exits 0.
 pi-shuttle start
 ```
 
-Unified macOS journey (ADR-003 — contracted, NOT implemented): start is
+Unified macOS journey (ADR-003 — implemented): start is
 identical for both macOS architectures and takes NO public experimental
 or acceptance flags; the runtime variant is selected internally from the
 detected host architecture. Physical evidence state never gates start
@@ -188,8 +189,8 @@ detected host architecture. Physical evidence state never gates start
   exec'ing the pinned node + the installed target-selected Gateway
   executable (`dist/runtime/mcp/cli.js --config <runtime-config>`, or the
   installed descriptor-selected bin — `bin/project-gateway-mcp` on the
-  historical Linux target, `bin/project-gateway-macos-mcp` on the Intel
-  target), **stdio inherited** — stdout stays MCP protocol, diagnostics
+  historical Linux target, `bin/project-gateway-macos-mcp` on both Darwin
+  targets), **stdio inherited** — stdout stays MCP protocol, diagnostics
   to stderr; the user sees exactly the Gateway process behavior, without
   ever typing the long executable/config path.
 - Propagates the Gateway exit code; forwards signals; no daemonization, no

@@ -4,17 +4,19 @@
 USER-JOURNEY CONTRACT CORRECTION`; supersedes the two earlier
 uncommitted D0 drafts — the lane-scoped acceptance decision and the
 target-scoped `--acceptance-target` decision — in full).
-**Implementation:** NOT STARTED (no `src/`, `tests/`, `scripts/`,
-workflow, or package-file change by this gate). **Implementation
-migration:** NOT STARTED (see §9).
-**Applies to:** the macOS product path of pi-shuttle (post-v0.1.0).
+**Implementation at decision time:** NOT STARTED (this contract gate made
+no implementation change). **Current implementation:** D0B binds both
+Darwin targets to the shared dual-architecture Gateway candidate; D0C
+made runtime eligibility descriptor-driven; D0D made release
+materialization descriptor-driven; D recorded physical Intel acceptance;
+E1 support-promotes only macOS x86_64.
+**Applies to:** the macOS product path of pi-shuttle.
 **Base analysis:** `PI-SHUTTLE D0 — INTEL PLATFORM-GATE ENABLEMENT
 ANALYSIS` (pi-shuttle @ `888ed90e113423b02a5a0e881289f10817550b37`).
-**Related:** ADR-002 (per-lane Gateway distribution; the x86_64 target
-binds `mfx-labs/project-gateway-macos` @
-`a90284b06420effb1ec1eeef14e7ed82e02c64e9`); platform-support-contract
-§0/§1 (v0.1.0 Linux-only disposition — unchanged by this decision);
-PGM-DIST-1 (Intel npm artifact packaging boundary — x64-only);
+**Related:** ADR-002 (per-target Gateway distribution; both Darwin
+targets bind `mfx-labs/project-gateway-macos` @
+`a18bd287c9ccada7fd31932dbe9937062d0b6bc1`); platform-support-contract
+§0/§1; PGM-DIST-2 (dual-architecture package candidate);
 MAC-5/MAC-6 (Apple Silicon formal physical-evidence gate chain —
 unchanged).
 
@@ -81,17 +83,16 @@ prohibited from execution.
 
 ### 4. Current evidence states (target-scoped)
 
-**macOS/x86_64:** the Project Gateway macOS/x64 runtime candidate
-exists and has accepted physical Intel evidence (fork-side MAC-4
-Intel runtime acceptance). pi-shuttle unified macOS
-clean-install/end-to-end D acceptance is NOT STARTED; therefore no
-pi-shuttle Intel support promotion has occurred.
+**macOS/x86_64:** the Project Gateway macOS/x64 runtime candidate and
+pi-shuttle unified clean-install/end-to-end journey have accepted physical
+Intel evidence. The separately human-authorized E1 gate promotes this
+target to supported.
 
-**macOS/arm64:** implementation/cross-build candidate exists; physical
-validation evidence is pending because real Apple Silicon hardware has
-not yet been available; compatibility is not known-bad; normal
-installation/use is an intended product behavior once the distributable
-arm64 runtime candidate is available.
+**macOS/arm64:** a provenance-complete distributable candidate exists in
+the shared dual-architecture package; physical validation evidence is
+pending because real Apple Silicon hardware has not yet been available;
+compatibility is not known-bad; the target is technically eligible and
+NOT support-promoted.
 
 ### 5. Distribution prerequisite (arm64; evidence is never an execution gate)
 
@@ -100,15 +101,12 @@ technical prerequisite — such as the absence of a provenance-complete
 distributable arm64 runtime artifact. It MUST NOT be blocked merely
 because physical acceptance evidence is absent.
 
-Current state (Git publication ≠ artifact release): the pinned Git
-commit `a90284b06420effb1ec1eeef14e7ed82e02c64e9`
-(`mfx-labs/project-gateway-macos`) IS published on the public Git
-remote, and the current provenance-complete macOS Gateway packaging
-candidate at that pinned Git commit is **x64-only** (PGM-DIST-1). No
-npm package/release artifact was published, and no macOS product
-release/support claim follows from Git publication. A separate
-distribution gate must make the arm64 candidate provenance-complete and
-distributable before unified macOS installation can be implemented.
+Current state (Git publication ≠ artifact release): PGM-DIST-2 produced
+the provenance-complete dual-architecture candidate at pinned Git commit
+`a18bd287c9ccada7fd31932dbe9937062d0b6bc1`
+(`mfx-labs/project-gateway-macos`), and D0B binds both Darwin targets to
+it. No npm/GitHub release artifact or pi-shuttle product release follows
+from that distribution binding.
 
 ### 6. Support claims (three distinct concerns)
 
@@ -148,30 +146,23 @@ map), artifact preparation (`prepare-fixtures.sh --lane`), installer,
 doctor/help, release-envelope, handshake (`GATEWAY_LANE`), and CI
 wiring — all locally baselined through the A/B/C gates.
 
-**Current routing (implementation state, not a final architecture
-decision):** the current code still uses the historical `lane`
-terminology for the host target IDs and maps:
+**Current routing:** the code retains the historical `lane` terminology
+for the host target IDs and maps:
 
 ```text
 darwin-x86_64-posix-utf8-node22 → macOS Gateway fork
                                   (mfx-labs/project-gateway-macos)
-darwin-arm64-posix-utf8-node22  → historical Gateway
-                                  (mfx-labs/project-gateway)
+darwin-arm64-posix-utf8-node22  → SAME macOS Gateway fork
+                                  (mfx-labs/project-gateway-macos)
 ```
 
-This temporary arm64 routing is CURRENT IMPLEMENTATION STATE, not a
-permanent architecture decision, and it is not the desired final macOS
-product model. This contract supersedes that terminology semantically
-and defines the intended unified macOS UX, but it does NOT claim the
-implementation has already migrated.
+Both targets share one distribution descriptor and user journey while
+remaining architecture-specific targets with independent evidence and
+support state. Broad terminology renaming is not required.
 
-**Semantic migration:** NOT STARTED. A separate READ-ONLY migration
-impact analysis is required before implementation (see Next gate).
+### 10. Completed migration gate sequence
 
-### 10. Next engineering gate (read-only, required before implementation)
-
-The next engineering gate is a READ-ONLY migration impact analysis. It
-must classify the existing A/B/C surfaces into:
+The D0A read-only analysis classified the existing surfaces into:
 
 1. terminology-only migration (lane → target naming);
 2. semantic target-model migration (single macOS lane, two targets);
@@ -179,7 +170,9 @@ must classify the existing A/B/C surfaces into:
 4. arm64 distribution prerequisite (provenance-complete distributable
    arm64 runtime candidate).
 
-It changes no code.
+It changed no code. PGM-DIST-2 and D0B/D0C/D0D then implemented the
+minimum upstream distribution, target routing, runtime eligibility, and
+release-materialization changes.
 
 ### 11. Support promotion (separate, human-approved, never automatic)
 
@@ -187,7 +180,9 @@ A target becomes `supported` ONLY after its complete physical acceptance
 journey passes on real hardware, evidence is recorded, and a separate
 human-approved support-promotion gate changes the manifest, release
 policy, and support documentation. Promotion is never automatic; missing
-physical evidence is never represented as a failed runtime result.
+physical evidence is never represented as a failed runtime result. E1 is
+that separate human-authorized gate for macOS x86_64 only; arm64 remains
+unpromoted.
 
 ### 12. Preserved (unchanged by this decision)
 
@@ -198,11 +193,12 @@ physical evidence is never represented as a failed runtime result.
 - install receipt authority and schema unchanged;
 - `artifactSha256` semantics unchanged (B digest stays run evidence
   only);
-- v0.1.0 historical Linux-only disposition unchanged;
+- the historical D0 decision itself made no support change; E1 later
+  promotes only macOS x86_64;
 - MAC-5 remains blocked only as a FORMAL PHYSICAL-EVIDENCE gate;
 - MAC-6 status unchanged;
 - no Apple Silicon physical acceptance claim;
-- no support promotion occurs in this decision.
+- no Apple Silicon support promotion occurs.
 
 ## Consequences
 
@@ -212,9 +208,8 @@ physical evidence is never represented as a failed runtime result.
 - Execution gating is reduced to concrete technical prerequisites
   (provenance-complete distributable runtime), while evidence state and
   support claims remain separate, honest, target-scoped layers.
-- The v0.1.0 Linux-only support disposition is unchanged; this decision
-  defines the macOS path design and changes no v0.1.0 refusal behavior.
-- Implementation surface (NOT started): the migration impact analysis
-  (§10), then internal architecture selection, removal of any
-  evidence-driven execution gate, unified install/doctor/start UX, and
-  the arm64 distribution gate (separate gate, not this decision).
+- This decision defined the macOS path; subsequent D0B/D0C/D0D gates
+  implemented it without public architecture or acceptance flags.
+- Subsequent D physical evidence and E1 support promotion remain
+  target-scoped: x86_64 support implies nothing about arm64 physical
+  acceptance or support.

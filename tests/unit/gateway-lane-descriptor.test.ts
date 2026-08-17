@@ -163,7 +163,7 @@ test('the closed manifest exposes the descriptor map as the lane-selection autho
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[LINUX_HOST_LANE], HISTORICAL_GATEWAY_DESCRIPTOR);
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[DARWIN_ARM64_HOST_LANE], MACOS_INTEL_GATEWAY_DESCRIPTOR);
   assert.equal(COMPATIBILITY_MANIFEST.gatewayLanes[DARWIN_X86_64_HOST_LANE], MACOS_INTEL_GATEWAY_DESCRIPTOR);
-  // Support claims unchanged by A: v0.1.0 Linux-only; darwin lanes gated.
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
+  // Support promotion is target-scoped; descriptor bindings remain unchanged.
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE]);
 });

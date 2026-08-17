@@ -13,6 +13,7 @@ import {
   DARWIN_X86_64_HOST_LANE,
   GATEWAY_PS1_BASELINE_COMMIT,
   LINUX_HOST_LANE,
+  MACOS_INTEL_GATEWAY_DESCRIPTOR,
   PI_COMPATIBILITY_BASELINE,
   PI_GUARD_COMMIT,
   PI_GUARD_VERSION,
@@ -48,11 +49,17 @@ test('manifest: exact approved pins are preserved', () => {
   });
 });
 
-test('manifest: lane claims are evidence-bound — v0.1.0 supports Linux x86_64 only; darwin lanes gated', () => {
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE]);
-  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false, 'macOS arm64 is deferred, not a v0.1.0 claim');
-  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), false, 'macOS Intel is deferred, not a v0.1.0 claim');
+test('manifest: support claims are target-scoped — Linux and macOS x86_64 supported; arm64 gated', () => {
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.supportedLanes], [LINUX_HOST_LANE, DARWIN_X86_64_HOST_LANE]);
+  assert.deepEqual([...COMPATIBILITY_MANIFEST.gatedLanes], [DARWIN_ARM64_HOST_LANE]);
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_ARM64_HOST_LANE), false, 'macOS arm64 remains physically unverified and not support-promoted');
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes(DARWIN_X86_64_HOST_LANE), true, 'macOS Intel is physically accepted and support-promoted');
+  assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.some((lane) => COMPATIBILITY_MANIFEST.gatedLanes.includes(lane)), false, 'supported and gated target sets must be disjoint');
+  assert.deepEqual(
+    [...new Set([...COMPATIBILITY_MANIFEST.supportedLanes, ...COMPATIBILITY_MANIFEST.gatedLanes])].sort(),
+    Object.keys(COMPATIBILITY_MANIFEST.gatewayLanes).sort(),
+    'support metadata must cover exactly the descriptor-bound targets',
+  );
   assert.equal(COMPATIBILITY_MANIFEST.supportedLanes.includes('win32-x64'), false, 'Windows is never a claimed lane');
 });
 
@@ -85,8 +92,9 @@ test('manifest: the authoritative Gateway pin is exact and repository-owned (PS-
   const fixturesScript = readFileSync(join(REPO, 'scripts', 'prepare-fixtures.sh'), 'utf8');
   assert.ok(fixturesScript.includes(`GATEWAY_COMMIT="${GATEWAY_BASELINE_COMMIT}"`), 'prepare-fixtures.sh embeds the same exact Gateway pin');
   const laneB = readFileSync(join(REPO, '.github', 'workflows', 'lane-b-macos-arm64.yml'), 'utf8');
-  assert.ok(laneB.includes(`GATEWAY_COMMIT: ${GATEWAY_BASELINE_COMMIT}`), 'Lane B workflow owns the same exact Gateway pin');
-  assert.ok(laneB.includes(`ref: ${GATEWAY_BASELINE_COMMIT}`), 'Lane B Gateway checkout ref is the exact commit');
+  assert.ok(laneB.includes(`GATEWAY_COMMIT: ${MACOS_INTEL_GATEWAY_DESCRIPTOR.commit}`), 'Lane B owns the shared macOS Gateway pin');
+  assert.ok(laneB.includes('repository: mfx-labs/project-gateway-macos'), 'Lane B checks out the shared macOS Gateway repository');
+  assert.ok(laneB.includes(`ref: ${MACOS_INTEL_GATEWAY_DESCRIPTOR.commit}`), 'Lane B Gateway checkout ref is the exact shared macOS commit');
   assert.ok(laneB.includes(`PI_GUARD_COMMIT: ${PI_GUARD_COMMIT}`), 'Lane B workflow owns the exact pi-guard pin');
   assert.ok(laneB.includes(`ref: ${PI_GUARD_COMMIT}`), 'Lane B pi-guard checkout ref is the exact commit');
 });

@@ -32,8 +32,8 @@ Non-interactive mode for CI/release lanes: `install.sh --batch` (or
 equivalent env-pinned answers) — same semantics, prompts become explicit
 required flags; no silent defaults in batch mode for components 1–2.
 
-Unified macOS user journey (ADR-003 — contracted, NOT implemented): the
-intended macOS installation UX is identical for both architectures —
+Unified macOS user journey (ADR-003 — implemented): the macOS
+installation UX is identical for both architectures —
 the same one-line installer (`install.sh`) journey with NO public
 experimental or acceptance flags (no `--experimental`,
 `--experimental-target`, `--acceptance-lane`, `--acceptance-target`).
@@ -67,23 +67,15 @@ gates installation (ADR-003 §3).
 
 ## 4. Preflight and refusal boundaries
 
-- Platform/architecture: Linux x86_64 → supported (the ONLY v0.1.0
-  claimed lane); macOS arm64 / macOS Intel/x86_64 → **refused in v0.1.0**
-  with a message that macOS is not supported in v0.1.0 (deferred until
-  the Gateway controlled-write boundary is portable; PS8B-DEFECT-001) —
-  this is the v0.1.0 support-scope disposition, NOT an evidence gate
-  (ADR-003 §3); Intel distribution WIRING is implemented and locally
-  baselined via the A/B/C gates (`mfx-labs/project-gateway-macos`,
-  ADR-002) — what remains incomplete is the unified macOS semantic
-  migration, the arm64 distributable candidate, and normal macOS
-  support enablement; future macOS execution eligibility depends on
-  concrete technical prerequisites (a known target, a
-  provenance-complete distributable runtime, the required
-  runtime/integrity checks) — NOT on physical-evidence completion;
-  support promotion remains separately evidence-bound;
-  anything else → **refuse with a clear message** (do not claim support).
-- **Unified macOS installation (ADR-003 — contracted, NOT implemented):**
-  the intended macOS install requires NO public experimental or
+- Platform/architecture: Linux x86_64 and macOS Intel/x86_64 are
+  technically eligible and support-promoted. macOS arm64 is technically
+  eligible through its valid shared Gateway descriptor but is NOT
+  support-promoted while physical evidence remains pending. Any unknown,
+  unbound, or malformed target → **refuse with a clear message**. Runtime
+  eligibility depends on concrete technical prerequisites, never on
+  support or physical-evidence state.
+- **Unified macOS installation (ADR-003 — implemented):** the macOS
+  install requires NO public experimental or
   acceptance flags and the host architecture is selected internally.
   Physical evidence state never gates installation. macOS installation
   may be blocked only by a concrete technical prerequisite such as the
@@ -123,14 +115,14 @@ gates installation (ADR-003 §3).
    descriptor-selected package directory
    `~/.local/share/pi-shuttle/packages/<packageName>@<version>/`
    (ADR-002/C1 identity selection; the historical Linux target resolves
-   to `project-gateway-artifact-core@0.1.0`, the Intel target currently
-   resolves to `project-gateway-macos-core@0.1.0` — never hardcoded
+   to `project-gateway-artifact-core@0.1.0`, and both Darwin targets
+   resolve to `project-gateway-macos-core@0.1.0` — never hardcoded
    across targets). npm registry access is for the three pinned deps
    only; the gateway itself comes from the pinned artifact, never from
    the public registry — the package is private. Verify the installed
    descriptor-selected executable/bin runs (`project-gateway-mcp` for
-   the historical Linux target; `project-gateway-macos-mcp` for the
-   Intel target) and the package exports match the manifest's expected
+   the historical Linux target; `project-gateway-macos-mcp` for both
+   Darwin targets) and the package exports match the manifest's expected
    surface.
 5. **pi-guard component install**: discover the Pi package store
    (read-only discovery; supported package-store install path only, never
