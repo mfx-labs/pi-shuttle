@@ -59,6 +59,7 @@ import { readPackageIdentity } from '../installer/artifact.js';
 import { regularFileOrNull } from '../installer/archive.js';
 import { componentDirName, PI_GUARD_PACKAGE_NAME, piListConfirmsSource, validateBinPath } from '../installer/components.js';
 import { readReceipt } from '../installer/receipt.js';
+import type { InstallReceipt } from '../installer/receipt.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
 import { projectLockPath } from '../lifecycle/state.js';
 
@@ -83,6 +84,22 @@ export interface DoctorReport {
 export type DoctorResult =
   | { readonly ok: true; readonly exitCode: 0 | 1 | 2; readonly report: DoctorReport }
   | { readonly ok: false; readonly exitCode: 1; readonly message: string };
+
+function receiptDistribution(receipt: InstallReceipt): string {
+  if (receipt.recovery !== undefined) {
+    const recoveredBy = receipt.recovery.recoveredBy === undefined
+      ? 'unknown'
+      : `latest @ ${receipt.recovery.recoveredBy.slice(receipt.recovery.recoveredBy.lastIndexOf('@') + 1)}`;
+    const originalTime = receipt.recovery.originalInstalledAt ?? 'unknown';
+    const originalOrigin = receipt.recovery.originalChannel === 'unknown'
+      ? 'unknown'
+      : `${receipt.recovery.originalChannel}${receipt.recovery.originalSourceIdentity === undefined ? '' : ` @ ${receipt.recovery.originalSourceIdentity.slice(receipt.recovery.originalSourceIdentity.lastIndexOf('@') + 1)}`}`;
+    return `installation metadata: recovered; recovered at: ${receipt.recovery.recoveredAt}; original installation time: ${originalTime}; original distribution provenance: ${originalOrigin}; recovered by: ${recoveredBy}`;
+  }
+  return receipt.channel === 'latest' && receipt.sourceIdentity
+    ? `latest ${receipt.piShuttleVersion} @ ${receipt.sourceIdentity.slice(receipt.sourceIdentity.lastIndexOf('@') + 1)}`
+    : `stable ${receipt.piShuttleVersion}`;
+}
 
 /** Injectable pi observations (host seam + probe environment). */
 export interface DoctorContext {
@@ -318,15 +335,16 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     }
   } else {
     const entry = receipt.receipt.components.gateway;
+    const distribution = receiptDistribution(receipt.receipt);
     if (receipt.receipt.result === 'PARTIAL') {
       const mode = modeNote(layout.installReceiptPath, 0o600);
-      checks.push(check('receipt', 'installation receipt', 'partial installation', `${mode}; omitted: ${receipt.receipt.omitted.join(', ') || 'none'} — re-run the installer to complete`));
+      checks.push(check('receipt', 'installation receipt', 'partial installation', `${distribution}; ${mode}; omitted: ${receipt.receipt.omitted.join(', ') || 'none'} — re-run the installer to complete`));
     } else if (entry === null) {
-      checks.push(check('receipt', 'installation receipt', 'partial installation', 'receipt records no Gateway component; re-run the installer with the Gateway selected'));
+      checks.push(check('receipt', 'installation receipt', 'partial installation', `${distribution}; receipt records no Gateway component; re-run the installer with the Gateway selected`));
     } else {
       const mode = modeNote(layout.installReceiptPath, 0o600);
       const modeSafe = modeOf(layout.installReceiptPath) !== null && (modeOf(layout.installReceiptPath)! & 0o077) === 0;
-      checks.push(check('receipt', 'installation receipt', modeSafe ? 'supported' : 'installed but unverified', mode));
+      checks.push(check('receipt', 'installation receipt', modeSafe ? 'supported' : 'installed but unverified', `${distribution}; ${mode}`));
     }
   }
 

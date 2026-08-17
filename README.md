@@ -17,11 +17,30 @@ Requirements:
 - **Git >= 2.30.0**
 - **Pi >= 0.83.0**
 
-Install the version-pinned release:
+### STABLE
+
+The stable channel uses immutable, versioned GitHub Releases. The semantic
+version identifies the published release; this is the reproducible,
+recommended path for stable/public use.
 
 ```bash
 curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/install.sh | bash
 ```
+
+### LATEST
+
+The latest channel follows reviewed `master`, resolves every invocation to
+one exact full commit SHA before building or running it, and may contain
+post-release fixes. It is intended for latest/internal/development use.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mfx-labs/pi-shuttle/master/install.sh | bash
+```
+
+Latest keeps the semantic package version separate from source identity; its
+diagnostics identify the source as `latest 0.1.1 @ <commit SHA>`. Post-v0.1.1
+changes on `master` are not retroactively part of the immutable v0.1.1
+release.
 
 Then verify the installation:
 

@@ -10,15 +10,49 @@
  * FAILED / UNSUPPORTED / REFUSED / malformed invocation.
  */
 import { realpathSync } from 'node:fs';
-import { hostEnvironmentFromProcess } from '../host/environment.js';
+import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from './selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
 import { readReceipt } from './receipt.js';
+import { acquireLatestArtifacts } from './release/latest.js';
 
 export const INSTALLER_EXIT = { COMPLETE: 0, PARTIAL: 1, FAILED: 2 } as const;
+
+export const LATEST_HANDOFF_ENV = {
+  source: 'PI_SHUTTLE_LATEST_SOURCE',
+  packageTgz: 'PI_SHUTTLE_LATEST_PACKAGE_TGZ',
+  artifactDir: 'PI_SHUTTLE_LATEST_ARTIFACT_DIR',
+} as const;
+
+export interface InstallerMainDependencies {
+  readonly latestAcquirer?: typeof acquireLatestArtifacts;
+  readonly installRunner?: typeof runInstall;
+}
+
+type LatestHandoff = {
+  readonly sourceIdentity: string;
+  readonly packageTgz: string;
+  readonly artifactDir?: string;
+};
+
+function latestHandoffFromEnv(env: NodeJS.ProcessEnv): LatestHandoff | { readonly error: string } | null {
+  const source = env[LATEST_HANDOFF_ENV.source];
+  if (source === undefined || source.length === 0) return null;
+  if (!/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(source)) return { error: 'latest source identity is not a valid full commit identity' };
+  const packageTgz = env[LATEST_HANDOFF_ENV.packageTgz];
+  if (packageTgz === undefined || packageTgz.length === 0) return { error: 'latest installer handoff is missing its verified pi-shuttle package' };
+  if (absolutePathProblem(packageTgz, 'latest package') !== null) return { error: 'latest installer handoff package path must be absolute' };
+  const artifactDir = env[LATEST_HANDOFF_ENV.artifactDir];
+  if (artifactDir !== undefined && absolutePathProblem(artifactDir, 'latest artifact directory') !== null) return { error: 'latest artifact directory path must be absolute' };
+  return {
+    sourceIdentity: source,
+    packageTgz,
+    ...(artifactDir !== undefined ? { artifactDir } : {}),
+  };
+}
 
 export function formatOutcome(outcome: InstallOutcome): string {
   switch (outcome.kind) {
@@ -57,7 +91,7 @@ export function exitCodeFor(outcome: InstallOutcome): number {
   }
 }
 
-export async function main(argv: readonly string[]): Promise<number> {
+export async function main(argv: readonly string[], dependencies: InstallerMainDependencies = {}): Promise<number> {
   const parsed = parseInstallerArgs(argv);
   if (!parsed.ok) {
     process.stderr.write(`pi-shuttle-installer: ${parsed.message}`);
@@ -66,6 +100,16 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (parsed.options.help) {
     process.stdout.write(INSTALLER_USAGE);
     return 0;
+  }
+
+  const latest = latestHandoffFromEnv(installerEnvironment());
+  if (latest !== null && 'error' in latest) {
+    process.stderr.write(`pi-shuttle-installer: ${latest.error}\n`);
+    return 2;
+  }
+  if (latest !== null && (parsed.options.artifactDir !== undefined || parsed.options.expectGatewaySha256 !== undefined || parsed.options.expectPiGuardSha256 !== undefined)) {
+    process.stderr.write('pi-shuttle-installer: latest bootstrap owns artifact acquisition and digest verification; local artifact options are refused\n');
+    return 2;
   }
 
   const env = hostEnvironmentFromProcess();
@@ -77,7 +121,11 @@ export async function main(argv: readonly string[]): Promise<number> {
   const layout = resolveLayout(home);
   const prior = readReceipt(layout.installReceiptPath);
 
-  process.stdout.write(`pi-shuttle installer ${PI_SHUTTLE_VERSION} (pre-release, local lane)\n`);
+  if (latest !== null) {
+    process.stdout.write(`pi-shuttle latest installer\nversion: ${PI_SHUTTLE_VERSION}\nsource: ${latest.sourceIdentity}\nchannel: latest\n`);
+  } else {
+    process.stdout.write(`pi-shuttle installer ${PI_SHUTTLE_VERSION} (pre-release, local lane)\n`);
+  }
 
   let selections = parsed.options.selections;
   let installDir = parsed.options.installDir;
@@ -95,17 +143,44 @@ export async function main(argv: readonly string[]): Promise<number> {
     configureProject = interactive.configureProject;
   }
 
+  let latestArtifactDir: string | undefined;
+  let latestGatewaySha256: string | undefined;
+  let latestPiGuardSha256: string | undefined;
+  if (latest !== null) {
+    if (latest.artifactDir === undefined) {
+      const outcome: InstallOutcome = { kind: 'REFUSED', reason: 'latest installer handoff is missing its private artifact staging directory' };
+      process.stdout.write(`${formatOutcome(outcome)}\nreceipt: ${layout.installReceiptPath}\nno installation changes were finalized; prior installation state (if any) is preserved\n`);
+      return INSTALLER_EXIT.FAILED;
+    }
+    const acquired = await (dependencies.latestAcquirer ?? acquireLatestArtifacts)(hostLane(env.environment.platform, env.environment.arch), selections, latest.artifactDir);
+    if (!acquired.ok) {
+      const outcome: InstallOutcome = { kind: 'REFUSED', reason: acquired.message };
+      process.stdout.write(`${formatOutcome(outcome)}\nreceipt: ${layout.installReceiptPath}\nno installation changes were finalized; prior installation state (if any) is preserved\n`);
+      return INSTALLER_EXIT.FAILED;
+    }
+    latestArtifactDir = acquired.artifactDir;
+    latestGatewaySha256 = acquired.gatewaySha256;
+    latestPiGuardSha256 = acquired.piGuardSha256;
+  }
+
   if (configureProject) {
     process.stdout.write(`${PROJECT_ONBOARDING_DEFERRED}\n`);
   }
 
-  const outcome = await runInstall(env.environment, {
+  const outcome = await (dependencies.installRunner ?? runInstall)(env.environment, {
     selections,
     ...(installDir !== undefined ? { installDir } : {}),
     ...(binDir !== undefined ? { binDir } : {}),
     ...(parsed.options.artifactDir !== undefined ? { artifactDir: parsed.options.artifactDir } : {}),
     ...(parsed.options.expectGatewaySha256 !== undefined ? { expectGatewaySha256: parsed.options.expectGatewaySha256 } : {}),
     ...(parsed.options.expectPiGuardSha256 !== undefined ? { expectPiGuardSha256: parsed.options.expectPiGuardSha256 } : {}),
+    ...(latest !== null ? {
+      releasePackageTgz: latest.packageTgz,
+      sourceIdentity: latest.sourceIdentity,
+      ...(latestArtifactDir !== undefined ? { artifactDir: latestArtifactDir } : {}),
+      ...(latestGatewaySha256 !== undefined ? { expectGatewaySha256: latestGatewaySha256 } : {}),
+      ...(latestPiGuardSha256 !== undefined ? { expectPiGuardSha256: latestPiGuardSha256 } : {}),
+    } : {}),
     confirmUpgrade: interactiveMode ? promptUpgrade : approveBatchUpgrade,
   });
 

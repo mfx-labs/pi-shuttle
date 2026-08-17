@@ -32,7 +32,7 @@ export interface GatewayReceiptEntry {
   readonly commitVerified: boolean;
   /** True only when the artifact SHA-256 matched an explicit expected digest. */
   readonly digestVerified: boolean;
-  readonly artifactSha256: string;
+  readonly artifactSha256: string | null;
   readonly installPath: string;
   readonly binPath: string;
   readonly smoke: GatewaySmoke;
@@ -45,17 +45,32 @@ export interface PiGuardReceiptEntry {
   readonly commitVerified: boolean;
   /** True only when the artifact SHA-256 matched an explicit expected digest. */
   readonly digestVerified: boolean;
-  readonly artifactSha256: string;
+  readonly artifactSha256: string | null;
   readonly installPath: string;
   readonly sourcePath: string;
   readonly piVersion: string;
   readonly verifiedBy: 'pi-list' | 'unverified';
 }
 
+export interface ReceiptRecovery {
+  readonly recoveredAt: string;
+  readonly recoveredBy?: string;
+  readonly originalInstalledAt: string | null;
+  readonly originalChannel: 'unknown' | 'stable' | 'latest';
+  readonly originalSourceIdentity?: string;
+}
+
 export interface InstallReceipt {
   readonly receiptVersion: number;
   readonly piShuttleVersion: string;
-  readonly installedAt: string;
+  /** Optional distribution identity; absent is the historical/local shape. */
+  readonly channel?: 'stable' | 'latest';
+  /** Present only for latest receipts, e.g. mfx-labs/pi-shuttle@<sha>. */
+  readonly sourceIdentity?: string;
+  /** Absent only when recovery could not prove the original install time. */
+  readonly installedAt?: string;
+  /** Present only for a receipt reconstructed from surviving state. */
+  readonly recovery?: ReceiptRecovery;
   readonly platformLane: string;
   readonly result: ReceiptResult;
   readonly installDir: string;
@@ -73,10 +88,11 @@ export type ReceiptResultT = { readonly ok: true; readonly receipt: InstallRecei
 
 export type ReceiptReadResult = { readonly ok: true; readonly receipt: InstallReceipt } | { readonly ok: false; readonly code: 'absent' | 'invalid' | 'read-failed'; readonly message: string };
 
-const RECEIPT_KEYS = new Set(['receiptVersion', 'piShuttleVersion', 'installedAt', 'platformLane', 'result', 'installDir', 'binDir', 'components', 'omitted', 'notes']);
+const RECEIPT_KEYS = new Set(['receiptVersion', 'piShuttleVersion', 'channel', 'sourceIdentity', 'installedAt', 'recovery', 'platformLane', 'result', 'installDir', 'binDir', 'components', 'omitted', 'notes']);
 const COMPONENTS_KEYS = new Set(['gateway', 'piGuard']);
 const GATEWAY_KEYS = new Set(['status', 'version', 'commit', 'commitVerified', 'digestVerified', 'artifactSha256', 'installPath', 'binPath', 'smoke']);
 const PI_GUARD_KEYS = new Set(['status', 'version', 'commit', 'commitVerified', 'digestVerified', 'artifactSha256', 'installPath', 'sourcePath', 'piVersion', 'verifiedBy']);
+const RECOVERY_KEYS = new Set(['recoveredAt', 'recoveredBy', 'originalInstalledAt', 'originalChannel', 'originalSourceIdentity']);
 
 function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -109,13 +125,62 @@ export function validateReceipt(value: unknown): ReceiptResultT {
   const verdict = validateEntry(value, RECEIPT_KEYS, 'receipt', {
     receiptVersion: (v) => v === RECEIPT_VERSION,
     piShuttleVersion: str,
-    installedAt: str,
     platformLane: str,
     result: (v) => v === 'COMPLETE' || v === 'PARTIAL',
     installDir: isAbsolutePath,
     binDir: isAbsolutePath,
   });
   if (!verdict.ok) return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: verdict.message };
+  const channel = value['channel'];
+  const sourceIdentity = value['sourceIdentity'];
+  const installedAt = value['installedAt'];
+  const recoveryRaw = value['recovery'];
+  if (installedAt !== undefined && !str(installedAt)) {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.installedAt must be a non-empty string when present' };
+  }
+  if (channel !== undefined && channel !== 'stable' && channel !== 'latest') {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.channel must be stable or latest' };
+  }
+  if (sourceIdentity !== undefined && (typeof sourceIdentity !== 'string' || !/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(sourceIdentity))) {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.sourceIdentity must be mfx-labs/pi-shuttle@<full-sha>' };
+  }
+  if ((channel === 'latest') !== (sourceIdentity !== undefined)) {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'latest receipts require sourceIdentity and sourceIdentity requires channel latest' };
+  }
+  let recovery: ReceiptRecovery | undefined;
+  if (recoveryRaw !== undefined) {
+    if (!isRecord(recoveryRaw)) return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.recovery must be an object' };
+    for (const key of Object.keys(recoveryRaw)) {
+      if (!RECOVERY_KEYS.has(key)) return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: `receipt.recovery has an unknown field: ${key}` };
+    }
+    const recoveredBy = recoveryRaw['recoveredBy'];
+    const originalInstalledAt = recoveryRaw['originalInstalledAt'];
+    const originalSourceIdentity = recoveryRaw['originalSourceIdentity'];
+    if (!str(recoveryRaw['recoveredAt']) || (recoveredBy !== undefined && (typeof recoveredBy !== 'string' || !/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(recoveredBy)))
+      || (originalInstalledAt !== null && !str(originalInstalledAt))
+      || (recoveryRaw['originalChannel'] !== 'unknown' && recoveryRaw['originalChannel'] !== 'stable' && recoveryRaw['originalChannel'] !== 'latest')
+      || (originalSourceIdentity !== undefined && (typeof originalSourceIdentity !== 'string' || !/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(originalSourceIdentity)))) {
+      return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.recovery contains invalid provenance facts' };
+    }
+    if (installedAt !== undefined || channel !== undefined || sourceIdentity !== undefined) {
+      return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'recovered receipts must keep original installation facts separate from recovery facts' };
+    }
+    if (recoveryRaw['originalChannel'] === 'latest' && originalSourceIdentity === undefined) {
+      return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'known latest original provenance requires originalSourceIdentity' };
+    }
+    if (recoveryRaw['originalChannel'] !== 'latest' && originalSourceIdentity !== undefined) {
+      return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'originalSourceIdentity requires latest original provenance' };
+    }
+    recovery = {
+      recoveredAt: recoveryRaw['recoveredAt'] as string,
+      ...(recoveredBy !== undefined ? { recoveredBy: recoveredBy as string } : {}),
+      originalInstalledAt: originalInstalledAt as string | null,
+      originalChannel: recoveryRaw['originalChannel'] as ReceiptRecovery['originalChannel'],
+      ...(originalSourceIdentity !== undefined ? { originalSourceIdentity: originalSourceIdentity as string } : {}),
+    };
+  } else if (installedAt === undefined) {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'ordinary receipts require installedAt' };
+  }
   const components = value['components'];
   if (!isRecord(components)) return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'receipt.components must be an object' };
   for (const key of Object.keys(components)) {
@@ -138,7 +203,7 @@ export function validateReceipt(value: unknown): ReceiptResultT {
       commit: str,
       commitVerified: (v) => typeof v === 'boolean',
       digestVerified: (v) => typeof v === 'boolean',
-      artifactSha256: (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v),
+      artifactSha256: (v) => v === null || (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)),
       installPath: isAbsolutePath,
       binPath: isAbsolutePath,
       smoke: (v) => v === 'passed' || v === 'not-run' || v === 'failed',
@@ -152,7 +217,7 @@ export function validateReceipt(value: unknown): ReceiptResultT {
       commit: str,
       commitVerified: (v) => typeof v === 'boolean',
       digestVerified: (v) => typeof v === 'boolean',
-      artifactSha256: (v) => typeof v === 'string' && /^[0-9a-f]{64}$/.test(v),
+      artifactSha256: (v) => v === null || (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)),
       installPath: isAbsolutePath,
       sourcePath: str,
       piVersion: str,
@@ -165,7 +230,10 @@ export function validateReceipt(value: unknown): ReceiptResultT {
     receipt: {
       receiptVersion: value['receiptVersion'] as number,
       piShuttleVersion: value['piShuttleVersion'] as string,
-      installedAt: value['installedAt'] as string,
+      ...(channel !== undefined ? { channel } : {}),
+      ...(sourceIdentity !== undefined ? { sourceIdentity } : {}),
+      ...(installedAt !== undefined ? { installedAt: installedAt as string } : {}),
+      ...(recovery !== undefined ? { recovery } : {}),
       platformLane: value['platformLane'] as string,
       result: value['result'] as ReceiptResult,
       installDir: value['installDir'] as string,
@@ -208,7 +276,10 @@ export function serializeReceipt(receipt: InstallReceipt): string {
   const document = {
     receiptVersion: receipt.receiptVersion,
     piShuttleVersion: receipt.piShuttleVersion,
-    installedAt: receipt.installedAt,
+    ...(receipt.channel !== undefined ? { channel: receipt.channel } : {}),
+    ...(receipt.sourceIdentity !== undefined ? { sourceIdentity: receipt.sourceIdentity } : {}),
+    ...(receipt.installedAt !== undefined ? { installedAt: receipt.installedAt } : {}),
+    ...(receipt.recovery !== undefined ? { recovery: receipt.recovery } : {}),
     platformLane: receipt.platformLane,
     result: receipt.result,
     installDir: receipt.installDir,
@@ -252,6 +323,7 @@ export function writeReceipt(path: string, receipt: InstallReceipt): ReceiptResu
 
 /** Build a fresh receipt skeleton with deterministic field order. */
 export function newReceipt(input: {
+  readonly piShuttleVersion?: string;
   readonly platformLane: string;
   readonly result: ReceiptResult;
   readonly installDir: string;
@@ -260,11 +332,16 @@ export function newReceipt(input: {
   readonly piGuard: PiGuardReceiptEntry | null;
   readonly omitted: readonly string[];
   readonly notes: readonly string[];
+  readonly channel?: 'stable' | 'latest';
+  readonly sourceIdentity?: string;
+  readonly recovery?: ReceiptRecovery;
 }): InstallReceipt {
   return {
     receiptVersion: RECEIPT_VERSION,
-    piShuttleVersion: PI_SHUTTLE_VERSION,
-    installedAt: new Date().toISOString(),
+    piShuttleVersion: input.piShuttleVersion ?? PI_SHUTTLE_VERSION,
+    ...(input.channel !== undefined ? { channel: input.channel } : {}),
+    ...(input.sourceIdentity !== undefined ? { sourceIdentity: input.sourceIdentity } : {}),
+    ...(input.recovery === undefined ? { installedAt: new Date().toISOString() } : { recovery: input.recovery }),
     platformLane: input.platformLane,
     result: input.result,
     installDir: input.installDir,

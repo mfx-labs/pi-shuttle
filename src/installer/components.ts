@@ -222,7 +222,7 @@ export interface GatewayInstallResult {
   readonly status: 'installed-verified' | 'installed-unverified';
   readonly installPath: string;
   readonly binPath: string;
-  readonly artifactSha256: string;
+  readonly artifactSha256: string | null;
   /** True only when the artifact digest matched an explicit expectation. */
   readonly digestVerified: boolean;
   readonly smoke: 'passed' | 'not-run';
@@ -342,7 +342,7 @@ export interface PiGuardInstallResult {
   readonly status: 'installed-verified' | 'installed-unverified';
   readonly installPath: string;
   readonly sourcePath: string;
-  readonly artifactSha256: string;
+  readonly artifactSha256: string | null;
   /** True only when the artifact digest matched an explicit expectation. */
   readonly digestVerified: boolean;
   readonly piVersion: string;

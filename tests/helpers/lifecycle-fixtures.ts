@@ -13,7 +13,7 @@ import { GATEWAY_PACKAGE_VERSION, GATEWAY_PS1_BASELINE_COMMIT, PI_GUARD_VERSION 
 import { canonicalizePath, resolveLayout } from '../../src/host/environment.js';
 import { componentDirName, GATEWAY_PACKAGE_NAME } from '../../src/installer/components.js';
 import { writeReceipt, newReceipt } from '../../src/installer/receipt.js';
-import type { ComponentStatus, GatewaySmoke } from '../../src/installer/receipt.js';
+import type { ComponentStatus, GatewaySmoke, ReceiptRecovery } from '../../src/installer/receipt.js';
 import { writeFakePi } from './installer-fixtures.js';
 
 /** Create a fresh isolated environment root (0700), on its CANONICAL spelling. */
@@ -167,6 +167,7 @@ export interface ReceiptFixtureOptions {
   readonly piGuard?: { readonly status: ComponentStatus; readonly installPath: string } | null;
   readonly omitted?: readonly string[];
   readonly notes?: readonly string[];
+  readonly recovery?: ReceiptRecovery;
 }
 
 /** Write a valid closed receipt under the env's state dir (default: COMPLETE, both components). */
@@ -215,6 +216,7 @@ export function writeReceiptFixture(env: string, options: ReceiptFixtureOptions 
     },
     omitted: options.omitted ?? [],
     notes: options.notes ?? [],
+    ...(options.recovery !== undefined ? { recovery: options.recovery } : {}),
   });
   const written = writeReceipt(layout.installReceiptPath, receipt);
   if (!written.ok) throw new Error(`receipt fixture failed: ${written.message}`);

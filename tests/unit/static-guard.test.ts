@@ -75,7 +75,7 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   // PS-3 installer boundary (ordinary local operator package management):
   'src/installer/preflight.ts': ['mkdirSync'],
   'src/installer/components.ts': ['existsSync', 'lstatSync', 'mkdirSync', 'renameSync', 'rmSync'],
-  'src/installer/install.ts': ['existsSync', 'mkdirSync', 'readlinkSync', 'rmSync', 'symlinkSync'],
+  'src/installer/install.ts': ['lstatSync', 'mkdirSync', 'readdirSync', 'readlinkSync', 'renameSync', 'rmSync', 'symlinkSync'],
   'src/installer/artifact.ts': ['createReadStream'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
   // PS-8A release boundary (verified staging + handoff files):

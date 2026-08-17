@@ -138,3 +138,34 @@ test('receipt: absent receipt reads as absent; PARTIAL receipts round-trip', () 
     rmSync(env, { recursive: true, force: true });
   }
 });
+
+test('receipt: recovered state keeps unknown original facts separate from recovery provenance', () => {
+  const recovered = newReceipt({
+    platformLane: 'linux-x86_64-posix-utf8-node22',
+    result: 'COMPLETE',
+    installDir: '/home/op/.local/share/pi-shuttle',
+    binDir: '/home/op/.local/bin',
+    gateway: null,
+    piGuard: null,
+    omitted: [],
+    notes: ['recovered'],
+    recovery: {
+      recoveredAt: '2026-08-17T00:00:00.000Z',
+      recoveredBy: `mfx-labs/pi-shuttle@${'b'.repeat(40)}`,
+      originalInstalledAt: null,
+      originalChannel: 'unknown',
+    },
+  });
+  assert.equal(recovered.installedAt, undefined);
+  assert.equal(recovered.channel, undefined);
+  const serialized = serializeReceipt(recovered);
+  assert.equal(validateReceipt(JSON.parse(serialized)).ok, true);
+  assert.match(serialized, /"recoveredAt"/);
+  assert.doesNotMatch(serialized, /"installedAt"/);
+
+  const ordinaryWithoutTime = JSON.parse(serializeReceipt(sampleReceipt())) as Record<string, unknown>;
+  delete ordinaryWithoutTime.installedAt;
+  assert.equal(validateReceipt(ordinaryWithoutTime).ok, false);
+  const fabricated = { ...JSON.parse(serialized), installedAt: '2026-08-17T00:00:00.000Z' };
+  assert.equal(validateReceipt(fabricated).ok, false);
+});

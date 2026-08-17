@@ -61,6 +61,31 @@ test('doctor: complete healthy local setup exits 0 (all implemented checks pass)
   }
 });
 
+test('doctor: recovered receipt reports recovery and does not invent original Stable/Latest provenance', async () => {
+  const { env, ctx } = healthyContext();
+  try {
+    writeReceiptFixture(env, {
+      recovery: {
+        recoveredAt: '2026-08-17T00:00:00.000Z',
+        recoveredBy: `mfx-labs/pi-shuttle@${'a'.repeat(40)}`,
+        originalInstalledAt: null,
+        originalChannel: 'unknown',
+      },
+    });
+    const result = await runDoctor(ctx);
+    assert.equal(result.ok, true);
+    if (!result.ok) return;
+    const detail = result.report.checks.find((check) => check.id === 'receipt')!.detail;
+    assert.match(detail, /installation metadata: recovered/);
+    assert.match(detail, /original installation time: unknown/);
+    assert.match(detail, /original distribution provenance: unknown/);
+    assert.match(detail, /recovered by: latest @ a{40}/);
+    assert.doesNotMatch(detail, /stable 0\.1\.1|latest 0\.1\.1/);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
 test('doctor: missing installation receipt is a finding (exit 1)', async () => {
   const { env, ctx } = healthyContext();
   try {

@@ -47,6 +47,11 @@ export function hostEnvironmentFromProcess(): { readonly ok: true; readonly envi
   return { ok: true, environment: { home, platform: process.platform, arch: process.arch, pathEnv: process.env } };
 }
 
+/** Direct-entry environment seam for installer bootstrap handoffs. */
+export function installerEnvironment(): NodeJS.ProcessEnv {
+  return process.env;
+}
+
 /** The complete approved pi-shuttle layout, derived from the home dir. */
 export interface LayoutPaths {
   readonly shareDir: string; // ~/.local/share/pi-shuttle

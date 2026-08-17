@@ -282,7 +282,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stderr.write('no installation changes were made; prior installation state (if any) is preserved\n');
     return INSTALLER_EXIT.FAILED;
   }
-  process.stdout.write(`pi-shuttle installer ${PI_SHUTTLE_VERSION} (official release lane)\n`);
+  process.stdout.write(`pi-shuttle stable installer\nversion: ${PI_SHUTTLE_VERSION}\nchannel: stable\n`);
   process.stdout.write(`${formatOutcome(result.outcome)}\n`);
   process.stdout.write(`receipt: ${resolveLayout(env.environment.home).installReceiptPath}\n`);
   if (result.outcome.kind === 'PARTIAL' || result.outcome.kind === 'COMPLETE') {

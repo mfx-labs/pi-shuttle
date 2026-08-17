@@ -26,11 +26,11 @@
  * project directories, Git state, unrelated Pi extensions, or a
  * pre-existing pi-guard.
  */
-import { lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync, rmSync, symlinkSync } from 'node:fs';
+import { lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync, rmdirSync, rmSync, symlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireLock, releaseLock } from '../persistence/lock.js';
-import { gatewayDescriptorForLane, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { GATEWAY_LANE_DESCRIPTORS, gatewayDescriptorForLane, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
 import type { GatewayLaneDescriptor } from '../compat/manifest.js';
 import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
@@ -77,8 +77,12 @@ export interface InstallOptions {
    * components.
    */
   readonly releasePackageTgz?: string;
+  /** Latest-channel source identity, e.g. mfx-labs/pi-shuttle@<full-sha>. */
+  readonly sourceIdentity?: string;
   /** Called only after the existing installation's ownership is proven. */
   readonly confirmUpgrade?: (installedVersion: string, installerVersion: string) => Promise<boolean>;
+  /** Deterministic test seam between receipt-less pre-proof and locked revalidation. */
+  readonly afterReceiptlessPreproof?: () => void | Promise<void>;
   /**
    * Injectable UID observation (SIR-PS3-007 root refusal). Defaults to
    * `process.getuid()` when absent; test-only seam, never hard-coded.
@@ -143,6 +147,47 @@ function pathEntryExists(path: string): boolean {
   }
 }
 
+interface AttemptCreatedDir {
+  readonly path: string;
+  readonly dev: number;
+  readonly ino: number;
+}
+
+function createAttemptStateDirs(stateDir: string): { readonly ok: true; readonly created: readonly AttemptCreatedDir[] } | { readonly ok: false; readonly code: string; readonly created: readonly AttemptCreatedDir[] } {
+  const paths: string[] = [];
+  for (let path = stateDir; dirname(path) !== path; path = dirname(path)) paths.push(path);
+  paths.reverse();
+  const created: AttemptCreatedDir[] = [];
+  for (const path of paths) {
+    try {
+      mkdirSync(path, { mode: 0o700 });
+      const stat = lstatSync(path);
+      if (stat.isDirectory() && !stat.isSymbolicLink()) created.push({ path, dev: stat.dev, ino: stat.ino });
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'EEXIST') continue;
+      return { ok: false, code: code ?? 'unknown error', created };
+    }
+  }
+  return { ok: true, created };
+}
+
+function removeEmptyAttemptStateDirs(stateDir: string, created: readonly AttemptCreatedDir[]): void {
+  for (const expected of [...created].reverse()) {
+    try {
+      const stat = lstatSync(expected.path);
+      if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== expected.dev || stat.ino !== expected.ino) break;
+      if (expected.path === stateDir
+        && (pathEntryExists(join(stateDir, 'install.json')) || pathEntryExists(join(stateDir, 'install.lock')))) break;
+      if (readdirSync(expected.path).length > 0) break;
+      rmdirSync(expected.path);
+    } catch {
+      // Never remove a non-empty, replaced, or concurrently used directory.
+      break;
+    }
+  }
+}
+
 /** Detect receipt-less installer state without claiming ownership from names alone. */
 function inspectUnownedState(layout: LayoutPaths, gatewayIdentity: GatewayComponentIdentity): ComponentResult<readonly string[]> {
   const found: string[] = [];
@@ -151,7 +196,7 @@ function inspectUnownedState(layout: LayoutPaths, gatewayIdentity: GatewayCompon
   try {
     const prefixes = [
       componentDirName(PI_SHUTTLE_PACKAGE_NAME, ''),
-      componentDirName(gatewayIdentity.packageName, ''),
+      ...Object.values(GATEWAY_LANE_DESCRIPTORS).map((descriptor) => componentDirName(descriptor.packageName, '')),
       componentDirName(PI_GUARD_PACKAGE_NAME, ''),
     ];
     for (const name of readdirSync(layout.packagesDir)) {
@@ -169,6 +214,169 @@ function inspectUnownedState(layout: LayoutPaths, gatewayIdentity: GatewayCompon
 
 interface OwnedInstallation {
   readonly binTarget: string;
+}
+
+type RecoveryResult =
+  | { readonly ok: true; readonly receipt: InstallReceipt | null }
+  | { readonly ok: false; readonly message: string };
+
+function packageCandidates(layout: LayoutPaths, prefixes: readonly string[]): ComponentResult<readonly string[]> {
+  try {
+    return {
+      ok: true,
+      value: readdirSync(layout.packagesDir)
+        .filter((name) => prefixes.some((prefix) => name.startsWith(prefix)))
+        .map((name) => join(layout.packagesDir, name)),
+    };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') return { ok: true, value: [] };
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `existing package storage could not be inspected (${code ?? 'unknown error'})` };
+  }
+}
+
+/**
+ * Prove receipt-less ownership using only the default layout and current
+ * read-only component inspections. No package is replaced and no command
+ * link is created here; the caller writes the receipt only after this proof.
+ */
+async function inspectReceiptlessOwnership(
+  env: HostEnvironment,
+  layout: LayoutPaths,
+  lane: string,
+  gatewayDescriptor: GatewayLaneDescriptor,
+  gatewayIdentity: GatewayComponentIdentity,
+  piExecutable: string | null,
+  sourceIdentity: string | undefined,
+): Promise<RecoveryResult> {
+  const shuttleCandidates = packageCandidates(layout, [componentDirName(PI_SHUTTLE_PACKAGE_NAME, '')]);
+  if (!shuttleCandidates.ok) return shuttleCandidates;
+  if (shuttleCandidates.value.length === 0) return { ok: true, receipt: null };
+  const defaults = resolveLayout(env.home);
+  if (layout.shareDir !== defaults.shareDir || layout.binDir !== defaults.binDir) {
+    return { ok: false, message: 'receipt-less recovery requires the expected default install and bin layout; custom layouts are refused' };
+  }
+  if (shuttleCandidates.value.length !== 1) {
+    return { ok: false, message: `receipt-less recovery found ambiguous pi-shuttle packages (${shuttleCandidates.value.join(', ')}); refusing` };
+  }
+
+  const shuttleRoot = shuttleCandidates.value[0]!;
+  let shuttleStat;
+  try {
+    shuttleStat = lstatSync(shuttleRoot);
+  } catch {
+    return { ok: false, message: `receipt-less recovery could not inspect the pi-shuttle package at ${shuttleRoot}` };
+  }
+  if (!shuttleStat.isDirectory()) return { ok: false, message: `receipt-less recovery found a non-directory pi-shuttle package entry at ${shuttleRoot}; refusing` };
+  const shuttleIdentity = readPackageIdentity(shuttleRoot);
+  if (shuttleIdentity === null || shuttleIdentity.name !== PI_SHUTTLE_PACKAGE_NAME || parseVersionTriple(shuttleIdentity.version) === null) {
+    return { ok: false, message: `installation metadata is missing or invalid at ${shuttleRoot}; automatic ownership cannot be established, so nothing was changed` };
+  }
+  if (shuttleRoot !== join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, shuttleIdentity.version))) {
+    return { ok: false, message: `receipt-less recovery found a pi-shuttle package at an unexpected location: ${shuttleRoot}` };
+  }
+  const binKeys = Object.keys(shuttleIdentity.bin);
+  if (binKeys.length !== 1 || binKeys[0] !== PI_SHUTTLE_PACKAGE_NAME) {
+    return { ok: false, message: `installation metadata is missing the exact pi-shuttle command identity at ${shuttleRoot}; automatic ownership cannot be established, so nothing was changed` };
+  }
+  const shuttleBin = validateBinPath(shuttleIdentity.bin[PI_SHUTTLE_PACKAGE_NAME]!, shuttleRoot);
+  if (!shuttleBin.ok || !regularFileOrNull(join(shuttleRoot, shuttleBin.ok ? shuttleBin.value : ''))) {
+    return { ok: false, message: shuttleBin.ok ? `receipt-less recovery found no regular pi-shuttle bin at ${join(shuttleRoot, shuttleBin.value)}` : shuttleBin.message };
+  }
+  const ownedBinTarget = join(shuttleRoot, shuttleBin.value);
+  const commandLink = join(layout.binDir, PI_SHUTTLE_PACKAGE_NAME);
+  let commandTarget: string;
+  try {
+    commandTarget = readlinkSync(commandLink);
+  } catch {
+    return { ok: false, message: `receipt-less recovery requires the pi-shuttle command symlink at ${commandLink}` };
+  }
+  if (commandTarget !== ownedBinTarget) {
+    return { ok: false, message: `receipt-less recovery found a foreign pi-shuttle command target (${commandTarget}); refusing` };
+  }
+
+  const gatewayPrefixes = [...new Set(Object.values(GATEWAY_LANE_DESCRIPTORS).map((descriptor) => componentDirName(descriptor.packageName, '')))].sort();
+  const gatewayCandidates = packageCandidates(layout, gatewayPrefixes);
+  if (!gatewayCandidates.ok) return gatewayCandidates;
+  if (gatewayCandidates.value.length > 1) return { ok: false, message: `receipt-less recovery found ambiguous Gateway packages (${gatewayCandidates.value.join(', ')}); refusing` };
+  const gatewayTarget = join(layout.packagesDir, componentDirName(gatewayIdentity.packageName, gatewayDescriptor.version));
+  if (gatewayCandidates.value.length === 1 && gatewayCandidates.value[0] !== gatewayTarget) {
+    return { ok: false, message: `receipt-less recovery found a Gateway package outside the expected location (${gatewayCandidates.value[0]}); refusing` };
+  }
+  const gateway = await inspectExistingGateway(gatewayTarget, process.execPath, gatewayIdentity, gatewayDescriptor.version);
+  if (!gateway.ok) return { ok: false, message: gateway.message };
+
+  const piGuardCandidates = packageCandidates(layout, [componentDirName(PI_GUARD_PACKAGE_NAME, '')]);
+  if (!piGuardCandidates.ok) return piGuardCandidates;
+  if (piGuardCandidates.value.length > 1) return { ok: false, message: `receipt-less recovery found ambiguous pi-guard packages (${piGuardCandidates.value.join(', ')}); refusing` };
+  const piGuardTarget = join(layout.packagesDir, componentDirName(PI_GUARD_PACKAGE_NAME, PI_GUARD_VERSION));
+  if (piGuardCandidates.value.length === 1 && piGuardCandidates.value[0] !== piGuardTarget) {
+    return { ok: false, message: `receipt-less recovery found pi-guard outside the expected location (${piGuardCandidates.value[0]}); refusing` };
+  }
+  const piGuard = await inspectExistingPiGuard(piGuardTarget, piExecutable, PI_GUARD_VERSION);
+  if (!piGuard.ok) return { ok: false, message: piGuard.message };
+  let piVersion: string | undefined;
+  if (piGuard.value !== null) {
+    if (piGuard.value.verifiedBy !== 'pi-list' || piExecutable === null) {
+      return { ok: false, message: 'receipt-less recovery could not prove the exact pi-guard source through pi list; refusing' };
+    }
+    const versionRun = await runProcess(piExecutable, ['--version'], { timeoutMs: 15_000 });
+    piVersion = versionRun.exitCode === 0 ? versionRun.stdout.trim().split(/\s+/)[0] : undefined;
+    if (piVersion === undefined || piVersion.length === 0 || parseVersionTriple(piVersion) === null) {
+      return { ok: false, message: 'receipt-less recovery could not prove the installed Pi version; refusing' };
+    }
+  }
+
+  const gatewayEntry: GatewayReceiptEntry | null = gateway.value === null ? null : {
+    status: gateway.value.status,
+    version: gatewayDescriptor.version,
+    commit: gatewayDescriptor.commit,
+    commitVerified: false,
+    digestVerified: false,
+    artifactSha256: null,
+    installPath: gateway.value.installPath,
+    binPath: gateway.value.binPath,
+    smoke: gateway.value.smoke,
+  };
+  const piGuardEntry: PiGuardReceiptEntry | null = piGuard.value === null ? null : {
+    status: piGuard.value.status,
+    version: PI_GUARD_VERSION,
+    commit: PI_GUARD_COMMIT,
+    commitVerified: false,
+    digestVerified: false,
+    artifactSha256: null,
+    installPath: piGuard.value.installPath,
+    sourcePath: piGuard.value.sourcePath,
+    piVersion: piVersion!,
+    verifiedBy: piGuard.value.verifiedBy,
+  };
+  const omitted: string[] = [];
+  if (gatewayEntry === null) omitted.push(gatewayIdentity.binName);
+  if (piGuardEntry === null) omitted.push('pi-guard');
+  const notes = ['recovered missing receipt from read-only ownership checks'];
+  if (gatewayEntry?.status !== undefined && gatewayEntry.status !== 'installed-verified') notes.push('recovered Gateway remains installed-unverified; verification was not claimed');
+  notes.push('recovered component artifact digests are unknown; digest verification was not claimed');
+  const result = gatewayEntry?.status === 'installed-verified' && (piGuardEntry === null || piGuardEntry.status === 'installed-verified') && omitted.length === 0 ? 'COMPLETE' : 'PARTIAL';
+  return {
+    ok: true,
+    receipt: newReceipt({
+      piShuttleVersion: shuttleIdentity.version,
+      platformLane: lane,
+      result,
+      installDir: layout.shareDir,
+      binDir: layout.binDir,
+      gateway: gatewayEntry,
+      piGuard: piGuardEntry,
+      omitted,
+      notes,
+      recovery: {
+        recoveredAt: new Date().toISOString(),
+        originalInstalledAt: null,
+        originalChannel: 'unknown',
+        ...(sourceIdentity !== undefined ? { recoveredBy: sourceIdentity } : {}),
+      },
+    }),
+  };
 }
 
 /** Prove receipt, package, component, and symlink ownership before upgrade mutation. */
@@ -382,6 +590,9 @@ export function gatewayReceiptEntryFromResult(descriptor: GatewayLaneDescriptor,
 
 /** Run the install flow. Pure orchestration; all I/O is installer-owned. */
 export async function runInstall(env: HostEnvironment, options: InstallOptions): Promise<InstallOutcome> {
+  if (options.sourceIdentity !== undefined && !/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(options.sourceIdentity)) {
+    return { kind: 'REFUSED', reason: 'latest source identity must be mfx-labs/pi-shuttle@<full-sha>' };
+  }
   // 0. Path-input defense: HOME/installDir/binDir must be absolute BEFORE
   // any installation mutation — the receipt schema requires absolute
   // paths, so a relative value could never produce self-valid state.
@@ -423,7 +634,24 @@ export async function runInstall(env: HostEnvironment, options: InstallOptions):
   const rootCheck = checkNotRoot(uid);
   if (!rootCheck.ok) return { kind: 'REFUSED', reason: rootCheck.message };
 
-  // 4. Layout + attempt bookkeeping. The attempt-spanning lock (SIR-PS3-009)
+  // 4. Read-only receipt/ownership pre-proof. Receipt-less ambiguity must
+  // refuse before creating the persistent state directory. The locked body
+  // repeats the proof after the lock is acquired, so this is only a gate,
+  // never a substitute for the race-safe revalidation.
+  const initialReceipt = readReceipt(layout.installReceiptPath);
+  if (!initialReceipt.ok && initialReceipt.code !== 'absent') {
+    return { kind: 'REFUSED', reason: `existing installation metadata is corrupted or invalid (${initialReceipt.message}); automatic ownership cannot be established, so nothing was changed` };
+  }
+  const receiptWasAbsentBeforeLock = !initialReceipt.ok;
+  if (receiptWasAbsentBeforeLock) {
+    const preflight = await inspectReceiptlessOwnership(env, layout, lane, gatewayDescriptor, gatewayIdentity, resolveExecutable('pi'), options.sourceIdentity);
+    if (!preflight.ok) {
+      return { kind: 'REFUSED', reason: `${preflight.message}; no installation changes were made. Restore the matching install receipt before retrying` };
+    }
+    await options.afterReceiptlessPreproof?.();
+  }
+
+  // 5. Layout + attempt bookkeeping. The attempt-spanning lock (SIR-PS3-009)
   // is acquired BEFORE the first installation mutation and before any
   // state-dependent decision (receipt inspection, layout creation).
   const installLockPath = join(layout.stateDir, 'install.lock');
@@ -436,30 +664,37 @@ export async function runInstall(env: HostEnvironment, options: InstallOptions):
     piGuardPiState: 'none',
     rollbackCandidates: [],
   };
-  try {
-    mkdirSync(layout.stateDir, { recursive: true, mode: 0o700 });
-  } catch (err) {
-    return { kind: 'REFUSED', reason: `state directory could not be created (${(err as NodeJS.ErrnoException).code ?? 'unknown error'})` };
+  const stateDirs = createAttemptStateDirs(layout.stateDir);
+  if (!stateDirs.ok) {
+    removeEmptyAttemptStateDirs(layout.stateDir, stateDirs.created);
+    return { kind: 'REFUSED', reason: `state directory could not be created (${stateDirs.code})` };
   }
   const installLock = acquireLock(installLockPath);
   if (!installLock.ok) {
+    removeEmptyAttemptStateDirs(layout.stateDir, stateDirs.created);
     return { kind: 'REFUSED', reason: installLock.message };
   }
+  let outcome: InstallOutcome;
   try {
-    return await runInstallLocked(env, options, lane, gatewayDescriptor, gatewayIdentity, attempt);
+    outcome = await runInstallLocked(env, options, lane, gatewayDescriptor, gatewayIdentity, attempt, receiptWasAbsentBeforeLock);
   } finally {
     releaseLock(installLock.fd, installLockPath);
   }
+  if (outcome.kind === 'REFUSED') removeEmptyAttemptStateDirs(layout.stateDir, stateDirs.created);
+  return outcome;
 }
 
 /** The locked install body: all state decisions and mutations happen here. */
-async function runInstallLocked(env: HostEnvironment, options: InstallOptions, lane: string, gatewayDescriptor: GatewayLaneDescriptor, gatewayIdentity: GatewayComponentIdentity, attempt: InstallAttempt): Promise<InstallOutcome> {
+async function runInstallLocked(env: HostEnvironment, options: InstallOptions, lane: string, gatewayDescriptor: GatewayLaneDescriptor, gatewayIdentity: GatewayComponentIdentity, attempt: InstallAttempt, receiptWasAbsentBeforeLock: boolean): Promise<InstallOutcome> {
   let layout = attempt.layout;
 
   // Existing receipt state: malformed metadata and ambiguous receipt-less
   // state fail closed. A valid receipt selects its recorded custom layout;
   // explicit path changes are not an upgrade operation.
-  const prior = readReceipt(attempt.receiptPath);
+  let prior = readReceipt(attempt.receiptPath);
+  if (receiptWasAbsentBeforeLock && (prior.ok || prior.code !== 'absent')) {
+    return { kind: 'REFUSED', reason: 'installation state changed between receipt-less ownership pre-proof and locked revalidation; no recovery mutation was made' };
+  }
   if (!prior.ok && prior.code !== 'absent') {
     return { kind: 'REFUSED', reason: `existing installation metadata is corrupted or invalid (${prior.message}); automatic ownership cannot be established, so nothing was changed. Restore the matching valid receipt before retrying` };
   }
@@ -473,6 +708,22 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     if (!recordedPathGuard.ok) return { kind: 'REFUSED', reason: recordedPathGuard.message };
     attempt.layout = layout;
   } else {
+    const recovered = await inspectReceiptlessOwnership(env, layout, lane, gatewayDescriptor, gatewayIdentity, resolveExecutable('pi'), options.sourceIdentity);
+    if (!recovered.ok) {
+      return {
+        kind: 'REFUSED',
+        reason: `${recovered.message}; no installation changes were made. Restore the matching install receipt before retrying`,
+      };
+    }
+    if (recovered.receipt !== null) {
+      const written = writeReceipt(attempt.receiptPath, recovered.receipt);
+      if (!written.ok) return { kind: 'REFUSED', reason: `receipt-less recovery could not persist the recovered receipt (${written.message}); no installation changes were made` };
+      process.stdout.write('pi-shuttle recovery: reconstructed the missing receipt from verified existing state\n');
+      prior = { ok: true, receipt: recovered.receipt };
+    }
+  }
+
+  if (!prior.ok) {
     const unowned = inspectUnownedState(layout, gatewayIdentity);
     if (!unowned.ok) {
       return { kind: 'REFUSED', reason: `${unowned.message}; automatic ownership cannot be established, so nothing was changed` };
@@ -860,6 +1111,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     piGuard: piGuardEntry,
     omitted,
     notes,
+    ...(options.sourceIdentity !== undefined ? { channel: 'latest' as const, sourceIdentity: options.sourceIdentity } : {}),
   });
   const written = writeReceipt(attempt.receiptPath, receipt);
   if (!written.ok) {

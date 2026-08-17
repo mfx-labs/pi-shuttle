@@ -72,7 +72,7 @@ test('installer: COMPLETE install of both components (batch)', async () => {
     assert.equal(receipt.receipt.components.gateway.smoke, 'passed');
     assert.equal(receipt.receipt.components.gateway.version, '0.1.0');
     assert.equal(receipt.receipt.components.gateway.commit, GATEWAY_PS1_BASELINE_COMMIT);
-    assert.match(receipt.receipt.components.gateway.artifactSha256, SHA_RE);
+    assert.match(receipt.receipt.components.gateway.artifactSha256 ?? '', SHA_RE);
     assert.equal(receipt.receipt.components.piGuard.status, 'installed-verified');
     assert.equal(receipt.receipt.components.piGuard.verifiedBy, 'pi-list');
     assert.equal(receipt.receipt.components.piGuard.piVersion, '0.83.0');
@@ -859,11 +859,12 @@ test('installer: concurrent different-selection installers serialize via the ins
     const b = await runInstaller(argsB, runEnv);
     const aResult = await a;
     assert.equal(aResult.code, 0, aResult.stdout + aResult.stderr);
-    // Two acceptable outcomes (SIR-PS3-009): B fails BUSY while A holds the
-    // lock, or B runs sequentially against A's final state. UNACCEPTABLE:
-    // a success whose receipt disagrees with the actual component state.
+    // Acceptable outcomes (SIR-PS3-009): B fails BUSY, locked revalidation
+    // refuses B's stale receipt-absent pre-proof after A finalizes, or B runs
+    // sequentially against A's final state. UNACCEPTABLE: a success whose
+    // receipt disagrees with the actual component state.
     if (b.code === 2) {
-      assert.ok(b.stdout.includes('in progress'), b.stdout);
+      assert.match(b.stdout, /in progress|state changed between receipt-less ownership pre-proof and locked revalidation/);
     } else {
       assert.ok(b.code === 0 || b.code === 1, b.stdout + b.stderr);
     }
