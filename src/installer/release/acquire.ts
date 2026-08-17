@@ -22,12 +22,16 @@ import { mkdirSync } from 'node:fs';
 import { get as httpsGet } from 'node:https';
 import { join } from 'node:path';
 import { hashFile } from '../artifact.js';
+import { PI_SHUTTLE_VERSION } from '../../compat/manifest.js';
 import { RELEASE_FILE_NAME_RE } from './envelope.js';
 
 export const RELEASE_BASE_URL_PREFIX = 'https://github.com/mfx-labs/pi-shuttle/releases/download';
 export const MAX_REDIRECTS = 5;
 export const RELEASE_FETCH_TIMEOUT_MS = 60_000;
 export const RELEASE_FETCH_MAX_BYTES = 1024 * 1024 * 1024; // 1 GiB hard cap per asset
+
+/** Release-installer HTTP identity (derived from the canonical version pin). */
+export const RELEASE_INSTALLER_USER_AGENT = `pi-shuttle-release-installer/${PI_SHUTTLE_VERSION}`;
 
 /** The version-pinned release base URL (fixed prefix + validated version). */
 export function releaseBaseUrlFor(version: string): string {
@@ -68,7 +72,7 @@ function fail(code: string, message: string): AcquireResult {
 /** Default HTTPS fetcher: one GET, no redirect following (the caller owns the policy). */
 export async function defaultFetcher(url: string): Promise<FetchResponse> {
   return new Promise((resolve, reject) => {
-    const request = httpsGet(url, { headers: { 'user-agent': 'pi-shuttle-release-installer/0.1.0' } }, (response) => {
+    const request = httpsGet(url, { headers: { 'user-agent': RELEASE_INSTALLER_USER_AGENT } }, (response) => {
       const lengthHeader = response.headers['content-length'];
       resolve({
         status: response.statusCode ?? 0,

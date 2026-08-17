@@ -71,7 +71,7 @@ test('cli dispatch: help and version are deterministic and state-free', async ()
 
   const version = await run(['--version'], { env: LINUX_ENV });
   assert.equal(version.exitCode, 0);
-  assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
+  assert.ok(version.stdout.includes('pi-shuttle 0.1.1'));
   assert.ok(version.stdout.includes(GATEWAY_PS1_BASELINE_COMMIT));
   assert.ok(version.stdout.includes(`pi-guard ${PI_GUARD_VERSION}`));
   assert.deepEqual(await run(['--version'], { env: LINUX_ENV }), version, 'version must be byte-deterministic');
@@ -127,7 +127,7 @@ test('cli dispatch: help/version work without any host environment (SIR-PS2-010)
   assert.equal(help.stderr, '');
   const version = await run(['--version'], {});
   assert.equal(version.exitCode, 0);
-  assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
+  assert.ok(version.stdout.includes('pi-shuttle 0.1.1'));
   // Env-requiring commands fail closed without an environment.
   const doctor = await run(['doctor'], {});
   assert.equal(doctor.exitCode, 2);
@@ -172,7 +172,7 @@ test('cli subprocess: real CLI help/version/unknown/deferred/doctor', async () =
 
   const version = await runCli(['--version'], home, probeEnv);
   assert.equal(version.code, 0);
-  assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
+  assert.ok(version.stdout.includes('pi-shuttle 0.1.1'));
 
   const unknown = await runCli(['frobnicate'], home, probeEnv);
   assert.equal(unknown.code, 2);
@@ -204,7 +204,7 @@ test('cli subprocess: help/version succeed with HOME absent (SIR-PS2-010)', asyn
   assert.ok(help.stdout.includes('usage: pi-shuttle'));
   const version = await runCli(['--version'], '/unused', noHome);
   assert.equal(version.code, 0, version.stderr);
-  assert.ok(version.stdout.includes('pi-shuttle 0.1.0'));
+  assert.ok(version.stdout.includes('pi-shuttle 0.1.1'));
   // Env-requiring commands still fail closed without HOME.
   const doctor = await runCli(['doctor'], '/unused', noHome);
   assert.equal(doctor.code, 2);

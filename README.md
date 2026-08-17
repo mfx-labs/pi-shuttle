@@ -4,7 +4,9 @@
 
 pi-shuttle packages **Project Gateway** and **pi-guard** into one operator-facing product. It installs and verifies the reviewed components, registers only the projects you choose, checks that the environment is healthy, and starts a constrained MCP gateway — without giving an AI agent a general-purpose shell, unrestricted filesystem access, or Git push authority.
 
-> **v0.1.0 is available now.**
+> **v0.1.0 is the current published release.**
+>
+> **v0.1.1 (installer correctness hotfix) is prepared for publication but is not yet a published release.**
 >
 > Product-supported: **Linux x86_64** and **macOS Intel x86_64**.
 > Apple Silicon follows the same macOS installation path, but is not yet product-supported.
@@ -22,6 +24,8 @@ Install the version-pinned release:
 ```bash
 curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.0/install.sh | bash
 ```
+
+v0.1.1 (installer correctness hotfix) is prepared for publication but is not yet published; the v0.1.0 installer above remains the currently usable public path until the v0.1.1 publication gate completes.
 
 Then verify the installation:
 
@@ -124,7 +128,7 @@ unrestricted machine access
 
 ## Supported platforms
 
-| Platform | Architecture | v0.1.0 |
+| Platform | Architecture | v0.1.1 |
 |---|---|---|
 | Linux | x86_64 | **Supported** |
 | macOS | Intel x86_64 | **Supported** |
@@ -139,7 +143,7 @@ The v0.1.0 macOS Gateway package contains both x86_64 and arm64 native candidate
 
 Therefore:
 
-- arm64 is **not product-supported in v0.1.0**;
+- arm64 is **not product-supported in v0.1.1**;
 - arm64 is **not known incompatible**;
 - no Apple Silicon physical/runtime acceptance is claimed.
 
@@ -229,13 +233,13 @@ Unknown platforms, target/envelope mismatches, component drift, invalid receipts
 
 ## macOS distribution note
 
-v0.1.0 is **not code-signed or Apple-notarized** and must not be described as signed or notarized distribution.
+v0.1.1 is **not code-signed or Apple-notarized** and must not be described as signed or notarized distribution.
 
 On macOS, quarantine handling occurs after artifact digest verification and before activation.
 
 ## Release
 
-Current release: **[pi-shuttle v0.1.0](https://github.com/mfx-labs/pi-shuttle/releases/tag/v0.1.0)**
+Current published release: **[pi-shuttle v0.1.0](https://github.com/mfx-labs/pi-shuttle/releases/tag/v0.1.0)**
 
 The public release contains one combined multi-platform inventory:
 
@@ -249,6 +253,8 @@ project-gateway-macos-core-0.1.0.tgz
 pi-guard-0.1.2.tgz
 SHA256SUMS
 ```
+
+**v0.1.1** (installer correctness hotfix) is prepared for publication but is **not yet a published release**. Its intended inventory is structurally identical to v0.1.0, with only the pi-shuttle versioned assets renamed: `pi-shuttle-0.1.1-linux-x86_64.json`, `pi-shuttle-0.1.1-macos.json`, `pi-shuttle-0.1.1.tgz`.
 
 Use `SHA256SUMS` to independently verify downloaded release assets.
 
@@ -285,4 +291,8 @@ The repository also contains release-engineering tooling for building from exact
 
 ## License
 
-`pi-shuttle` v0.1.0 is currently **UNLICENSED**. See [`package.json`](package.json) for the authoritative package metadata.
+The pi-shuttle repository and the v0.1.1 source distribution are licensed under the **MIT License**. See [LICENSE](LICENSE) for the full text.
+
+This license covers the pi-shuttle repository only. Bundled/referenced components — Project Gateway, Project Gateway macOS, pi-guard, and all third-party dependencies — retain their own existing licenses.
+
+Earlier v0.1.0 artifacts were distributed without a repository license; this change licenses the current repository and the v0.1.1 source distribution and does not retroactively relicense historical v0.1.0 artifacts.

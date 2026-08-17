@@ -154,18 +154,18 @@ test('builder (E2A): combined inventory contains both envelopes, both Gateways, 
   ]);
   assert.deepEqual(assets, [
     'install.sh',
-    'pi-shuttle-0.1.0-linux-x86_64.json',
-    'pi-shuttle-0.1.0-macos.json',
-    'pi-shuttle-0.1.0.tgz',
+    'pi-shuttle-0.1.1-linux-x86_64.json',
+    'pi-shuttle-0.1.1-macos.json',
+    'pi-shuttle-0.1.1.tgz',
     'project-gateway-artifact-core-0.1.0.tgz',
     'project-gateway-macos-core-0.1.0.tgz',
     'pi-guard-0.1.2.tgz',
   ]);
   assert.deepEqual(RELEASE_ENVELOPE_FILES, {
-    linux: 'pi-shuttle-0.1.0-linux-x86_64.json',
-    macos: 'pi-shuttle-0.1.0-macos.json',
+    linux: 'pi-shuttle-0.1.1-linux-x86_64.json',
+    macos: 'pi-shuttle-0.1.1-macos.json',
   });
-  for (const common of ['install.sh', 'pi-shuttle-0.1.0.tgz', 'pi-guard-0.1.2.tgz']) {
+  for (const common of ['install.sh', 'pi-shuttle-0.1.1.tgz', 'pi-guard-0.1.2.tgz']) {
     assert.equal(assets.filter((asset: string) => asset === common).length, 1, `${common} must be common and singular`);
   }
   assert.throws(

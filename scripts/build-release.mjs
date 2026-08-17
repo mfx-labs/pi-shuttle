@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
  * PS-8A release-candidate builder (deterministic local release
- * preparation). Produces the complete v0.1.0 release asset set under
- * dist-release/v0.1.0/ from EXACT clean component source checkouts and
+ * preparation). Produces the complete v0.1.1 release asset set under
+ * dist-release/v0.1.1/ from EXACT clean component source checkouts and
  * the exact release-candidate pi-shuttle tree.
  *
  * The builder NEVER: pushes, tags, calls GitHub Release APIs, uploads,
@@ -13,16 +13,16 @@
  *     --linux-gateway-checkout <path> \
  *     --macos-gateway-checkout <path> \
  *     --pi-guard-checkout <path> \
- *     [--out dist-release/v0.1.0]
+ *     [--out dist-release/v0.1.1]
  *
  * Requires: `npm run build` already done in this repository (the
  * builder validates its output against the built release modules).
  *
  * Asset set produced:
  *   install.sh                                  version-specific bootstrap
- *   pi-shuttle-0.1.0-linux-x86_64.json          Linux release envelope
- *   pi-shuttle-0.1.0-macos.json                 shared macOS release envelope
- *   pi-shuttle-0.1.0.tgz                        pi-shuttle package (dist only)
+ *   pi-shuttle-0.1.1-linux-x86_64.json          Linux release envelope
+ *   pi-shuttle-0.1.1-macos.json                 shared macOS release envelope
+ *   pi-shuttle-0.1.1.tgz                        pi-shuttle package (dist only)
  *   project-gateway-artifact-core-0.1.0.tgz     Linux Gateway artifact
  *   project-gateway-macos-core-0.1.0.tgz        shared macOS Gateway artifact
  *   pi-guard-0.1.2.tgz                          pi-guard artifact (no deps)
@@ -47,9 +47,9 @@ import { scanArtifactMembers } from '../dist/installer/archive.js';
 import { PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME, validateBinPath } from '../dist/installer/components.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const OUT_DEFAULT = join(ROOT, 'dist-release', 'v0.1.0');
+const OUT_DEFAULT = join(ROOT, 'dist-release', 'v0.1.1');
 
-const RELEASE_VERSION = '0.1.0';
+const RELEASE_VERSION = '0.1.1';
 export const RELEASE_ENVELOPE_FILES = Object.freeze({
   linux: `pi-shuttle-${RELEASE_VERSION}-linux-x86_64.json`,
   macos: `pi-shuttle-${RELEASE_VERSION}-macos.json`,
@@ -557,7 +557,7 @@ async function main() {
       if (!existsSync(join(shuttleVerify, 'package', entry))) fail(`pi-shuttle release package is missing ${entry}`);
     }
 
-    console.log('\nbuild-release: release-candidate inventory (dist-release/v0.1.0):');
+    console.log('\nbuild-release: release-candidate inventory (dist-release/v0.1.1):');
     console.log('  asset                                          size         sha256');
     for (const asset of [...assets, SHA256SUMS]) {
       const size = statSync(join(out, asset)).size;

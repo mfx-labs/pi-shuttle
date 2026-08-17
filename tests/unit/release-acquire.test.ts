@@ -11,10 +11,16 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
-import { acquireVerifiedFile, downloadToFile, MAX_REDIRECTS, RELEASE_BASE_URL_PREFIX, RELEASE_REDIRECT_ALLOWLIST } from '../../src/installer/release/acquire.js';
+import { acquireVerifiedFile, downloadToFile, MAX_REDIRECTS, RELEASE_BASE_URL_PREFIX, RELEASE_INSTALLER_USER_AGENT, RELEASE_REDIRECT_ALLOWLIST } from '../../src/installer/release/acquire.js';
 import type { FetchResponse, ReleaseFetcher } from '../../src/installer/release/acquire.js';
 
 const BASE = `${RELEASE_BASE_URL_PREFIX}/v0.1.0`;
+
+test('acquire: release-installer user-agent carries the current pi-shuttle version', () => {
+  // Version-sensitive assertion: a future pi-shuttle bump must move this
+  // expectation (the shipped HTTP identity must never go stale).
+  assert.equal(RELEASE_INSTALLER_USER_AGENT, 'pi-shuttle-release-installer/0.1.1');
+});
 
 function body(buffer: Buffer, status = 200, extra: Partial<FetchResponse> = {}): FetchResponse {
   return { status, body: Readable.from([buffer]), contentLength: buffer.length, ...extra };
