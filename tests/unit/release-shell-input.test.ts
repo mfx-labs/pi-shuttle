@@ -10,7 +10,7 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,7 +21,8 @@ function buildInstallSh(dir: string): string {
   const template = readFileSync(join(REPO, 'scripts', 'install-release.template.sh'), 'utf8');
   const installSh = template
     .replaceAll('__RELEASE_VERSION__', '0.1.0')
-    .replaceAll('__ENVELOPE_SHA256__', 'e'.repeat(64))
+    .replaceAll('__LINUX_ENVELOPE_SHA256__', 'l'.repeat(64))
+    .replaceAll('__MACOS_ENVELOPE_SHA256__', 'm'.repeat(64))
     .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', 'p'.repeat(64));
   const path = join(dir, 'install.sh');
   writeFileSync(path, installSh);
@@ -32,7 +33,91 @@ function runInstallSh(installSh: string, args: readonly string[], env: Record<st
   return spawnSync('bash', [installSh, ...args], { encoding: 'utf8', input: '', env: { ...process.env, ...env } });
 }
 
+function runWithHost(installSh: string, dir: string, hostKey: string) {
+  const bin = join(dir, 'bin');
+  mkdirSync(bin, { recursive: true });
+  const node = join(bin, 'node');
+  const curl = join(bin, 'curl');
+  const fetchLog = join(dir, 'fetch.log');
+  writeFileSync(node, '#!/bin/sh\nif [ "$1" = "-p" ]; then printf "%s\\n" "$FAKE_NODE_HOST"; exit 0; fi\nexit 99\n');
+  writeFileSync(curl, '#!/bin/sh\nprintf "%s\\n" "$*" > "$FAKE_FETCH_LOG"\nexit 22\n');
+  chmodSync(node, 0o755);
+  chmodSync(curl, 0o755);
+  const result = runInstallSh(installSh, ['--batch', '--gateway', 'no', '--pi-guard', 'no'], {
+    PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+    FAKE_NODE_HOST: hostKey,
+    FAKE_FETCH_LOG: fetchLog,
+  });
+  return { result, fetchLog: existsSync(fetchLog) ? readFileSync(fetchLog, 'utf8') : null };
+}
+
 const TTY_REFUSAL = 'must pass explicit selections';
+
+test('shell (E2A): Linux x64 selects the Linux envelope', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'e2a-shell.XXXXXX'));
+  try {
+    const { result, fetchLog } = runWithHost(buildInstallSh(dir), dir, 'linux:x64');
+    assert.match(fetchLog ?? '', /pi-shuttle-0\.1\.0-linux-x86_64\.json/);
+    assert.match(result.stdout, /downloading release v0\.1\.0 assets/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shell (E2A): Darwin x64 selects the shared macOS envelope', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'e2a-shell.XXXXXX'));
+  try {
+    const { fetchLog } = runWithHost(buildInstallSh(dir), dir, 'darwin:x64');
+    assert.match(fetchLog ?? '', /pi-shuttle-0\.1\.0-macos\.json/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shell (E2A): Darwin arm64 selects the same shared macOS envelope', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'e2a-shell.XXXXXX'));
+  try {
+    const { fetchLog } = runWithHost(buildInstallSh(dir), dir, 'darwin:arm64');
+    assert.match(fetchLog ?? '', /pi-shuttle-0\.1\.0-macos\.json/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shell (E2A): unknown host facts refuse before release acquisition with no fallback', () => {
+  for (const hostKey of ['linux:arm64', 'darwin:ia32', 'win32:x64', '']) {
+    const dir = mkdtempSync(join(tmpdir(), 'e2a-shell.XXXXXX'));
+    try {
+      const { result, fetchLog } = runWithHost(buildInstallSh(dir), dir, hostKey);
+      assert.equal(result.status, 2, hostKey);
+      assert.match(result.stderr, /unsupported platform\/architecture.*no release-envelope fallback/, hostKey);
+      assert.equal(fetchLog, null, `${hostKey} must refuse before curl/wget acquisition`);
+      assert.equal(result.stdout.includes('downloading release'), false, hostKey);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('shell (E2A): topology adds no public target, lane, architecture, or acceptance selector', () => {
+  const template = readFileSync(join(REPO, 'scripts', 'install-release.template.sh'), 'utf8');
+  for (const selector of ['--target', '--lane', '--architecture', '--experimental', '--acceptance']) {
+    assert.equal(template.includes(selector), false, selector);
+  }
+});
+
+test('shell (E2A): generated installer embeds both exact envelope digest slots', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'e2a-shell.XXXXXX'));
+  try {
+    const generated = readFileSync(buildInstallSh(dir), 'utf8');
+    assert.ok(generated.includes(`LINUX_ENVELOPE_SHA256="${'l'.repeat(64)}"`));
+    assert.ok(generated.includes(`MACOS_ENVELOPE_SHA256="${'m'.repeat(64)}"`));
+    assert.equal(generated.includes('__LINUX_ENVELOPE_SHA256__'), false);
+    assert.equal(generated.includes('__MACOS_ENVELOPE_SHA256__'), false);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('shell (F-01): piped stdin with no explicit selections refuses instead of EOF-defaulting', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'ps8a-shell.XXXXXX'));

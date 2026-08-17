@@ -10,8 +10,9 @@
  *
  * Usage:
  *   node scripts/build-release.mjs \
- *     --target <internal-host-target> \
- *     --gateway-checkout <path> --pi-guard-checkout <path> \
+ *     --linux-gateway-checkout <path> \
+ *     --macos-gateway-checkout <path> \
+ *     --pi-guard-checkout <path> \
  *     [--out dist-release/v0.1.0]
  *
  * Requires: `npm run build` already done in this repository (the
@@ -19,16 +20,17 @@
  *
  * Asset set produced:
  *   install.sh                                  version-specific bootstrap
- *   pi-shuttle-0.1.0.json                       release envelope (closed schema)
+ *   pi-shuttle-0.1.0-linux-x86_64.json          Linux release envelope
+ *   pi-shuttle-0.1.0-macos.json                 shared macOS release envelope
  *   pi-shuttle-0.1.0.tgz                        pi-shuttle package (dist only)
- *   <selected Gateway descriptor artifact>      Gateway artifact incl. pinned
- *                                               runtime dependencies
+ *   project-gateway-artifact-core-0.1.0.tgz     Linux Gateway artifact
+ *   project-gateway-macos-core-0.1.0.tgz        shared macOS Gateway artifact
  *   pi-guard-0.1.2.tgz                          pi-guard artifact (no deps)
  *   SHA256SUMS                                  sha256 of every asset
  *
  * Self-reference note (§7): no cycle exists. The envelope carries the
- * digests of the pi-shuttle package and the component artifacts; the
- * envelope's own digest is embedded in install.sh; nothing embeds
+ * digests of the pi-shuttle package and the component artifacts; both
+ * envelope digests are embedded in install.sh; nothing embeds
  * install.sh's digest (SHA256SUMS covers it, generated last). The
  * runtime compatibility manifest (src/compat/manifest.ts) is frozen
  * source and is never rewritten by the builder.
@@ -48,7 +50,10 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DEFAULT = join(ROOT, 'dist-release', 'v0.1.0');
 
 const RELEASE_VERSION = '0.1.0';
-const ENVELOPE_FILE = `pi-shuttle-${RELEASE_VERSION}.json`;
+export const RELEASE_ENVELOPE_FILES = Object.freeze({
+  linux: `pi-shuttle-${RELEASE_VERSION}-linux-x86_64.json`,
+  macos: `pi-shuttle-${RELEASE_VERSION}-macos.json`,
+});
 const PI_SHUTTLE_TGZ = `pi-shuttle-${RELEASE_VERSION}.tgz`;
 const PI_GUARD_TGZ = 'pi-guard-0.1.2.tgz';
 const INSTALL_SH = 'install.sh';
@@ -76,6 +81,25 @@ function sha256File(path) {
   const hash = createHash('sha256');
   hash.update(readFileSync(path));
   return hash.digest('hex');
+}
+
+/** The complete combined release inventory, excluding SHA256SUMS itself. */
+export function releaseInventoryAssets(gatewayArtifacts) {
+  const assets = [
+    INSTALL_SH,
+    RELEASE_ENVELOPE_FILES.linux,
+    RELEASE_ENVELOPE_FILES.macos,
+    PI_SHUTTLE_TGZ,
+    ...gatewayArtifacts,
+    PI_GUARD_TGZ,
+  ];
+  if (new Set(assets).size !== assets.length) throw new Error('combined release inventory contains duplicate asset names');
+  return assets;
+}
+
+/** SHA256SUMS rows for every published asset, sorted by the complete row. */
+export function checksumLines(out, assets) {
+  return assets.map((asset) => `${sha256File(join(out, asset))}  ${asset}`).sort();
 }
 
 /**
@@ -257,24 +281,24 @@ function writeTarGz(rootDir, topPrefix, outPath) {
 // ─── main ───
 
 function parseArgs(argv) {
-  const options = { target: null, gatewayCheckout: null, piGuardCheckout: null, out: OUT_DEFAULT };
+  const options = { linuxGatewayCheckout: null, macosGatewayCheckout: null, piGuardCheckout: null, out: OUT_DEFAULT };
   let i = 0;
   while (i < argv.length) {
     const flag = argv[i];
     const value = argv[i + 1];
-    if (flag === '--target' || flag === '--gateway-checkout' || flag === '--pi-guard-checkout' || flag === '--out') {
+    if (flag === '--linux-gateway-checkout' || flag === '--macos-gateway-checkout' || flag === '--pi-guard-checkout' || flag === '--out') {
       if (value === undefined) fail(`${flag} requires a value`);
-      if (flag === '--target') options.target = value;
-      if (flag === '--gateway-checkout') options.gatewayCheckout = value;
+      if (flag === '--linux-gateway-checkout') options.linuxGatewayCheckout = value;
+      if (flag === '--macos-gateway-checkout') options.macosGatewayCheckout = value;
       if (flag === '--pi-guard-checkout') options.piGuardCheckout = value;
       if (flag === '--out') options.out = value;
       i += 2;
     } else {
-      fail(`unknown argument: ${flag}\nusage: node scripts/build-release.mjs --target <internal-host-target> --gateway-checkout <path> --pi-guard-checkout <path> [--out <dir>]`);
+      fail(`unknown argument: ${flag}\nusage: node scripts/build-release.mjs --linux-gateway-checkout <path> --macos-gateway-checkout <path> --pi-guard-checkout <path> [--out <dir>]`);
     }
   }
-  if (options.target === null || options.gatewayCheckout === null || options.piGuardCheckout === null) {
-    fail('--target, --gateway-checkout, and --pi-guard-checkout are required');
+  if (options.linuxGatewayCheckout === null || options.macosGatewayCheckout === null || options.piGuardCheckout === null) {
+    fail('--linux-gateway-checkout, --macos-gateway-checkout, and --pi-guard-checkout are required');
   }
   return options;
 }
@@ -326,14 +350,25 @@ export function createReleaseEnvelope(gatewayDescriptor, { piShuttleSha, gateway
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
-  let gatewayDescriptor;
+  let releaseTargets;
   try {
-    gatewayDescriptor = selectGatewayReleaseDescriptor(options.target);
+    releaseTargets = [
+      {
+        key: 'linux',
+        target: manifest.LINUX_HOST_LANE,
+        checkout: resolve(options.linuxGatewayCheckout),
+        descriptor: selectGatewayReleaseDescriptor(manifest.LINUX_HOST_LANE),
+      },
+      {
+        key: 'macos',
+        target: manifest.DARWIN_X86_64_HOST_LANE,
+        checkout: resolve(options.macosGatewayCheckout),
+        descriptor: selectGatewayReleaseDescriptor(manifest.DARWIN_X86_64_HOST_LANE),
+      },
+    ];
   } catch (err) {
     fail(err.message);
   }
-  const gatewayTgz = gatewayDescriptor.artifactFileName;
-  const gatewayCheckout = resolve(options.gatewayCheckout);
   const piGuardCheckout = resolve(options.piGuardCheckout);
   const out = resolve(options.out);
 
@@ -341,11 +376,16 @@ async function main() {
     fail('dist is missing or stale — run `npm run build` first');
   }
   console.log(`build-release: pi-shuttle release candidate v${manifest.PI_SHUTTLE_VERSION}`);
-  console.log(`build-release: target ${options.target} selects ${gatewayDescriptor.repository}@${gatewayDescriptor.commit} (${gatewayDescriptor.packageName}@${gatewayDescriptor.version}, ${gatewayTgz})`);
-
-  verifyCheckout('gateway', gatewayCheckout, gatewayDescriptor.commit, { expectedRepository: gatewayDescriptor.repository });
+  for (const releaseTarget of releaseTargets) {
+    const { target, descriptor } = releaseTarget;
+    console.log(`build-release: target ${target} selects ${descriptor.repository}@${descriptor.commit} (${descriptor.packageName}@${descriptor.version}, ${descriptor.artifactFileName})`);
+    verifyCheckout(`gateway (${releaseTarget.key})`, releaseTarget.checkout, descriptor.commit, { expectedRepository: descriptor.repository });
+  }
   verifyCheckout('pi-guard', piGuardCheckout, manifest.PI_GUARD_COMMIT, { expectedTag: manifest.PI_GUARD_TAG });
 
+  if (existsSync(out) && readdirSync(out).length > 0) {
+    fail(`output directory must be absent or empty so SHA256SUMS covers the complete inventory: ${out}`);
+  }
   mkdirSync(out, { recursive: true });
   const work = join(tmpdir(), `pi-shuttle-release-build.${process.pid}`);
   rmSync(work, { recursive: true, force: true });
@@ -366,53 +406,56 @@ async function main() {
     verifyArtifactIdentity(join(out, PI_SHUTTLE_TGZ), PI_SHUTTLE_PACKAGE_NAME, manifest.PI_SHUTTLE_VERSION, 'pi-shuttle');
     console.log(`build-release: pi-shuttle package ${PI_SHUTTLE_TGZ} (identity verified: ${PI_SHUTTLE_PACKAGE_NAME}@${manifest.PI_SHUTTLE_VERSION})`);
 
-    // ── Gateway artifact with materialized pinned runtime dependencies ──
-    console.log('build-release: building Gateway artifact with materialized pinned dependencies...');
-    const gw = join(work, 'gateway');
-    run('git', ['clone', '-q', '--no-local', gatewayCheckout, gw]);
-    run('npm', ['ci', '--ignore-scripts'], { cwd: gw });
-    run('npm', ['run', 'build'], { cwd: gw });
-    const packedGateway = run('npm', ['pack', '--silent', '--pack-destination', work], { cwd: gw }).split('\n').at(-1);
-    if (packedGateway !== gatewayTgz || !existsSync(join(work, gatewayTgz))) {
-      fail(`Gateway pack output mismatch for ${options.target}: expected ${gatewayTgz}, got ${packedGateway ?? 'no artifact'} (fail closed)`);
-    }
-    // Reinstall production-only (exact lockfile) for dependency materialization.
-    run('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: gw });
-    const gwPkg = join(work, 'gw-pkg');
-    mkdirSync(gwPkg, { recursive: true });
-    run('tar', ['-xzf', join(work, gatewayTgz), '-C', gwPkg]);
-    const gwPackageDir = join(gwPkg, 'package');
-    rmSync(join(gwPackageDir, 'node_modules'), { recursive: true, force: true });
-    cpSync(join(gw, 'node_modules'), join(gwPackageDir, 'node_modules'), { recursive: true });
-    // Strip npm metadata and .bin symlink trees: the installer's closed
-    // archive policy accepts only regular files and directories.
-    for (const dir of ['node_modules/.bin']) {
-      rmSync(join(gwPackageDir, dir), { recursive: true, force: true });
-    }
-    const strip = (dir) => {
-      for (const entry of readdirSync(dir)) {
-        const abs = join(dir, entry);
-        const st = lstatSync(abs);
-        if (st.isDirectory()) {
-          if (entry === '.bin') rmSync(abs, { recursive: true, force: true });
-          else if (entry === 'node_modules') strip(abs);
-          else strip(abs);
-        } else if (entry === '.package-lock.json') {
-          rmSync(abs, { force: true });
-        }
+    // ── Both Gateway artifacts with materialized pinned runtime dependencies ──
+    const gateways = [];
+    for (const releaseTarget of releaseTargets) {
+      const { key, target, checkout, descriptor } = releaseTarget;
+      const gatewayTgz = descriptor.artifactFileName;
+      console.log(`build-release: building ${key} Gateway artifact with materialized pinned dependencies...`);
+      const gw = join(work, `gateway-${key}`);
+      run('git', ['clone', '-q', '--no-local', checkout, gw]);
+      run('npm', ['ci', '--ignore-scripts'], { cwd: gw });
+      run('npm', ['run', 'build'], { cwd: gw });
+      const packedGateway = run('npm', ['pack', '--silent', '--pack-destination', work], { cwd: gw }).split('\n').at(-1);
+      if (packedGateway !== gatewayTgz || !existsSync(join(work, gatewayTgz))) {
+        fail(`Gateway pack output mismatch for ${target}: expected ${gatewayTgz}, got ${packedGateway ?? 'no artifact'} (fail closed)`);
       }
-    };
-    strip(join(gwPackageDir, 'node_modules'));
-    writeTarGz(gwPackageDir, 'package', join(out, gatewayTgz));
-    // The FINAL retarred artifact must match the selected descriptor.
-    let gatewayBinRelative;
-    try {
-      gatewayBinRelative = verifyGatewayPackageIdentity(readTgzPackageIdentity(join(out, gatewayTgz)), gatewayDescriptor);
-    } catch (err) {
-      fail(err.message);
+      // Reinstall production-only (exact lockfile) for dependency materialization.
+      run('npm', ['ci', '--omit=dev', '--ignore-scripts'], { cwd: gw });
+      const gwPkg = join(work, `gw-pkg-${key}`);
+      mkdirSync(gwPkg, { recursive: true });
+      run('tar', ['-xzf', join(work, gatewayTgz), '-C', gwPkg]);
+      const gwPackageDir = join(gwPkg, 'package');
+      rmSync(join(gwPackageDir, 'node_modules'), { recursive: true, force: true });
+      cpSync(join(gw, 'node_modules'), join(gwPackageDir, 'node_modules'), { recursive: true });
+      // Strip npm metadata and .bin symlink trees: the installer's closed
+      // archive policy accepts only regular files and directories.
+      rmSync(join(gwPackageDir, 'node_modules/.bin'), { recursive: true, force: true });
+      const strip = (dir) => {
+        for (const entry of readdirSync(dir)) {
+          const abs = join(dir, entry);
+          const st = lstatSync(abs);
+          if (st.isDirectory()) {
+            if (entry === '.bin') rmSync(abs, { recursive: true, force: true });
+            else strip(abs);
+          } else if (entry === '.package-lock.json') {
+            rmSync(abs, { force: true });
+          }
+        }
+      };
+      strip(join(gwPackageDir, 'node_modules'));
+      writeTarGz(gwPackageDir, 'package', join(out, gatewayTgz));
+      // The FINAL retarred artifact must match the selected descriptor.
+      let gatewayBinRelative;
+      try {
+        gatewayBinRelative = verifyGatewayPackageIdentity(readTgzPackageIdentity(join(out, gatewayTgz)), descriptor);
+      } catch (err) {
+        fail(err.message);
+      }
+      const dependencySummary = Object.entries(descriptor.dependencies).map(([name, version]) => `${name}@${version}`).join(', ');
+      console.log(`build-release: Gateway artifact ${gatewayTgz} (identity verified: ${descriptor.packageName}@${descriptor.version}; bin: ${descriptor.binName}; deps materialized: ${dependencySummary})`);
+      gateways.push({ ...releaseTarget, gatewayTgz, gatewayBinRelative, gatewaySha: sha256File(join(out, gatewayTgz)) });
     }
-    const dependencySummary = Object.entries(gatewayDescriptor.dependencies).map(([name, version]) => `${name}@${version}`).join(', ');
-    console.log(`build-release: Gateway artifact ${gatewayTgz} (identity verified: ${gatewayDescriptor.packageName}@${gatewayDescriptor.version}; bin: ${gatewayDescriptor.binName}; deps materialized: ${dependencySummary})`);
 
     // ── pi-guard artifact (no runtime dependencies) ──
     console.log('build-release: packing pi-guard artifact...');
@@ -426,63 +469,86 @@ async function main() {
 
     // ── digests, envelope, install.sh, SHA256SUMS ──
     const piShuttleSha = sha256File(join(out, PI_SHUTTLE_TGZ));
-    const gatewaySha = sha256File(join(out, gatewayTgz));
     const piGuardSha = sha256File(join(out, PI_GUARD_TGZ));
 
-    const envelope = createReleaseEnvelope(gatewayDescriptor, { piShuttleSha, gatewaySha, piGuardSha });
-    const validated = validateEnvelope(envelope, options.target);
-    if (!validated.ok) fail(`generated envelope failed validation: ${validated.message}`);
-    const envelopePath = join(out, ENVELOPE_FILE);
-    writeFileSync(envelopePath, JSON.stringify(envelope, null, 2) + '\n');
-    const envelopeSha = sha256File(envelopePath);
-    console.log(`build-release: envelope ${ENVELOPE_FILE} validated (schema v1, exact pins)`);
+    const envelopeBuilds = [
+      {
+        key: 'linux',
+        fileName: RELEASE_ENVELOPE_FILES.linux,
+        gateway: gateways.find((gateway) => gateway.key === 'linux'),
+        validationTargets: [manifest.LINUX_HOST_LANE],
+      },
+      {
+        key: 'macos',
+        fileName: RELEASE_ENVELOPE_FILES.macos,
+        gateway: gateways.find((gateway) => gateway.key === 'macos'),
+        validationTargets: [manifest.DARWIN_X86_64_HOST_LANE, manifest.DARWIN_ARM64_HOST_LANE],
+      },
+    ];
+    for (const envelopeBuild of envelopeBuilds) {
+      if (envelopeBuild.gateway === undefined) fail(`missing ${envelopeBuild.key} Gateway materialization`);
+      const envelope = createReleaseEnvelope(envelopeBuild.gateway.descriptor, {
+        piShuttleSha,
+        gatewaySha: envelopeBuild.gateway.gatewaySha,
+        piGuardSha,
+      });
+      for (const target of envelopeBuild.validationTargets) {
+        const validated = validateEnvelope(envelope, target);
+        if (!validated.ok) fail(`generated ${envelopeBuild.key} envelope failed validation for ${target}: ${validated.message}`);
+      }
+      const envelopePath = join(out, envelopeBuild.fileName);
+      writeFileSync(envelopePath, JSON.stringify(envelope, null, 2) + '\n');
+      envelopeBuild.sha256 = sha256File(envelopePath);
+      console.log(`build-release: envelope ${envelopeBuild.fileName} validated (schema v1, exact pins)`);
+    }
 
-    // install.sh: version-specific bootstrap embedding the envelope digest
-    // (single crypto trust root for the whole release).
+    // install.sh: version-specific bootstrap embedding both envelope
+    // digests plus the common pi-shuttle package digest.
     const template = readFileSync(join(ROOT, 'scripts', 'install-release.template.sh'), 'utf8');
     const installSh = template
       .replaceAll('__RELEASE_VERSION__', RELEASE_VERSION)
-      .replaceAll('__ENVELOPE_SHA256__', envelopeSha)
+      .replaceAll('__LINUX_ENVELOPE_SHA256__', envelopeBuilds.find((envelope) => envelope.key === 'linux').sha256)
+      .replaceAll('__MACOS_ENVELOPE_SHA256__', envelopeBuilds.find((envelope) => envelope.key === 'macos').sha256)
       .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', piShuttleSha);
     const installShPath = join(out, INSTALL_SH);
     writeFileSync(installShPath, installSh);
     chmodSync(installShPath, 0o755);
     run('bash', ['-n', installShPath]);
-    const installShSha = sha256File(installShPath);
 
-    const sums = [
-      `${installShSha}  ${INSTALL_SH}`,
-      `${envelopeSha}  ${ENVELOPE_FILE}`,
-      `${piShuttleSha}  ${PI_SHUTTLE_TGZ}`,
-      `${gatewaySha}  ${gatewayTgz}`,
-      `${piGuardSha}  ${PI_GUARD_TGZ}`,
-    ].sort();
+    const assets = releaseInventoryAssets(gateways.map((gateway) => gateway.gatewayTgz));
+    const sums = checksumLines(out, assets);
     writeFileSync(join(out, SHA256SUMS), sums.join('\n') + '\n');
 
     // ── final verification ──
     console.log('build-release: verifying generated assets...');
-    const assets = [INSTALL_SH, ENVELOPE_FILE, PI_SHUTTLE_TGZ, gatewayTgz, PI_GUARD_TGZ];
     for (const asset of assets) {
       const actual = sha256File(join(out, asset));
       const expected = sums.find((line) => line.endsWith(`  ${asset}`))?.split('  ')[0];
       if (actual !== expected) fail(`post-generation verification failed for ${asset}`);
     }
-    for (const asset of [PI_SHUTTLE_TGZ, gatewayTgz, PI_GUARD_TGZ]) {
+    const expectedOutputFiles = [...assets, SHA256SUMS].sort();
+    const actualOutputFiles = readdirSync(out).sort();
+    if (actualOutputFiles.join('\0') !== expectedOutputFiles.join('\0')) {
+      fail(`release output inventory mismatch: expected ${expectedOutputFiles.join(', ')}, got ${actualOutputFiles.join(', ')}`);
+    }
+    for (const asset of [PI_SHUTTLE_TGZ, ...gateways.map((gateway) => gateway.gatewayTgz), PI_GUARD_TGZ]) {
       const scan = await scanArtifactMembers(join(out, asset));
       if (!scan.ok) fail(`release artifact fails the installer archive policy: ${asset}: ${scan.message}`);
       console.log(`build-release: ${asset} passes the installer archive scan (${scan.memberCount} members)`);
     }
     // Gateway runnability: the exact smoke the installer records as
     // installed-verified must pass on the materialized artifact.
-    const gwVerify = join(work, 'gw-verify');
-    mkdirSync(gwVerify, { recursive: true });
-    run('tar', ['-xzf', join(out, gatewayTgz), '-C', gwVerify]);
-    const gatewayPackageRoot = join(gwVerify, 'package');
-    const confinedGatewayBin = validateBinPath(gatewayBinRelative, gatewayPackageRoot);
-    if (!confinedGatewayBin.ok) fail(`Gateway artifact selected bin is invalid: ${confinedGatewayBin.message}`);
-    const smoke = spawnSync(process.execPath, [join(gatewayPackageRoot, confinedGatewayBin.value), '--help'], { encoding: 'utf8', timeout: 30_000 });
-    if (smoke.status !== 0) fail(`Gateway artifact smoke failed (exit ${smoke.status}): ${(smoke.stderr || smoke.stdout || '').slice(0, 400)}`);
-    console.log('build-release: Gateway artifact smoke green (installed-verified bar)');
+    for (const gateway of gateways) {
+      const gwVerify = join(work, `gw-verify-${gateway.key}`);
+      mkdirSync(gwVerify, { recursive: true });
+      run('tar', ['-xzf', join(out, gateway.gatewayTgz), '-C', gwVerify]);
+      const gatewayPackageRoot = join(gwVerify, 'package');
+      const confinedGatewayBin = validateBinPath(gateway.gatewayBinRelative, gatewayPackageRoot);
+      if (!confinedGatewayBin.ok) fail(`${gateway.key} Gateway artifact selected bin is invalid: ${confinedGatewayBin.message}`);
+      const smoke = spawnSync(process.execPath, [join(gatewayPackageRoot, confinedGatewayBin.value), '--help'], { encoding: 'utf8', timeout: 30_000 });
+      if (smoke.status !== 0) fail(`${gateway.key} Gateway artifact smoke failed (exit ${smoke.status}): ${(smoke.stderr || smoke.stdout || '').slice(0, 400)}`);
+      console.log(`build-release: ${gateway.key} Gateway artifact smoke green (installed-verified bar)`);
+    }
     // pi-shuttle package contains the release installer entry.
     const shuttleVerify = join(work, 'shuttle-verify');
     mkdirSync(shuttleVerify, { recursive: true });
@@ -493,7 +559,7 @@ async function main() {
 
     console.log('\nbuild-release: release-candidate inventory (dist-release/v0.1.0):');
     console.log('  asset                                          size         sha256');
-    for (const asset of assets) {
+    for (const asset of [...assets, SHA256SUMS]) {
       const size = statSync(join(out, asset)).size;
       console.log(`  ${asset.padEnd(44)} ${String(size).padStart(10)}  ${sha256File(join(out, asset))}`);
     }

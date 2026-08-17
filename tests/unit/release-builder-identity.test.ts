@@ -26,8 +26,11 @@ import { validateEnvelope } from '../../src/installer/release/envelope.js';
 // side-effect free.
 const BUILDER = pathToFileURL(join(import.meta.dirname, '..', '..', '..', 'scripts', 'build-release.mjs')).href;
 const {
+  RELEASE_ENVELOPE_FILES,
+  checksumLines,
   createReleaseEnvelope,
   readTgzPackageIdentity,
+  releaseInventoryAssets,
   repositoryIdentityFromRemote,
   selectGatewayReleaseDescriptor,
   verifyGatewayPackageIdentity,
@@ -142,6 +145,50 @@ test('builder (D0D): both Darwin targets materialize the same schema-v1 envelope
   assert.deepEqual(arm64Envelope, intelEnvelope);
   assert.equal(intelEnvelope.gateway.fileName, 'project-gateway-macos-core-0.1.0.tgz');
   assert.equal(intelEnvelope.gateway.sourceCommit, 'a18bd287c9ccada7fd31932dbe9937062d0b6bc1');
+});
+
+test('builder (E2A): combined inventory contains both envelopes, both Gateways, and common assets exactly once', () => {
+  const assets = releaseInventoryAssets([
+    HISTORICAL_GATEWAY_DESCRIPTOR.artifactFileName,
+    MACOS_INTEL_GATEWAY_DESCRIPTOR.artifactFileName,
+  ]);
+  assert.deepEqual(assets, [
+    'install.sh',
+    'pi-shuttle-0.1.0-linux-x86_64.json',
+    'pi-shuttle-0.1.0-macos.json',
+    'pi-shuttle-0.1.0.tgz',
+    'project-gateway-artifact-core-0.1.0.tgz',
+    'project-gateway-macos-core-0.1.0.tgz',
+    'pi-guard-0.1.2.tgz',
+  ]);
+  assert.deepEqual(RELEASE_ENVELOPE_FILES, {
+    linux: 'pi-shuttle-0.1.0-linux-x86_64.json',
+    macos: 'pi-shuttle-0.1.0-macos.json',
+  });
+  for (const common of ['install.sh', 'pi-shuttle-0.1.0.tgz', 'pi-guard-0.1.2.tgz']) {
+    assert.equal(assets.filter((asset: string) => asset === common).length, 1, `${common} must be common and singular`);
+  }
+  assert.throws(
+    () => releaseInventoryAssets([HISTORICAL_GATEWAY_DESCRIPTOR.artifactFileName, HISTORICAL_GATEWAY_DESCRIPTOR.artifactFileName]),
+    /duplicate asset names/,
+  );
+});
+
+test('builder (E2A): SHA256SUMS rows cover the complete combined inventory', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'e2a-sums.XXXXXX'));
+  try {
+    const assets = releaseInventoryAssets([
+      HISTORICAL_GATEWAY_DESCRIPTOR.artifactFileName,
+      MACOS_INTEL_GATEWAY_DESCRIPTOR.artifactFileName,
+    ]);
+    for (const [index, asset] of assets.entries()) writeFileSync(join(dir, asset), `asset-${index}`);
+    const sums = checksumLines(dir, assets);
+    assert.equal(sums.length, assets.length);
+    assert.deepEqual(sums.map((line: string) => line.slice(66)).sort(), [...assets].sort());
+    assert.equal(sums.every((line: string) => /^[0-9a-f]{64}  [^/]+$/.test(line)), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('builder (D0D): target/descriptor disagreement and artifact mismatch fail closed', () => {
