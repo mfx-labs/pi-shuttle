@@ -11,8 +11,12 @@ import { acquireLatestArtifacts } from '../../src/installer/release/latest.js';
 import { LATEST_HANDOFF_ENV, main as installerMain } from '../../src/installer/main.js';
 import { recursiveStateSnapshot } from '../helpers/state-snapshot.js';
 import type { RecursivePathSnapshot } from '../helpers/state-snapshot.js';
+import { hashPackageTree } from '../../src/installer/artifact.js';
+import { piShuttlePackageDirName } from '../../src/installer/components.js';
 
-const SOURCE = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
+const SOURCE_A = `mfx-labs/pi-shuttle@${'a'.repeat(40)}`;
+const SOURCE_B = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
+const SOURCE = SOURCE_B;
 
 function piShuttleFiles(version = '0.1.1'): Record<string, string> {
   return {
@@ -63,11 +67,18 @@ async function seedOwnedState(env: string, removeReceipt = true) {
   return { runEnv, shuttle, piState, gateway, piGuard, project };
 }
 
-function latestOptions(shuttle: string, extra: Record<string, unknown> = {}) {
+async function seedLatestState(env: string, sourceIdentity = SOURCE_A) {
+  const seeded = await seedOwnedState(env, false);
+  const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => true }, sourceIdentity)));
+  assert.equal(outcome.kind, 'COMPLETE', JSON.stringify(outcome));
+  return seeded;
+}
+
+function latestOptions(shuttle: string, extra: Record<string, unknown> = {}, sourceIdentity = SOURCE) {
   return {
     selections: { gateway: false, piGuard: false },
     releasePackageTgz: shuttle,
-    sourceIdentity: SOURCE,
+    sourceIdentity,
     uid: 12345,
     ...extra,
   } as Parameters<typeof runInstall>[1];
@@ -85,6 +96,7 @@ function protectedPaths(env: string, piState: string, project: string): Record<s
     commandLink,
     commandTarget,
     shuttlePackage,
+    stableShuttlePackage: join(layout.packagesDir, 'pi-shuttle@0.1.1'),
     gatewayPackage,
     gatewayExecutable: join(gatewayPackage, 'dist', 'cli.js'),
     piGuardPackage,
@@ -109,7 +121,7 @@ function entry(snapshot: readonly RecursivePathSnapshot[], label: string): Recur
   return found;
 }
 
-test('receipt-less recovery reconstructs truthful latest provenance without reinstalling intact components', async () => {
+test('receipt-less recovery reconstructs truthful provenance and requires consent before a same-semver Latest transition', async () => {
   const env = makeEnv();
   try {
     const seeded = await seedOwnedState(env);
@@ -120,7 +132,7 @@ test('receipt-less recovery reconstructs truthful latest provenance without rein
     const startedAt = Date.now();
     const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle)));
     const finishedAt = Date.now();
-    assert.equal(outcome.kind, 'ALREADY_INSTALLED', JSON.stringify(outcome));
+    assert.equal(outcome.kind, 'UPGRADE_AVAILABLE', JSON.stringify(outcome));
     assert.equal(existsSync(layout.stateDir), true, 'the attempt must retain its atomically created stateDir after recovery');
     assert.equal(existsSync(join(layout.stateDir, 'install.lock')), false, 'the normal install lock must be released');
     const receipt = readReceipt(layout.installReceiptPath);
@@ -274,14 +286,14 @@ test('latest wrong digest preserves representative protected installation state 
   }
 });
 
-test('receipt-less recovery of an older owned package preserves upgrade consent and then performs controlled upgrade', async () => {
+test('active old package is selected by the exact command link while valid newer inactive state is retained through recovery and upgrade', async () => {
   const env = makeEnv();
   try {
     const seeded = await seedOwnedState(env);
     const layout = resolveLayout(env);
     const current = join(layout.packagesDir, 'pi-shuttle@0.1.1');
     const old = join(layout.packagesDir, 'pi-shuttle@0.1.0');
-    rmSync(current, { recursive: true, force: true });
+    writeFileSync(join(current, 'dist', 'cli.js'), '#!/usr/bin/env node\nconsole.log("retained Stable 0.1.1");\n');
     mkdirSync(join(old, 'dist'), { recursive: true, mode: 0o700 });
     writeFileSync(join(old, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.0', bin: { 'pi-shuttle': './dist/cli.js' } }));
     writeFileSync(join(old, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
@@ -300,6 +312,8 @@ test('receipt-less recovery of an older owned package preserves upgrade consent 
     assert.equal(recovered.receipt.installedAt, undefined);
     assert.equal(recovered.receipt.channel, undefined);
     assert.equal(recovered.receipt.sourceIdentity, undefined);
+    assert.equal(recovered.receipt.piShuttleInstallPath, old);
+    assert.match(recovered.receipt.piShuttleTreeSha256 ?? '', /^[0-9a-f]{64}$/);
     assert.equal(recovered.receipt.recovery?.originalChannel, 'unknown');
     assert.equal(recovered.receipt.recovery?.originalInstalledAt, null);
     assert.equal(recovered.receipt.recovery?.recoveredBy, SOURCE);
@@ -308,14 +322,14 @@ test('receipt-less recovery of an older owned package preserves upgrade consent 
     assert.deepEqual(without(afterDecline, 'receipt'), without(beforeDecline, 'receipt'), 'only the truthful recovery receipt may differ after decline');
     assert.equal(entry(beforeDecline, 'receipt').exists, false);
     assert.equal(entry(afterDecline, 'receipt').type, 'file');
-    for (const label of ['shuttlePackage', 'commandTarget', 'commandLink', 'gatewayPackage', 'gatewayExecutable', 'piGuardPackage', 'piGuardSource']) {
+    for (const label of ['shuttlePackage', 'stableShuttlePackage', 'commandTarget', 'commandLink', 'gatewayPackage', 'gatewayExecutable', 'piGuardPackage', 'piGuardSource']) {
       assert.deepEqual(entry(afterDecline, label), entry(beforeDecline, label), `${label} must remain byte/state-identical`);
     }
     for (const label of ['piState', 'stores', 'config', 'runtimeConfig', 'project', 'installerStaging', 'installerLogs']) {
       assert.deepEqual(entry(afterDecline, label), entry(beforeDecline, label), `${label} unrelated state must remain unchanged`);
     }
     assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(old, 'dist', 'cli.js'), 'decline must not replace the command link');
-    assert.equal(existsSync(current), false, 'decline must not activate the new pi-shuttle package');
+    assert.equal(existsSync(current), true, 'decline must preserve the inactive Stable package');
     assert.equal(readFileSync(seeded.piState, 'utf8').split('\n').filter(Boolean).length, piInstallsBefore, 'decline must not run a second pi install');
 
     const gatewayBefore = readFileSync(join(layout.packagesDir, 'project-gateway-artifact-core@0.1.0', 'package.json'), 'utf8');
@@ -338,7 +352,9 @@ test('receipt-less recovery of an older owned package preserves upgrade consent 
 
     const upgraded = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => true })));
     assert.equal(upgraded.kind, 'COMPLETE', JSON.stringify(upgraded));
-    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(layout.packagesDir, 'pi-shuttle@0.1.1', 'dist', 'cli.js'));
+    const latestTarget = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE));
+    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(latestTarget, 'dist', 'cli.js'));
+    assert.equal(readFileSync(join(current, 'dist', 'cli.js'), 'utf8'), '#!/usr/bin/env node\nconsole.log("retained Stable 0.1.1");\n', 'inactive Stable bytes remain untouched');
     assert.equal(readFileSync(join(layout.packagesDir, 'project-gateway-artifact-core@0.1.0', 'package.json'), 'utf8'), gatewayBefore);
     assert.equal(readFileSync(seeded.piState, 'utf8'), piStateBefore, 'controlled pi-shuttle upgrade must not reinstall pi-guard');
     const upgradedReceipt = readReceipt(layout.installReceiptPath);
@@ -346,8 +362,191 @@ test('receipt-less recovery of an older owned package preserves upgrade consent 
     if (!upgradedReceipt.ok) return;
     assert.equal(upgradedReceipt.receipt.channel, 'latest');
     assert.equal(upgradedReceipt.receipt.sourceIdentity, SOURCE);
+    assert.equal(upgradedReceipt.receipt.piShuttleInstallPath, latestTarget);
+    const latestTree = await hashPackageTree(latestTarget);
+    assert.equal(latestTree.ok, true);
+    if (latestTree.ok) assert.equal(upgradedReceipt.receipt.piShuttleTreeSha256, latestTree.value);
     assert.equal(upgradedReceipt.receipt.recovery, undefined);
     assert.equal(typeof upgradedReceipt.receipt.installedAt, 'string');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('same-semver Stable package cannot satisfy Latest identity and consented activation uses exact source-bound bytes', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedOwnedState(env, false);
+    const layout = resolveLayout(env);
+    const stable = join(layout.packagesDir, 'pi-shuttle@0.1.1');
+    writeFileSync(join(stable, 'dist', 'cli.js'), '#!/usr/bin/env node\nconsole.log("Stable bytes");\n');
+    const protectedBefore = recursiveStateSnapshot(protectedPaths(env, seeded.piState, seeded.project));
+    const piInstallsBefore = readFileSync(seeded.piState, 'utf8');
+    const declined = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => false })));
+    assert.equal(declined.kind, 'UPGRADE_DECLINED', JSON.stringify(declined));
+    assert.deepEqual(recursiveStateSnapshot(protectedPaths(env, seeded.piState, seeded.project)), protectedBefore, 'same-semver decline preserves Stable and all other state byte-for-byte');
+
+    const accepted = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => true })));
+    assert.equal(accepted.kind, 'COMPLETE', JSON.stringify(accepted));
+    const latest = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE));
+    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(latest, 'dist', 'cli.js'));
+    assert.equal(readFileSync(join(latest, 'dist', 'cli.js'), 'utf8'), piShuttleFiles()['dist/cli.js']);
+    assert.equal(readFileSync(join(stable, 'dist', 'cli.js'), 'utf8'), '#!/usr/bin/env node\nconsole.log("Stable bytes");\n');
+    assert.equal(readFileSync(seeded.piState, 'utf8'), piInstallsBefore, 'Latest activation must not run a second pi install');
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true);
+    if (!receipt.ok) return;
+    assert.equal(receipt.receipt.channel, 'latest');
+    assert.equal(receipt.receipt.sourceIdentity, SOURCE);
+    assert.equal(receipt.receipt.piShuttleInstallPath, latest);
+    const tree = await hashPackageTree(latest);
+    assert.equal(tree.ok, true);
+    if (tree.ok) assert.equal(receipt.receipt.piShuttleTreeSha256, tree.value);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('Latest SHA-A to SHA-B is a consented source transition that retains SHA-A', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedLatestState(env);
+    const layout = resolveLayout(env);
+    const sourceA = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_A));
+    const sourceB = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_B));
+    const paths = { ...protectedPaths(env, seeded.piState, seeded.project), sourceA, sourceB };
+    const before = recursiveStateSnapshot(paths);
+    const offers: Array<[string, string]> = [];
+    const declined = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, {
+      confirmUpgrade: async (installed: string, installer: string) => { offers.push([installed, installer]); return false; },
+    }, SOURCE_B)));
+    assert.equal(declined.kind, 'UPGRADE_DECLINED', JSON.stringify(declined));
+    assert.deepEqual(offers, [['0.1.1', '0.1.1']], 'semantic-version equality must still require source-transition consent');
+    assert.deepEqual(recursiveStateSnapshot(paths), before, 'declining SHA-B must preserve the complete SHA-A installation byte-for-byte');
+
+    const piStateBefore = readFileSync(seeded.piState, 'utf8');
+    const accepted = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => true }, SOURCE_B)));
+    assert.equal(accepted.kind, 'COMPLETE', JSON.stringify(accepted));
+    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(sourceB, 'dist', 'cli.js'));
+    assert.equal(existsSync(sourceA), true, 'SHA-A remains retained as history');
+    assert.deepEqual(entry(recursiveStateSnapshot(paths), 'sourceA'), entry(before, 'sourceA'), 'SHA-A bytes remain unchanged');
+    assert.equal(readFileSync(seeded.piState, 'utf8'), piStateBefore, 'source transition must not run a second pi install');
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true);
+    if (!receipt.ok) return;
+    assert.equal(receipt.receipt.sourceIdentity, SOURCE_B);
+    assert.equal(receipt.receipt.piShuttleInstallPath, sourceB);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('concurrent matching SHA-B target is reused without rollback ownership and survives a later failure', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedLatestState(env);
+    const layout = resolveLayout(env);
+    const sourceB = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_B));
+    const paths = { ...protectedPaths(env, seeded.piState, seeded.project), concurrentSourceB: sourceB };
+    const before = recursiveStateSnapshot(paths);
+    let concurrentSnapshot: readonly RecursivePathSnapshot[] | undefined;
+    const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, {
+      selections: { gateway: true, piGuard: false },
+      artifactDir: env,
+      expectGatewaySha256: '0'.repeat(64),
+      confirmUpgrade: async () => true,
+      beforePiShuttleActivation: (target: string, extractedRoot: string) => {
+        assert.equal(target, sourceB);
+        assert.equal(existsSync(target), false, 'target starts absent before the concurrent actor wins');
+        cpSync(extractedRoot, target, { recursive: true });
+        concurrentSnapshot = recursiveStateSnapshot({ concurrentSourceB: target });
+      },
+    }, SOURCE_B)));
+    assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));
+    assert.ok(concurrentSnapshot);
+    const after = recursiveStateSnapshot(paths);
+    assert.deepEqual(entry(after, 'concurrentSourceB'), entry(concurrentSnapshot!, 'concurrentSourceB'), 'reused concurrent target must survive rollback byte-for-byte');
+    assert.deepEqual(without(after, 'concurrentSourceB'), without(before, 'concurrentSourceB'), 'prior active package, command, receipt, components, and unrelated state remain unchanged');
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true);
+    if (receipt.ok) assert.equal(receipt.receipt.sourceIdentity, SOURCE_A);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('concurrent mismatching SHA-B target fails closed and is never deleted by rollback', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedLatestState(env);
+    const layout = resolveLayout(env);
+    const sourceB = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_B));
+    const paths = { ...protectedPaths(env, seeded.piState, seeded.project), concurrentSourceB: sourceB };
+    const before = recursiveStateSnapshot(paths);
+    let concurrentSnapshot: readonly RecursivePathSnapshot[] | undefined;
+    const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, {
+      confirmUpgrade: async () => true,
+      beforePiShuttleActivation: (target: string, extractedRoot: string) => {
+        assert.equal(existsSync(target), false);
+        cpSync(extractedRoot, target, { recursive: true });
+        writeFileSync(join(target, 'dist', 'cli.js'), '#!/usr/bin/env node\nconsole.log("concurrent mismatch");\n');
+        concurrentSnapshot = recursiveStateSnapshot({ concurrentSourceB: target });
+      },
+    }, SOURCE_B)));
+    assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));
+    assert.ok(concurrentSnapshot);
+    const after = recursiveStateSnapshot(paths);
+    assert.deepEqual(entry(after, 'concurrentSourceB'), entry(concurrentSnapshot!, 'concurrentSourceB'), 'mismatching concurrent target must be preserved byte-for-byte');
+    assert.deepEqual(without(after, 'concurrentSourceB'), without(before, 'concurrentSourceB'), 'mismatch must not switch the command, rewrite the SHA-A receipt, or mutate unrelated state');
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true);
+    if (receipt.ok) assert.equal(receipt.receipt.sourceIdentity, SOURCE_A, 'no false SHA-B receipt');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('pre-existing mismatching SHA-B target is preserved without a command switch or false receipt', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedLatestState(env);
+    const layout = resolveLayout(env);
+    const sourceA = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_A));
+    const sourceB = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_B));
+    cpSync(sourceA, sourceB, { recursive: true });
+    writeFileSync(join(sourceB, 'dist', 'cli.js'), '#!/usr/bin/env node\nconsole.log("pre-existing mismatch");\n');
+    const paths = { ...protectedPaths(env, seeded.piState, seeded.project), sourceA, mismatchedSourceB: sourceB };
+    const before = recursiveStateSnapshot(paths);
+    const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, { confirmUpgrade: async () => true }, SOURCE_B)));
+    assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));
+    assert.deepEqual(recursiveStateSnapshot(paths), before, 'pre-existing mismatched SHA-B target and all SHA-A state must remain byte-for-byte identical');
+    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(sourceA, 'dist', 'cli.js'));
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true);
+    if (receipt.ok) assert.equal(receipt.receipt.sourceIdentity, SOURCE_A);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('attempt-created SHA-B target is removed when a later stage fails', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedLatestState(env);
+    const layout = resolveLayout(env);
+    const sourceB = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_B));
+    const paths = { ...protectedPaths(env, seeded.piState, seeded.project), sourceB };
+    const before = recursiveStateSnapshot(paths);
+    assert.equal(entry(before, 'sourceB').exists, false);
+    const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle, {
+      selections: { gateway: true, piGuard: false },
+      artifactDir: env,
+      expectGatewaySha256: '0'.repeat(64),
+      confirmUpgrade: async () => true,
+    }, SOURCE_B)));
+    assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));
+    assert.deepEqual(recursiveStateSnapshot(paths), before, 'rollback removes only the target atomically created by this attempt');
+    assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(layout.packagesDir, piShuttlePackageDirName('0.1.1', SOURCE_A), 'dist', 'cli.js'));
   } finally {
     cleanupEnv(env);
   }
@@ -390,8 +589,8 @@ test('ambiguous receipt-less recovery refuses before creating a missing state di
   }
 });
 
-test('receipt-less recovery refuses ambiguous pi-shuttle packages and Gateway/pi-guard drift', async (t) => {
-  await t.test('duplicate pi-shuttle packages', async () => {
+test('receipt-less recovery refuses unsafe inactive pi-shuttle candidates and Gateway/pi-guard drift', async (t) => {
+  await t.test('malformed inactive package identity', async () => {
     const env = makeEnv();
     try {
       const seeded = await seedOwnedState(env);
@@ -400,6 +599,56 @@ test('receipt-less recovery refuses ambiguous pi-shuttle packages and Gateway/pi
       const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle)));
       assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
       assert.equal(existsSync(layout.installReceiptPath), false);
+    } finally {
+      cleanupEnv(env);
+    }
+  });
+
+  await t.test('foreign inactive package identity', async () => {
+    const env = makeEnv();
+    try {
+      const seeded = await seedOwnedState(env);
+      const root = join(resolveLayout(env).packagesDir, 'pi-shuttle@9.9.9');
+      mkdirSync(join(root, 'dist'), { recursive: true });
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'foreign', version: '9.9.9', bin: { 'pi-shuttle': './dist/cli.js' } }));
+      writeFileSync(join(root, 'dist', 'cli.js'), 'foreign\n');
+      const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle)));
+      assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
+      assert.equal(existsSync(resolveLayout(env).installReceiptPath), false);
+    } finally {
+      cleanupEnv(env);
+    }
+  });
+
+  await t.test('second command-relevant candidate with a traversal bin conflicts and is refused', async () => {
+    const env = makeEnv();
+    try {
+      const seeded = await seedOwnedState(env);
+      const root = join(resolveLayout(env).packagesDir, 'pi-shuttle@9.9.9');
+      mkdirSync(root, { recursive: true });
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '9.9.9', bin: { 'pi-shuttle': '../pi-shuttle@0.1.1/dist/cli.js' } }));
+      const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle)));
+      assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
+      assert.equal(existsSync(resolveLayout(env).installReceiptPath), false);
+    } finally {
+      cleanupEnv(env);
+    }
+  });
+
+  await t.test('inactive candidate symlink escape', async () => {
+    const env = makeEnv();
+    try {
+      const seeded = await seedOwnedState(env);
+      const outside = join(env, 'outside-package');
+      mkdirSync(join(outside, 'dist'), { recursive: true });
+      writeFileSync(join(outside, 'dist', 'cli.js'), 'outside\n');
+      const root = join(resolveLayout(env).packagesDir, 'pi-shuttle@9.9.9');
+      mkdirSync(root);
+      writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '9.9.9', bin: { 'pi-shuttle': './dist/cli.js' } }));
+      symlinkSync(join(outside, 'dist'), join(root, 'dist'));
+      const outcome = await withFixturePi(seeded.runEnv, () => runInstall({ home: env, platform: 'linux', arch: 'x64' }, latestOptions(seeded.shuttle)));
+      assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
+      assert.equal(existsSync(resolveLayout(env).installReceiptPath), false);
     } finally {
       cleanupEnv(env);
     }

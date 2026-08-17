@@ -44,6 +44,8 @@ export interface ComponentInstallContext {
   readonly platform: string;
   /** Executable-search environment for quarantine handling (test seam). */
   readonly pathEnv?: NodeJS.ProcessEnv;
+  /** Records only package roots atomically created by this exact attempt. */
+  readonly onPackageCreated?: (path: string) => void;
 }
 
 /**
@@ -55,6 +57,20 @@ export interface ComponentInstallContext {
 export function componentDirName(name: string, version: string): string {
   const dirSafe = name.replace(/^@/, '').replace(/\//g, '-');
   return `${dirSafe}@${version}`;
+}
+
+/** Stable keeps its historical slot; Latest binds storage to the exact source SHA. */
+export function piShuttlePackageDirName(version: string, sourceIdentity?: string): string {
+  if (sourceIdentity === undefined) return componentDirName(PI_SHUTTLE_PACKAGE_NAME, version);
+  const match = /^mfx-labs\/pi-shuttle@([0-9a-f]{40})$/.exec(sourceIdentity);
+  if (match === null) throw new Error('invalid latest source identity');
+  return componentDirName(PI_SHUTTLE_PACKAGE_NAME, `${version}+latest.${match[1]}`);
+}
+
+/** Accepted retained-candidate names; metadata remains the authority for version/bin. */
+export function isPiShuttlePackageDirName(name: string, version: string): boolean {
+  const stable = componentDirName(PI_SHUTTLE_PACKAGE_NAME, version);
+  return name === stable || (name.startsWith(stable) && /^\+latest\.[0-9a-f]{40}$/.test(name.slice(stable.length)));
 }
 
 /**
@@ -294,6 +310,7 @@ export async function installGatewayComponent(input: GatewayInput): Promise<Comp
   };
   const activated = activatePackageRoot(root ?? extracted.value, targetDir, verifyExisting);
   if (!activated.ok) return activated;
+  if (activated.value.created) input.context.onPackageCreated?.(targetDir);
 
   // Bounded help smoke against the ACTIVATED bin path (10 s) — confined to
   // the package by the bin-path check above. A missing-dependencies
@@ -432,6 +449,7 @@ export async function installPiGuardComponent(input: PiGuardInput): Promise<Comp
   };
   const activated = activatePackageRoot(root ?? extracted.value, targetDir, verifyExisting);
   if (!activated.ok) return activated;
+  if (activated.value.created) input.context.onPackageCreated?.(targetDir);
 
   // PS-6R: a candidate pi version (not the known-good 0.83.0 baseline)
   // must PASS the committed pi-guard compatibility probe BEFORE any

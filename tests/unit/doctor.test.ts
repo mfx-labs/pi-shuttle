@@ -13,6 +13,9 @@ import type { DoctorCheck } from '../../src/command/doctor.js';
 import { resolveLayout } from '../../src/host/environment.js';
 import { cleanupEnv, installFixtureGateway, makeEnv, makeHealthyEnv, makeProjectRoot, writeReceiptFixture, writeFakeGit, writeRuntimeDocument } from '../helpers/lifecycle-fixtures.js';
 import { writeFakePi } from '../helpers/installer-fixtures.js';
+import { hashPackageTree } from '../../src/installer/artifact.js';
+import { piShuttlePackageDirName } from '../../src/installer/components.js';
+import { readReceipt, writeReceipt } from '../../src/installer/receipt.js';
 
 function healthyContext(options: { readonly withRuntimeConfig?: boolean; readonly withPiGuard?: boolean } = {}) {
   const healthy = makeHealthyEnv(options);
@@ -81,6 +84,73 @@ test('doctor: recovered receipt reports recovery and does not invent original St
     assert.match(detail, /original distribution provenance: unknown/);
     assert.match(detail, /recovered by: latest @ a{40}/);
     assert.doesNotMatch(detail, /stable 0\.1\.1|latest 0\.1\.1/);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('doctor: Latest receipt verifies its semantic version, exact source slot, command target, and package bytes', async () => {
+  const { env, ctx, layout } = healthyContext();
+  try {
+    const sourceIdentity = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
+    const root = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', sourceIdentity));
+    mkdirSync(join(root, 'dist'), { recursive: true, mode: 0o700 });
+    mkdirSync(layout.binDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.1', bin: { 'pi-shuttle': './dist/cli.js' } }));
+    writeFileSync(join(root, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    symlinkSync(join(root, 'dist', 'cli.js'), join(layout.binDir, 'pi-shuttle'));
+    const digest = await hashPackageTree(root);
+    assert.equal(digest.ok, true);
+    if (!digest.ok) return;
+    const prior = readReceipt(layout.installReceiptPath);
+    assert.equal(prior.ok, true);
+    if (!prior.ok) return;
+    const boundReceipt = {
+      ...prior.receipt,
+      channel: 'latest' as const,
+      sourceIdentity,
+      piShuttleInstallPath: root,
+      piShuttleTreeSha256: digest.value,
+    };
+    const written = writeReceipt(layout.installReceiptPath, boundReceipt);
+    assert.equal(written.ok, true);
+
+    const healthy = await runDoctor(ctx);
+    assert.equal(healthy.ok, true);
+    if (!healthy.ok) return;
+    assert.equal(verdicts(healthy.report)['receipt'], 'supported', formatDoctorReport(healthy.report));
+    assert.match(healthy.report.checks.find((check) => check.id === 'receipt')!.detail, /package bytes verified/);
+
+    const wrongPath = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', `mfx-labs/pi-shuttle@${'c'.repeat(40)}`));
+    assert.equal(writeReceipt(layout.installReceiptPath, { ...boundReceipt, piShuttleInstallPath: wrongPath }).ok, true);
+    const wrongPathResult = await runDoctor(ctx);
+    assert.equal(wrongPathResult.ok, true);
+    if (!wrongPathResult.ok) return;
+    assert.equal(verdicts(wrongPathResult.report)['receipt'], 'installed but unverified');
+    assert.match(wrongPathResult.report.checks.find((check) => check.id === 'receipt')!.detail, /exact source SHA/);
+
+    assert.equal(writeReceipt(layout.installReceiptPath, boundReceipt).ok, true);
+    const stable = join(layout.packagesDir, 'pi-shuttle@0.1.1');
+    mkdirSync(join(stable, 'dist'), { recursive: true, mode: 0o700 });
+    writeFileSync(join(stable, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.1', bin: { 'pi-shuttle': './dist/cli.js' } }));
+    writeFileSync(join(stable, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
+    rmSync(join(layout.binDir, 'pi-shuttle'));
+    symlinkSync(join(stable, 'dist', 'cli.js'), join(layout.binDir, 'pi-shuttle'));
+    const stableCommand = await runDoctor(ctx);
+    assert.equal(stableCommand.ok, true);
+    if (!stableCommand.ok) return;
+    assert.equal(verdicts(stableCommand.report)['receipt'], 'installed but unverified');
+    assert.match(stableCommand.report.checks.find((check) => check.id === 'receipt')!.detail, /command link does not select/);
+
+    rmSync(join(layout.binDir, 'pi-shuttle'));
+    symlinkSync(join(root, 'dist', 'cli.js'), join(layout.binDir, 'pi-shuttle'));
+
+    writeFileSync(join(root, 'dist', 'cli.js'), '#!/usr/bin/env node\n// drift\n');
+    const drifted = await runDoctor(ctx);
+    assert.equal(drifted.ok, true);
+    if (!drifted.ok) return;
+    assert.equal(verdicts(drifted.report)['receipt'], 'installed but unverified');
+    assert.match(drifted.report.checks.find((check) => check.id === 'receipt')!.detail, /tree SHA-256/);
   } finally {
     cleanupEnv(env);
   }

@@ -67,6 +67,9 @@ export interface InstallReceipt {
   readonly channel?: 'stable' | 'latest';
   /** Present only for latest receipts, e.g. mfx-labs/pi-shuttle@<sha>. */
   readonly sourceIdentity?: string;
+  /** Exact activated package root and deterministic tree digest when package-backed. */
+  readonly piShuttleInstallPath?: string;
+  readonly piShuttleTreeSha256?: string;
   /** Absent only when recovery could not prove the original install time. */
   readonly installedAt?: string;
   /** Present only for a receipt reconstructed from surviving state. */
@@ -88,7 +91,7 @@ export type ReceiptResultT = { readonly ok: true; readonly receipt: InstallRecei
 
 export type ReceiptReadResult = { readonly ok: true; readonly receipt: InstallReceipt } | { readonly ok: false; readonly code: 'absent' | 'invalid' | 'read-failed'; readonly message: string };
 
-const RECEIPT_KEYS = new Set(['receiptVersion', 'piShuttleVersion', 'channel', 'sourceIdentity', 'installedAt', 'recovery', 'platformLane', 'result', 'installDir', 'binDir', 'components', 'omitted', 'notes']);
+const RECEIPT_KEYS = new Set(['receiptVersion', 'piShuttleVersion', 'channel', 'sourceIdentity', 'piShuttleInstallPath', 'piShuttleTreeSha256', 'installedAt', 'recovery', 'platformLane', 'result', 'installDir', 'binDir', 'components', 'omitted', 'notes']);
 const COMPONENTS_KEYS = new Set(['gateway', 'piGuard']);
 const GATEWAY_KEYS = new Set(['status', 'version', 'commit', 'commitVerified', 'digestVerified', 'artifactSha256', 'installPath', 'binPath', 'smoke']);
 const PI_GUARD_KEYS = new Set(['status', 'version', 'commit', 'commitVerified', 'digestVerified', 'artifactSha256', 'installPath', 'sourcePath', 'piVersion', 'verifiedBy']);
@@ -133,6 +136,8 @@ export function validateReceipt(value: unknown): ReceiptResultT {
   if (!verdict.ok) return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: verdict.message };
   const channel = value['channel'];
   const sourceIdentity = value['sourceIdentity'];
+  const piShuttleInstallPath = value['piShuttleInstallPath'];
+  const piShuttleTreeSha256 = value['piShuttleTreeSha256'];
   const installedAt = value['installedAt'];
   const recoveryRaw = value['recovery'];
   if (installedAt !== undefined && !str(installedAt)) {
@@ -146,6 +151,11 @@ export function validateReceipt(value: unknown): ReceiptResultT {
   }
   if ((channel === 'latest') !== (sourceIdentity !== undefined)) {
     return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'latest receipts require sourceIdentity and sourceIdentity requires channel latest' };
+  }
+  if ((piShuttleInstallPath === undefined) !== (piShuttleTreeSha256 === undefined)
+    || (piShuttleInstallPath !== undefined && !isAbsolutePath(piShuttleInstallPath))
+    || (piShuttleTreeSha256 !== undefined && (typeof piShuttleTreeSha256 !== 'string' || !/^[0-9a-f]{64}$/.test(piShuttleTreeSha256)))) {
+    return { ok: false, code: 'ERR-PS3-RECEIPT-INVALID', message: 'pi-shuttle package path and tree SHA-256 must be present together and valid' };
   }
   let recovery: ReceiptRecovery | undefined;
   if (recoveryRaw !== undefined) {
@@ -232,6 +242,7 @@ export function validateReceipt(value: unknown): ReceiptResultT {
       piShuttleVersion: value['piShuttleVersion'] as string,
       ...(channel !== undefined ? { channel } : {}),
       ...(sourceIdentity !== undefined ? { sourceIdentity } : {}),
+      ...(piShuttleInstallPath !== undefined ? { piShuttleInstallPath: piShuttleInstallPath as string, piShuttleTreeSha256: piShuttleTreeSha256 as string } : {}),
       ...(installedAt !== undefined ? { installedAt: installedAt as string } : {}),
       ...(recovery !== undefined ? { recovery } : {}),
       platformLane: value['platformLane'] as string,
@@ -278,6 +289,7 @@ export function serializeReceipt(receipt: InstallReceipt): string {
     piShuttleVersion: receipt.piShuttleVersion,
     ...(receipt.channel !== undefined ? { channel: receipt.channel } : {}),
     ...(receipt.sourceIdentity !== undefined ? { sourceIdentity: receipt.sourceIdentity } : {}),
+    ...(receipt.piShuttleInstallPath !== undefined ? { piShuttleInstallPath: receipt.piShuttleInstallPath, piShuttleTreeSha256: receipt.piShuttleTreeSha256 } : {}),
     ...(receipt.installedAt !== undefined ? { installedAt: receipt.installedAt } : {}),
     ...(receipt.recovery !== undefined ? { recovery: receipt.recovery } : {}),
     platformLane: receipt.platformLane,
@@ -334,6 +346,8 @@ export function newReceipt(input: {
   readonly notes: readonly string[];
   readonly channel?: 'stable' | 'latest';
   readonly sourceIdentity?: string;
+  readonly piShuttleInstallPath?: string;
+  readonly piShuttleTreeSha256?: string;
   readonly recovery?: ReceiptRecovery;
 }): InstallReceipt {
   return {
@@ -341,6 +355,7 @@ export function newReceipt(input: {
     piShuttleVersion: input.piShuttleVersion ?? PI_SHUTTLE_VERSION,
     ...(input.channel !== undefined ? { channel: input.channel } : {}),
     ...(input.sourceIdentity !== undefined ? { sourceIdentity: input.sourceIdentity } : {}),
+    ...(input.piShuttleInstallPath !== undefined ? { piShuttleInstallPath: input.piShuttleInstallPath, piShuttleTreeSha256: input.piShuttleTreeSha256! } : {}),
     ...(input.recovery === undefined ? { installedAt: new Date().toISOString() } : { recovery: input.recovery }),
     platformLane: input.platformLane,
     result: input.result,

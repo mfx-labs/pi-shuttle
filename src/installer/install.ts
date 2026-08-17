@@ -26,8 +26,8 @@
  * project directories, Git state, unrelated Pi extensions, or a
  * pre-existing pi-guard.
  */
-import { lstatSync, mkdirSync, readdirSync, readlinkSync, renameSync, rmdirSync, rmSync, symlinkSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { lstatSync, mkdirSync, readdirSync, readlinkSync, realpathSync, renameSync, rmdirSync, rmSync, symlinkSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acquireLock, releaseLock } from '../persistence/lock.js';
 import { GATEWAY_LANE_DESCRIPTORS, gatewayDescriptorForLane, PI_COMPATIBILITY_BASELINE, PI_GUARD_COMMIT, PI_GUARD_VERSION, PI_SHUTTLE_VERSION } from '../compat/manifest.js';
@@ -38,10 +38,10 @@ import { hostLane, resolveLayout } from '../host/environment.js';
 import { compareVersionTriples, parseVersionTriple } from '../compat/versions.js';
 import { applyPiPolicy, checkNodeLane, checkNotRoot, checkPlatformLane, checkTarPresent, classifyPiVersion, ensureWritableLayout, PI_RUNTIME_POLICY } from './preflight.js';
 import { runProcess, resolveExecutable } from './process.js';
-import { activatePackageRoot, componentDirName, extractArtifact, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, removeStaging, validateBinPath, verifyIdentity, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME } from './components.js';
+import { activatePackageRoot, componentDirName, extractArtifact, inspectExistingGateway, inspectExistingPiGuard, installGatewayComponent, installPiGuardComponent, isPiShuttlePackageDirName, piShuttlePackageDirName, removeStaging, validateBinPath, verifyIdentity, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME } from './components.js';
 import type { ComponentResult, GatewayComponentIdentity, GatewayInstallResult, PiGuardInstallResult } from './components.js';
 import { regularFileOrNull, scanArtifactMembers } from './archive.js';
-import { findPackageRoot, readPackageIdentity } from './artifact.js';
+import { findPackageRoot, hashPackageTree, readPackageIdentity } from './artifact.js';
 import { newReceipt, readReceipt, writeReceipt } from './receipt.js';
 import type { GatewayReceiptEntry, InstallReceipt, PiGuardReceiptEntry } from './receipt.js';
 import type { InstallerSelections } from './selection.js';
@@ -83,6 +83,8 @@ export interface InstallOptions {
   readonly confirmUpgrade?: (installedVersion: string, installerVersion: string) => Promise<boolean>;
   /** Deterministic test seam between receipt-less pre-proof and locked revalidation. */
   readonly afterReceiptlessPreproof?: () => void | Promise<void>;
+  /** Deterministic test seam immediately before atomic pi-shuttle activation. */
+  readonly beforePiShuttleActivation?: (targetDir: string, extractedPackageRoot: string) => void | Promise<void>;
   /**
    * Injectable UID observation (SIR-PS3-007 root refusal). Defaults to
    * `process.getuid()` when absent; test-only seam, never hard-coded.
@@ -104,8 +106,8 @@ export interface InstallAttempt {
   /** External Pi-side state caused by THIS attempt (SIR-PS3-002). */
   piGuardPiState: 'none' | 'pre-existing' | 'attempt-installed';
   receipt?: InstallReceipt;
-  /** Paths this attempt MAY create; removed on rollback only when they did not pre-exist. */
-  readonly rollbackCandidates: Array<{ readonly path: string; readonly preExisting: boolean }>;
+  /** Recursively removable roots, each proven by successful atomic creation. */
+  readonly rollbackCandidates: Array<{ readonly path: string; readonly createdByThisAttempt: true }>;
 }
 
 export interface RollbackReport {
@@ -214,6 +216,8 @@ function inspectUnownedState(layout: LayoutPaths, gatewayIdentity: GatewayCompon
 
 interface OwnedInstallation {
   readonly binTarget: string;
+  readonly installPath?: string;
+  readonly treeSha256?: string;
 }
 
 type RecoveryResult =
@@ -226,6 +230,7 @@ function packageCandidates(layout: LayoutPaths, prefixes: readonly string[]): Co
       ok: true,
       value: readdirSync(layout.packagesDir)
         .filter((name) => prefixes.some((prefix) => name.startsWith(prefix)))
+        .sort()
         .map((name) => join(layout.packagesDir, name)),
     };
   } catch (err) {
@@ -233,6 +238,47 @@ function packageCandidates(layout: LayoutPaths, prefixes: readonly string[]): Co
     if (code === 'ENOENT') return { ok: true, value: [] };
     return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `existing package storage could not be inspected (${code ?? 'unknown error'})` };
   }
+}
+
+interface ShuttleCandidate {
+  readonly root: string;
+  readonly version: string;
+  readonly binTarget: string;
+}
+
+/** Validate one active or retained candidate without deriving trust from its name. */
+function inspectShuttleCandidate(layout: LayoutPaths, root: string): ComponentResult<ShuttleCandidate> {
+  let stat;
+  let canonicalRoot: string;
+  let canonicalPackages: string;
+  try {
+    stat = lstatSync(root);
+    canonicalRoot = realpathSync(root);
+    canonicalPackages = realpathSync(layout.packagesDir);
+  } catch {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `receipt-less recovery could not inspect the pi-shuttle package at ${root}` };
+  }
+  if (!stat.isDirectory() || stat.isSymbolicLink() || dirname(canonicalRoot) !== canonicalPackages) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `receipt-less recovery found a non-owned or escaping pi-shuttle package entry at ${root}; refusing` };
+  }
+  const identity = readPackageIdentity(root);
+  if (identity === null || identity.name !== PI_SHUTTLE_PACKAGE_NAME || parseVersionTriple(identity.version) === null) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `installation metadata is missing or invalid at ${root}; automatic ownership cannot be established, so nothing was changed` };
+  }
+  if (!isPiShuttlePackageDirName(basename(root), identity.version)) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `receipt-less recovery found incoherent pi-shuttle package identity at ${root}` };
+  }
+  const binKeys = Object.keys(identity.bin);
+  if (binKeys.length !== 1 || binKeys[0] !== PI_SHUTTLE_PACKAGE_NAME) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `installation metadata is missing the exact pi-shuttle command identity at ${root}; automatic ownership cannot be established, so nothing was changed` };
+  }
+  const bin = validateBinPath(identity.bin[PI_SHUTTLE_PACKAGE_NAME]!, root);
+  if (!bin.ok) return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: bin.message };
+  const binTarget = join(root, bin.value);
+  if (!regularFileOrNull(binTarget)) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `receipt-less recovery found no regular pi-shuttle bin at ${binTarget}` };
+  }
+  return { ok: true, value: { root, version: identity.version, binTarget } };
 }
 
 /**
@@ -256,44 +302,29 @@ async function inspectReceiptlessOwnership(
   if (layout.shareDir !== defaults.shareDir || layout.binDir !== defaults.binDir) {
     return { ok: false, message: 'receipt-less recovery requires the expected default install and bin layout; custom layouts are refused' };
   }
-  if (shuttleCandidates.value.length !== 1) {
-    return { ok: false, message: `receipt-less recovery found ambiguous pi-shuttle packages (${shuttleCandidates.value.join(', ')}); refusing` };
-  }
-
-  const shuttleRoot = shuttleCandidates.value[0]!;
-  let shuttleStat;
-  try {
-    shuttleStat = lstatSync(shuttleRoot);
-  } catch {
-    return { ok: false, message: `receipt-less recovery could not inspect the pi-shuttle package at ${shuttleRoot}` };
-  }
-  if (!shuttleStat.isDirectory()) return { ok: false, message: `receipt-less recovery found a non-directory pi-shuttle package entry at ${shuttleRoot}; refusing` };
-  const shuttleIdentity = readPackageIdentity(shuttleRoot);
-  if (shuttleIdentity === null || shuttleIdentity.name !== PI_SHUTTLE_PACKAGE_NAME || parseVersionTriple(shuttleIdentity.version) === null) {
-    return { ok: false, message: `installation metadata is missing or invalid at ${shuttleRoot}; automatic ownership cannot be established, so nothing was changed` };
-  }
-  if (shuttleRoot !== join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, shuttleIdentity.version))) {
-    return { ok: false, message: `receipt-less recovery found a pi-shuttle package at an unexpected location: ${shuttleRoot}` };
-  }
-  const binKeys = Object.keys(shuttleIdentity.bin);
-  if (binKeys.length !== 1 || binKeys[0] !== PI_SHUTTLE_PACKAGE_NAME) {
-    return { ok: false, message: `installation metadata is missing the exact pi-shuttle command identity at ${shuttleRoot}; automatic ownership cannot be established, so nothing was changed` };
-  }
-  const shuttleBin = validateBinPath(shuttleIdentity.bin[PI_SHUTTLE_PACKAGE_NAME]!, shuttleRoot);
-  if (!shuttleBin.ok || !regularFileOrNull(join(shuttleRoot, shuttleBin.ok ? shuttleBin.value : ''))) {
-    return { ok: false, message: shuttleBin.ok ? `receipt-less recovery found no regular pi-shuttle bin at ${join(shuttleRoot, shuttleBin.value)}` : shuttleBin.message };
-  }
-  const ownedBinTarget = join(shuttleRoot, shuttleBin.value);
   const commandLink = join(layout.binDir, PI_SHUTTLE_PACKAGE_NAME);
   let commandTarget: string;
   try {
     commandTarget = readlinkSync(commandLink);
   } catch {
-    return { ok: false, message: `receipt-less recovery requires the pi-shuttle command symlink at ${commandLink}` };
+    return { ok: false, message: `installation metadata is missing; automatic ownership cannot be established because receipt-less recovery requires the pi-shuttle command symlink at ${commandLink}` };
   }
-  if (commandTarget !== ownedBinTarget) {
+  const candidates: ShuttleCandidate[] = [];
+  const candidateTrees = new Map<string, string>();
+  for (const root of shuttleCandidates.value) {
+    const candidate = inspectShuttleCandidate(layout, root);
+    if (!candidate.ok) return { ok: false, message: candidate.message };
+    const tree = await hashPackageTree(root);
+    if (!tree.ok) return { ok: false, message: tree.message };
+    candidates.push(candidate.value);
+    candidateTrees.set(root, tree.value);
+  }
+  const active = candidates.filter((candidate) => candidate.binTarget === commandTarget);
+  if (active.length !== 1) {
     return { ok: false, message: `receipt-less recovery found a foreign pi-shuttle command target (${commandTarget}); refusing` };
   }
+  const shuttle = active[0]!;
+  const shuttleTreeSha256 = candidateTrees.get(shuttle.root)!;
 
   const gatewayPrefixes = [...new Set(Object.values(GATEWAY_LANE_DESCRIPTORS).map((descriptor) => componentDirName(descriptor.packageName, '')))].sort();
   const gatewayCandidates = packageCandidates(layout, gatewayPrefixes);
@@ -360,7 +391,9 @@ async function inspectReceiptlessOwnership(
   return {
     ok: true,
     receipt: newReceipt({
-      piShuttleVersion: shuttleIdentity.version,
+      piShuttleVersion: shuttle.version,
+      piShuttleInstallPath: shuttle.root,
+      piShuttleTreeSha256: shuttleTreeSha256,
       platformLane: lane,
       result,
       installDir: layout.shareDir,
@@ -395,33 +428,36 @@ async function verifyOwnedInstallation(
     return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `the receipt platform lane ${receipt.platformLane} does not match this host lane ${lane}` };
   }
 
-  const shuttleRoot = join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, receipt.piShuttleVersion));
-  const shuttleIdentity = readPackageIdentity(shuttleRoot);
+  const historicalRoot = join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, receipt.piShuttleVersion));
+  const shuttleRoot = receipt.piShuttleInstallPath ?? historicalRoot;
   let binTarget: string;
-  if (shuttleIdentity !== null) {
-    try {
-      if (!lstatSync(shuttleRoot).isDirectory()) {
-        return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package is not an owned package directory at ${shuttleRoot}` };
-      }
-    } catch {
-      return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package could not be inspected at ${shuttleRoot}` };
+  let packageTreeSha256: string | undefined;
+  if (receipt.channel === 'latest') {
+    const expected = join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion, receipt.sourceIdentity));
+    if (receipt.piShuttleInstallPath === undefined || receipt.piShuttleTreeSha256 === undefined || shuttleRoot !== expected) {
+      return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: 'latest receipt does not bind the exact source-qualified pi-shuttle package and tree digest' };
     }
-    if (shuttleIdentity.name !== PI_SHUTTLE_PACKAGE_NAME || shuttleIdentity.version !== receipt.piShuttleVersion) {
+  } else if (receipt.recovery === undefined && receipt.piShuttleInstallPath !== undefined && shuttleRoot !== historicalRoot) {
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `stable receipt records an unexpected pi-shuttle package path at ${shuttleRoot}` };
+  }
+  const shuttle = inspectShuttleCandidate(layout, shuttleRoot);
+  if (shuttle.ok) {
+    if (shuttle.value.version !== receipt.piShuttleVersion) {
       return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package has incompatible identity at ${shuttleRoot}` };
     }
-    const binRaw = shuttleIdentity.bin['pi-shuttle'];
-    if (binRaw === undefined) {
-      return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package does not declare its command entry at ${shuttleRoot}` };
+    binTarget = shuttle.value.binTarget;
+    const digest = await hashPackageTree(shuttleRoot);
+    if (!digest.ok) return { ok: false, code: digest.code, message: digest.message };
+    packageTreeSha256 = digest.value;
+    if (receipt.piShuttleTreeSha256 !== undefined && receipt.piShuttleTreeSha256 !== digest.value) {
+      return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package bytes drifted at ${shuttleRoot}` };
     }
-    const binCheck = validateBinPath(binRaw, shuttleRoot);
-    if (!binCheck.ok) return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: binCheck.message };
-    binTarget = join(shuttleRoot, binCheck.value);
-  } else if (receipt.piShuttleVersion === PI_SHUTTLE_VERSION && !pathEntryExists(shuttleRoot)) {
+  } else if (receipt.piShuttleInstallPath === undefined && receipt.piShuttleVersion === PI_SHUTTLE_VERSION && !pathEntryExists(shuttleRoot)) {
     // The local installer lane links to the package currently executing;
     // only a same-version rerun can establish that identity this way.
     binTarget = ownCliPath();
   } else {
-    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package is missing or invalid at ${shuttleRoot}` };
+    return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle package is missing or invalid at ${shuttleRoot} (${shuttle.message})` };
   }
   if (!regularFileOrNull(binTarget)) {
     return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: `recorded pi-shuttle command is missing or not a regular file: ${binTarget}` };
@@ -472,7 +508,7 @@ async function verifyOwnedInstallation(
       return { ok: false, code: 'ERR-PS3-OWNERSHIP', message: 'pi-guard is recorded as installed in Pi but its exact owned source is no longer present' };
     }
   }
-  return { ok: true, value: { binTarget } };
+  return { ok: true, value: { binTarget, ...(packageTreeSha256 !== undefined ? { installPath: shuttleRoot, treeSha256: packageTreeSha256 } : {}) } };
 }
 
 /** Replace a symlink by rename within its directory (atomic on supported POSIX lanes). */
@@ -501,10 +537,7 @@ function refuseAfterRollback(attempt: InstallAttempt, reason: string): InstallOu
  */
 export function rollback(attempt: InstallAttempt): RollbackReport {
   const residual: string[] = [];
-  const created: string[] = [];
-  for (const candidate of attempt.rollbackCandidates) {
-    if (!candidate.preExisting) created.push(candidate.path);
-  }
+  const created = attempt.rollbackCandidates.map((candidate) => candidate.path);
   let upgradedLinkRestored = true;
   if (attempt.binLinkPreviousTarget !== undefined) {
     const binLink = join(attempt.layout.binDir, 'pi-shuttle');
@@ -739,6 +772,8 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   const piExecutable = resolveExecutable('pi');
   let upgradeFrom: string | undefined;
   let ownedBinTarget: string | undefined;
+  let installedShuttlePath: string | undefined;
+  let installedShuttleTreeSha256: string | undefined;
   let installSelections = options.selections;
   let sameVersionCompletion = false;
   if (prior.ok) {
@@ -752,8 +787,12 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       return { kind: 'REFUSED', reason: `existing owned installation is corrupted or no longer matches its receipt (${owned.message}); automatic mutation was refused and prior state was preserved` };
     }
     ownedBinTarget = owned.value.binTarget;
+    installedShuttlePath = owned.value.installPath;
+    installedShuttleTreeSha256 = owned.value.treeSha256;
     const comparison = compareVersionTriples(installedVersion, installerVersion);
-    if (comparison === 0) {
+    const latestSourceTransition = options.sourceIdentity !== undefined
+      && (prior.receipt.channel !== 'latest' || prior.receipt.sourceIdentity !== options.sourceIdentity);
+    if (comparison === 0 && !latestSourceTransition) {
       const gatewayMissing = options.selections.gateway && prior.receipt.components.gateway === null;
       const piGuardMissing = options.selections.piGuard && prior.receipt.components.piGuard === null;
       const requestedEntries = [
@@ -771,7 +810,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     if (comparison > 0) {
       return { kind: 'REFUSED', reason: `installed pi-shuttle ${prior.receipt.piShuttleVersion} is newer than installer ${PI_SHUTTLE_VERSION}; downgrade was refused and prior state was preserved` };
     }
-    if (comparison < 0) {
+    if (comparison < 0 || latestSourceTransition) {
       if (options.confirmUpgrade === undefined) {
         return { kind: 'UPGRADE_AVAILABLE', installedVersion: prior.receipt.piShuttleVersion, installerVersion: PI_SHUTTLE_VERSION };
       }
@@ -906,8 +945,13 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       const rollbackState = rollback(attempt);
       return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: binCheck.message };
     }
-    const shuttleTarget = join(layout.packagesDir, componentDirName(PI_SHUTTLE_PACKAGE_NAME, PI_SHUTTLE_VERSION));
-    attempt.rollbackCandidates.push({ path: shuttleTarget, preExisting: pathEntryExists(shuttleTarget) });
+    const packageRoot = releaseRoot ?? releaseExtract.value;
+    const sourceTree = await hashPackageTree(packageRoot);
+    if (!sourceTree.ok) {
+      const rollbackState = rollback(attempt);
+      return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: sourceTree.message };
+    }
+    const shuttleTarget = join(layout.packagesDir, piShuttlePackageDirName(PI_SHUTTLE_VERSION, options.sourceIdentity));
     const verifyShuttle = (existingRoot: string): ComponentResult<unknown> => {
       const existing = readPackageIdentity(existingRoot);
       if (existing === null || existing.name !== PI_SHUTTLE_PACKAGE_NAME || existing.version !== PI_SHUTTLE_VERSION) {
@@ -915,20 +959,41 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       }
       return { ok: true, value: undefined };
     };
-    const activated = activatePackageRoot(releaseRoot ?? releaseExtract.value, shuttleTarget, verifyShuttle);
+    await options.beforePiShuttleActivation?.(shuttleTarget, packageRoot);
+    const activated = activatePackageRoot(packageRoot, shuttleTarget, verifyShuttle);
     if (!activated.ok) {
       const rollbackState = rollback(attempt);
       return { kind: 'FAILED', stage: 'release-package', rollback: rollbackState.message, message: activated.message };
     }
+    if (activated.value.created) attempt.rollbackCandidates.push({ path: shuttleTarget, createdByThisAttempt: true });
+    const installedTree = await hashPackageTree(shuttleTarget);
+    if (!installedTree.ok || installedTree.value !== sourceTree.value) {
+      const rollbackState = rollback(attempt);
+      return {
+        kind: 'FAILED',
+        stage: 'release-package',
+        rollback: rollbackState.message,
+        message: installedTree.ok ? `installed pi-shuttle package bytes at ${shuttleTarget} do not match the verified release package` : installedTree.message,
+      };
+    }
+    installedShuttlePath = shuttleTarget;
+    installedShuttleTreeSha256 = sourceTree.value;
     binLinkTarget = join(shuttleTarget, binCheck.value);
   }
   attempt.binLinkTarget = binLinkTarget;
   let gatewayResult: GatewayInstallResult | undefined;
   if (installSelections.gateway) {
-    const gatewayTarget = join(layout.packagesDir, componentDirName(gatewayIdentity.packageName, gatewayDescriptor.version));
-    attempt.rollbackCandidates.push({ path: gatewayTarget, preExisting: pathEntryExists(gatewayTarget) });
     const gateway = await installGatewayComponent({
-      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectGatewaySha256, platform: env.platform, pathEnv: env.pathEnv },
+      context: {
+        artifactDir,
+        packagesDir: layout.packagesDir,
+        stagingDir: attempt.stagingDir,
+        nodeExecutable: process.execPath,
+        expectedSha256: options.expectGatewaySha256,
+        platform: env.platform,
+        pathEnv: env.pathEnv,
+        onPackageCreated: (path) => attempt.rollbackCandidates.push({ path, createdByThisAttempt: true }),
+      },
       expectedVersion: gatewayDescriptor.version,
       expectedCommit: gatewayDescriptor.commit,
       identity: gatewayIdentity,
@@ -992,10 +1057,17 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
       const rollbackState = rollback(attempt);
       return { kind: 'REFUSED', reason: `pi executable is required for pi-guard installation but was not found on PATH (${rollbackState.message})` };
     }
-    const piGuardTarget = join(layout.packagesDir, componentDirName(PI_GUARD_PACKAGE_NAME, PI_GUARD_VERSION));
-    attempt.rollbackCandidates.push({ path: piGuardTarget, preExisting: pathEntryExists(piGuardTarget) });
     const piGuard = await installPiGuardComponent({
-      context: { artifactDir, packagesDir: layout.packagesDir, stagingDir: attempt.stagingDir, nodeExecutable: process.execPath, expectedSha256: options.expectPiGuardSha256, platform: env.platform, pathEnv: env.pathEnv },
+      context: {
+        artifactDir,
+        packagesDir: layout.packagesDir,
+        stagingDir: attempt.stagingDir,
+        nodeExecutable: process.execPath,
+        expectedSha256: options.expectPiGuardSha256,
+        platform: env.platform,
+        pathEnv: env.pathEnv,
+        onPackageCreated: (path) => attempt.rollbackCandidates.push({ path, createdByThisAttempt: true }),
+      },
       expectedVersion: PI_GUARD_VERSION,
       expectedCommit: PI_GUARD_COMMIT,
       piExecutable,
@@ -1111,6 +1183,9 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     piGuard: piGuardEntry,
     omitted,
     notes,
+    ...(options.sourceIdentity !== undefined && installedShuttlePath !== undefined
+      ? { piShuttleInstallPath: installedShuttlePath, piShuttleTreeSha256: installedShuttleTreeSha256 }
+      : {}),
     ...(options.sourceIdentity !== undefined ? { channel: 'latest' as const, sourceIdentity: options.sourceIdentity } : {}),
   });
   const written = writeReceipt(attempt.receiptPath, receipt);

@@ -74,6 +74,19 @@ test('receipt: deterministic serialization (parse→serialize is byte-stable)', 
   assert.ok(text.endsWith('\n'));
 });
 
+test('receipt: exact pi-shuttle package path and tree digest are paired while historical Stable shape remains valid', () => {
+  const historical = sampleReceipt();
+  assert.equal(validateReceipt(JSON.parse(serializeReceipt(historical))).ok, true);
+  const bound = sampleReceipt({
+    channel: 'latest',
+    sourceIdentity: `mfx-labs/pi-shuttle@${'b'.repeat(40)}`,
+    piShuttleInstallPath: `/home/op/.local/share/pi-shuttle/packages/pi-shuttle@0.1.1+latest.${'b'.repeat(40)}`,
+    piShuttleTreeSha256: 'c'.repeat(64),
+  });
+  assert.equal(validateReceipt(JSON.parse(serializeReceipt(bound))).ok, true);
+  assert.equal(validateReceipt({ ...JSON.parse(serializeReceipt(bound)), piShuttleTreeSha256: undefined }).ok, false);
+});
+
 test('receipt: never serializes authority/secrets vocabulary', () => {
   const text = serializeReceipt(sampleReceipt());
   for (const forbidden of ['provenance', 'grant', 'secret', 'credential', 'token']) {

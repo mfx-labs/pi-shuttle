@@ -45,8 +45,8 @@
  * unverified`, `partial installation`) → 1; otherwise 0. Malformed
  * runtime configuration or receipt fails closed with exit 1.
  */
-import { existsSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, lstatSync, readdirSync, readlinkSync, realpathSync, statSync } from 'node:fs';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { COMPATIBILITY_MANIFEST, GIT_LANE_VERSION, GIT_RUNTIME_MINIMUM, NODE_LANE_VERSION, NODE_RUNTIME_MINIMUM, PI_COMPATIBILITY_BASELINE, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM, gatewayDescriptorForLane } from '../compat/manifest.js';
 import { classifyAgainstMinimum, parseVersionTriple } from '../compat/versions.js';
@@ -55,9 +55,9 @@ import { classifyNodeRuntime } from '../installer/preflight.js';
 import { readRuntimeDocument } from '../config/document.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
 import { canonicalizePath, hostLane, resolveLayout } from '../host/environment.js';
-import { readPackageIdentity } from '../installer/artifact.js';
+import { hashPackageTree, readPackageIdentity } from '../installer/artifact.js';
 import { regularFileOrNull } from '../installer/archive.js';
-import { componentDirName, PI_GUARD_PACKAGE_NAME, piListConfirmsSource, validateBinPath } from '../installer/components.js';
+import { componentDirName, isPiShuttlePackageDirName, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME, piListConfirmsSource, piShuttlePackageDirName, validateBinPath } from '../installer/components.js';
 import { readReceipt } from '../installer/receipt.js';
 import type { InstallReceipt } from '../installer/receipt.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
@@ -181,6 +181,48 @@ function modeNote(path: string, expected: number): string {
   const mode = modeOf(path);
   if (mode === null) return `${path}: unreadable`;
   return `${path}: mode ${mode.toString(8).padStart(4, '0')}${(mode & 0o077) !== 0 ? ` (unsafe: group/world bits must be clear; expected ${expected.toString(8).padStart(4, '0')})` : ''}`;
+}
+
+/** New package-backed receipts prove the command, semantic identity, source slot, and bytes. */
+async function piShuttleReceiptProblem(receipt: InstallReceipt, layout: LayoutPaths): Promise<string | null> {
+  if (receipt.piShuttleInstallPath === undefined || receipt.piShuttleTreeSha256 === undefined) {
+    return receipt.channel === 'latest' ? 'latest receipt predates exact source-package byte binding' : null;
+  }
+  const root = receipt.piShuttleInstallPath;
+  if (receipt.channel === 'latest') {
+    if (receipt.sourceIdentity === undefined || root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion, receipt.sourceIdentity))) {
+      return 'latest package path does not match its semantic version and exact source SHA';
+    }
+  } else if (receipt.recovery === undefined && root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion))) {
+    return 'stable package path does not match its semantic version';
+  }
+  try {
+    const stat = lstatSync(root);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || dirname(realpathSync(root)) !== realpathSync(layout.packagesDir)) {
+      return `pi-shuttle package is not a real confined directory: ${root}`;
+    }
+  } catch {
+    return `pi-shuttle package is missing or unreadable: ${root}`;
+  }
+  const identity = readPackageIdentity(root);
+  if (identity === null || identity.name !== PI_SHUTTLE_PACKAGE_NAME || identity.version !== receipt.piShuttleVersion
+    || !isPiShuttlePackageDirName(basename(root), identity.version)) {
+    return `pi-shuttle package identity does not match the receipt: ${root}`;
+  }
+  const binRaw = identity.bin[PI_SHUTTLE_PACKAGE_NAME];
+  const bin = binRaw === undefined ? null : validateBinPath(binRaw, root);
+  const binTarget = bin?.ok ? join(root, bin.value) : null;
+  if (Object.keys(identity.bin).length !== 1 || binTarget === null || !regularFileOrNull(binTarget)) {
+    return `pi-shuttle package command is missing, ambiguous, or unconfined: ${root}`;
+  }
+  try {
+    if (readlinkSync(join(layout.binDir, PI_SHUTTLE_PACKAGE_NAME)) !== binTarget) return 'pi-shuttle command link does not select the receipt-bound package';
+  } catch {
+    return 'pi-shuttle command entry is missing or is not a symlink';
+  }
+  const digest = await hashPackageTree(root);
+  if (!digest.ok || digest.value !== receipt.piShuttleTreeSha256) return `pi-shuttle package bytes do not match the receipt tree SHA-256: ${root}`;
+  return null;
 }
 
 /** Git isolation directory conditions (mirrors the Gateway WP-7 host-directory contract). */
@@ -336,15 +378,19 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   } else {
     const entry = receipt.receipt.components.gateway;
     const distribution = receiptDistribution(receipt.receipt);
+    const shuttleProblem = await piShuttleReceiptProblem(receipt.receipt, layout);
+    const binding = shuttleProblem === null
+      ? (receipt.receipt.piShuttleInstallPath === undefined ? '' : `; pi-shuttle package bytes verified at ${receipt.receipt.piShuttleInstallPath}`)
+      : `; ${shuttleProblem}`;
     if (receipt.receipt.result === 'PARTIAL') {
       const mode = modeNote(layout.installReceiptPath, 0o600);
-      checks.push(check('receipt', 'installation receipt', 'partial installation', `${distribution}; ${mode}; omitted: ${receipt.receipt.omitted.join(', ') || 'none'} — re-run the installer to complete`));
+      checks.push(check('receipt', 'installation receipt', 'partial installation', `${distribution}; ${mode}${binding}; omitted: ${receipt.receipt.omitted.join(', ') || 'none'} — re-run the installer to complete`));
     } else if (entry === null) {
       checks.push(check('receipt', 'installation receipt', 'partial installation', `${distribution}; receipt records no Gateway component; re-run the installer with the Gateway selected`));
     } else {
       const mode = modeNote(layout.installReceiptPath, 0o600);
       const modeSafe = modeOf(layout.installReceiptPath) !== null && (modeOf(layout.installReceiptPath)! & 0o077) === 0;
-      checks.push(check('receipt', 'installation receipt', modeSafe ? 'supported' : 'installed but unverified', `${distribution}; ${mode}`));
+      checks.push(check('receipt', 'installation receipt', modeSafe && shuttleProblem === null ? 'supported' : 'installed but unverified', `${distribution}; ${mode}${binding}`));
     }
   }
 

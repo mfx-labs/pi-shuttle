@@ -12,8 +12,8 @@
  * digest — never presented as an official release digest.
  */
 import { createHash } from 'node:crypto';
-import { createReadStream } from 'node:fs';
-import { join } from 'node:path';
+import { createReadStream, lstatSync, readdirSync } from 'node:fs';
+import { join, relative } from 'node:path';
 import { readJsonFileIfRegular } from './archive.js';
 
 export type ArtifactResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly message: string };
@@ -44,6 +44,36 @@ export async function hashFile(path: string): Promise<string> {
     stream.on('error', reject);
   });
   return hash.digest('hex');
+}
+
+/** Deterministic byte/inventory digest of an extracted or installed package tree. */
+export async function hashPackageTree(packageRoot: string): Promise<ArtifactResult<string>> {
+  const entries: Array<{ readonly path: string; readonly type: 'directory' | 'file' }> = [];
+  const visit = (path: string): void => {
+    const stat = lstatSync(path);
+    const rel = relative(packageRoot, path) || '.';
+    if (stat.isDirectory() && !stat.isSymbolicLink()) {
+      entries.push({ path: rel, type: 'directory' });
+      for (const name of readdirSync(path).sort()) visit(join(path, name));
+      return;
+    }
+    if (stat.isFile()) {
+      entries.push({ path: rel, type: 'file' });
+      return;
+    }
+    throw new Error(`unsupported package entry at ${path}`);
+  };
+  try {
+    visit(packageRoot);
+    const digest = createHash('sha256');
+    for (const entry of entries) {
+      digest.update(`${entry.type}\0${entry.path}\0`);
+      if (entry.type === 'file') digest.update(`${await hashFile(join(packageRoot, entry.path))}\0`);
+    }
+    return { ok: true, value: digest.digest('hex') };
+  } catch (err) {
+    return { ok: false, code: 'ERR-PS3-PACKAGE-TREE', message: `package tree at ${packageRoot} could not be verified (${(err as Error).message || 'unknown error'})` };
+  }
 }
 
 export interface VerifiedArtifact {
