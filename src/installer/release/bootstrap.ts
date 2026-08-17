@@ -31,7 +31,7 @@ import { hashFile } from '../artifact.js';
 import { runInstall } from '../install.js';
 import type { InstallOutcome } from '../install.js';
 import { INSTALLER_EXIT, exitCodeFor, formatOutcome } from '../main.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, parseInstallerArgs, promptInteractive } from '../selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, parseInstallerArgs, promptInteractive } from '../selection.js';
 import type { InteractiveResult } from '../selection.js';
 import { acquireVerifiedFile, releaseBaseUrlFor } from './acquire.js';
 import type { ReleaseFetcher } from './acquire.js';
@@ -110,6 +110,9 @@ function refuse(code: string, message: string): ReleaseBootstrapResult {
  * Exported for focused tests with injected fetcher/runner/prompts.
  */
 export async function runReleaseBootstrap(env: HostEnvironment, handoff: ReleaseBootstrapHandoff, args: readonly string[], options: ReleaseBootstrapOptions = {}): Promise<ReleaseBootstrapResult> {
+  const homeProblem = absolutePathProblem(env.home, 'HOME');
+  if (homeProblem !== null) return refuse('ERR-REL-HOME', homeProblem);
+
   const parsed = parseInstallerArgs(args);
   if (!parsed.ok) {
     return refuse('ERR-REL-ARGS', `pi-shuttle-installer: ${parsed.message}`);

@@ -7,9 +7,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { REPO, buildTarball, cleanupEnv, fullInstallEnv, gatewayFixtureFiles, makeEnv, piGuardFixtureFiles, runInstaller, GATEWAY_ARTIFACT_NAME, PI_GUARD_ARTIFACT_NAME } from '../helpers/installer-fixtures.js';
+import type { InstallerRun } from '../helpers/installer-fixtures.js';
 import { readReceipt } from '../../src/installer/receipt.js';
 import { rollback, runInstall } from '../../src/installer/install.js';
 import { validateBinPath } from '../../src/installer/components.js';
@@ -28,6 +29,24 @@ async function piGuardArtifact(env: string, overrides: Record<string, string> = 
 
 function installArgs(artifactDir: string, extra: readonly string[] = []): string[] {
   return ['--batch', '--gateway', 'yes', '--pi-guard', 'yes', '--artifact-dir', artifactDir, ...extra];
+}
+
+/** Run the compiled installer main with scripted stdin (interactive path). */
+function runInstallerInteractive(args: readonly string[], input: readonly string[], env: { readonly home: string; readonly fixtureBin?: string; readonly extraEnv?: NodeJS.ProcessEnv }): Promise<InstallerRun> {
+  return new Promise((resolve, reject) => {
+    const pathEntries: string[] = [env.fixtureBin, join(env.home, '.local', 'bin'), process.env.PATH].filter((p): p is string => p !== undefined && p.length > 0);
+    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'main.js'), ...args], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...env.extraEnv, HOME: env.home, PATH: pathEntries.join(':') },
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
+    child.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+    child.stdin.end(input.map((l) => l + '\n').join(''));
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
 }
 
 test('installer: COMPLETE install of both components (batch)', async () => {
@@ -124,6 +143,145 @@ test('installer: batch mode requires explicit selections', async () => {
     assert.ok(run.stderr.includes('batch mode requires explicit'), run.stderr);
     const missing = await runInstaller(['--batch'], runEnv);
     assert.equal(missing.code, 2);
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: batch --install-dir / --bin-dir reject relative paths at the argument boundary', async () => {
+  const env = makeEnv();
+  try {
+    for (const [flag, bad] of [
+      ['--install-dir', 'y'],
+      ['--install-dir', 'foo/bar'],
+      ['--install-dir', './foo'],
+      ['--install-dir', '~/.local/share/pi-shuttle'],
+      ['--bin-dir', 'y'],
+      ['--bin-dir', './bin'],
+    ] as const) {
+      const run = await runInstaller(['--batch', '--gateway', 'yes', '--pi-guard', 'yes', flag, bad], { home: env });
+      assert.equal(run.code, 2, `${flag} ${bad}: ${run.stdout} ${run.stderr}`);
+      assert.match(run.stderr, /must be an absolute path/, `${flag} ${bad}: operator-facing guidance required`);
+      assert.ok(run.stderr.includes(bad), `${flag} ${bad}: message must name the rejected value`);
+    }
+    // No rejected invocation may create installation state or a receipt.
+    assert.equal(existsSync(join(env, '.local')), false, 'no layout dirs for rejected invocations');
+    assert.equal(existsSync(resolveLayout(env).installReceiptPath), false, 'no receipt for rejected invocations');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: absolute --install-dir / --bin-dir overrides install into the chosen layout with a self-valid receipt', async () => {
+  const env = makeEnv();
+  try {
+    await gatewayArtifact(env);
+    await piGuardArtifact(env);
+    const runEnv = fullInstallEnv(env, '0.83.0', join(env, 'pi-state.txt'));
+    const share = join(env, 'alt-share');
+    const bin = join(env, 'alt-bin');
+    const run = await runInstaller(installArgs(env, ['--install-dir', share, '--bin-dir', bin]), runEnv);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    const receipt = readReceipt(resolveLayout(env).installReceiptPath);
+    assert.equal(receipt.ok, true, 'absolute overrides must produce a receipt validateReceipt accepts');
+    if (!receipt.ok) return;
+    assert.equal(receipt.receipt.installDir, share);
+    assert.equal(receipt.receipt.binDir, bin);
+    assert.ok(existsSync(join(share, 'packages')), 'components installed under the chosen share dir');
+    assert.equal(readlinkSync(join(bin, 'pi-shuttle')), join(REPO, 'dist', 'cli.js'), 'bin link lives in the chosen bin dir');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: interactive invalid directory input reprompts; Enter selects the absolute defaults (process boundary)', async () => {
+  const env = makeEnv();
+  try {
+    await gatewayArtifact(env);
+    await piGuardArtifact(env);
+    const runEnv = fullInstallEnv(env, '0.83.0', join(env, 'pi-state.txt'));
+    // 'y' for Installation directory and 'rel' for Command/bin directory
+    // must each be rejected and reprompted; empty then selects the
+    // existing absolute defaults. Artifact dir arrives via --artifact-dir
+    // (interactive mode has no artifact prompt).
+    const run = await runInstallerInteractive(
+      ['--artifact-dir', env],
+      ['yes', 'yes', 'y', '', 'rel', '', 'no'],
+      runEnv,
+    );
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.ok(run.stdout.includes('result: COMPLETE'), run.stdout);
+    assert.equal(run.stdout.split('Installation directory [').length - 1, 2, 'invalid installation directory must reprompt');
+    assert.equal(run.stdout.split('Command/bin directory [').length - 1, 2, 'invalid bin directory must reprompt');
+    assert.ok(run.stderr.includes('Installation directory must be an absolute path'), run.stderr);
+    assert.ok(run.stderr.includes('Command/bin directory must be an absolute path'), run.stderr);
+    // Enter-selected defaults were used and the receipt validates.
+    const layout = resolveLayout(env);
+    const receipt = readReceipt(layout.installReceiptPath);
+    assert.equal(receipt.ok, true, 'interactive defaults must produce a self-valid receipt');
+    if (receipt.ok) {
+      assert.equal(receipt.receipt.installDir, layout.shareDir);
+      assert.equal(receipt.receipt.binDir, layout.binDir);
+    }
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: relative HOME is rejected before Enter/EOF reaches interactive prompts', () => {
+  const env = makeEnv();
+  try {
+    const relativeHomeDir = join(env, 'interactive-relative-home');
+    const relativeHome = relative(process.cwd(), relativeHomeDir);
+    const run = spawnSync(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'main.js')], {
+      input: '',
+      encoding: 'utf8',
+      timeout: 5_000,
+      env: { ...process.env, HOME: relativeHome },
+    });
+    assert.ifError(run.error);
+    assert.equal(run.status, 2, run.stdout + run.stderr);
+    assert.match(run.stderr, /HOME must be an absolute path/);
+    assert.doesNotMatch(run.stdout, /Install Project Gateway MCP\?/, 'no prompt may consume EOF');
+    assert.equal(existsSync(relativeHomeDir), false, 'relative HOME layout must not be created');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('install core: relative installDir/binDir is REFUSED before any installation mutation (programmatic boundary)', async () => {
+  const env = makeEnv();
+  try {
+    const host = { home: env, platform: 'linux', arch: 'x64' };
+    for (const overrides of [{ installDir: 'y' }, { binDir: 'y' }, { installDir: './foo', binDir: 'foo/bar' }] as const) {
+      const outcome = await runInstall(host, { selections: { gateway: false, piGuard: false }, ...overrides });
+      assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
+      if (outcome.kind === 'REFUSED') assert.match(outcome.reason, /must be an absolute path/, 'refusal must carry guidance');
+    }
+    // The refusal precedes every mutation: no layout, state, staging,
+    // packages, links, or receipts may exist.
+    assert.equal(existsSync(join(env, '.local')), false, 'no layout may be created');
+    assert.equal(existsSync(resolveLayout(env).installReceiptPath), false, 'no receipt may be written');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('install core: relative HOME with absolute overrides is REFUSED before any mutation', async () => {
+  const env = makeEnv();
+  try {
+    const relativeHomeDir = join(env, 'relative-home');
+    const share = join(env, 'absolute-share');
+    const bin = join(env, 'absolute-bin');
+    const outcome = await runInstall(
+      { home: relative(process.cwd(), relativeHomeDir), platform: 'linux', arch: 'x64' },
+      { selections: { gateway: false, piGuard: false }, installDir: share, binDir: bin },
+    );
+    assert.equal(outcome.kind, 'REFUSED', JSON.stringify(outcome));
+    if (outcome.kind === 'REFUSED') assert.match(outcome.reason, /HOME must be an absolute path/);
+    assert.equal(existsSync(relativeHomeDir), false, 'no HOME-derived state/config layout may be created');
+    assert.equal(existsSync(share), false, 'absolute install override must remain untouched');
+    assert.equal(existsSync(bin), false, 'absolute bin override must remain untouched');
   } finally {
     cleanupEnv(env);
   }

@@ -307,6 +307,44 @@ test('bootstrap: interactive prompts resolve selections before acquisition', asy
   }
 });
 
+test('bootstrap: relative HOME is refused before prompt, acquisition, install, or staging', async () => {
+  const h = makeHarness();
+  try {
+    let promptCalls = 0;
+    let acquisitionAttempts = 0;
+    const stageParent = join(h.dir, 'relative-home-stage');
+    const fetcher: ReleaseFetcher = async (url, depth) => {
+      acquisitionAttempts += 1;
+      return h.fetcher(url, depth);
+    };
+    const result = await runReleaseBootstrap(
+      envFor('relative-home'),
+      { envelopePath: h.envelopePath, piShuttleTgzPath: h.tgzPath, tmpDir: stageParent },
+      [],
+      {
+        fetcher,
+        uid: 12345,
+        installRunner: h.runner,
+        promptUI: async () => {
+          promptCalls += 1;
+          return { selections: { gateway: true, piGuard: false }, installDir: join(h.home, 'share'), binDir: join(h.home, 'bin'), configureProject: false };
+        },
+      },
+    );
+    assert.equal(result.kind, 'refused');
+    if (result.kind === 'refused') {
+      assert.equal(result.code, 'ERR-REL-HOME');
+      assert.match(result.message, /HOME must be an absolute path/);
+    }
+    assert.equal(promptCalls, 0, 'relative HOME must be rejected before prompting');
+    assert.equal(acquisitionAttempts, 0, 'relative HOME must be rejected before acquisition');
+    assert.equal(h.runnerCalls, 0, 'relative HOME must be rejected before the install core');
+    assert.equal(existsSync(stageParent), false, 'relative HOME refusal must not create staging');
+  } finally {
+    rmSync(h.dir, { recursive: true, force: true });
+  }
+});
+
 test('bootstrap: no components selected runs the core without artifacts', async () => {
   const h = makeHarness();
   try {
@@ -333,6 +371,33 @@ test('bootstrap: installer argument forwarding (install-dir, bin-dir, unknown fl
     assert.equal(bad.kind, 'refused');
     if (bad.kind === 'refused') assert.equal(bad.code, 'ERR-REL-ARGS');
     assert.equal(h.runnerCalls, 1, 'the failed invocation must not reach the runner');
+  } finally {
+    rmSync(h.dir, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap: relative --install-dir / --bin-dir are refused at the argument boundary', async () => {
+  const h = makeHarness();
+  try {
+    let acquisitionAttempts = 0;
+    const fetcher: ReleaseFetcher = async (url, depth) => {
+      acquisitionAttempts += 1;
+      return h.fetcher(url, depth);
+    };
+    for (const bad of [
+      ['--install-dir', 'y'],
+      ['--install-dir', '~/.local/share/pi-shuttle'],
+      ['--bin-dir', 'y'],
+    ] as const) {
+      const result = await runReleaseBootstrap(envFor(h.home), { envelopePath: h.envelopePath, piShuttleTgzPath: h.tgzPath }, ['--batch', '--gateway', 'yes', '--pi-guard', 'no', ...bad], { fetcher, uid: 12345, installRunner: h.runner });
+      assert.equal(result.kind, 'refused', JSON.stringify(bad));
+      if (result.kind === 'refused') {
+        assert.equal(result.code, 'ERR-REL-ARGS');
+        assert.match(result.message, /must be an absolute path/);
+      }
+    }
+    assert.equal(acquisitionAttempts, 0, 'relative paths must be rejected before selected-component acquisition');
+    assert.equal(h.runnerCalls, 0, 'relative paths must never reach the install core');
   } finally {
     rmSync(h.dir, { recursive: true, force: true });
   }

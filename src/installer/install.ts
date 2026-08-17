@@ -43,6 +43,7 @@ import { findPackageRoot, readPackageIdentity } from './artifact.js';
 import { newReceipt, readReceipt, writeReceipt } from './receipt.js';
 import type { GatewayReceiptEntry, InstallReceipt, PiGuardReceiptEntry } from './receipt.js';
 import type { InstallerSelections } from './selection.js';
+import { absolutePathProblem } from './selection.js';
 
 export type InstallOutcome =
   | { readonly kind: 'COMPLETE' }
@@ -98,6 +99,15 @@ export interface RollbackReport {
   /** 'rolled-back' = every attempt-created mutation was removed. */
   readonly state: 'rolled-back' | 'partial';
   readonly message: string;
+}
+
+/** Defensive absolute-path guard for direct/programmatic core callers. */
+function validateInstallPaths(shareDir: string, binDir: string): { readonly ok: true } | { readonly ok: false; readonly message: string } {
+  const shareProblem = absolutePathProblem(shareDir, 'installDir');
+  if (shareProblem !== null) return { ok: false, message: shareProblem };
+  const binProblem = absolutePathProblem(binDir, 'binDir');
+  if (binProblem !== null) return { ok: false, message: binProblem };
+  return { ok: true };
 }
 
 function layoutWithOverrides(home: string, options: InstallOptions): LayoutPaths {
@@ -190,6 +200,18 @@ export function gatewayReceiptEntryFromResult(descriptor: GatewayLaneDescriptor,
 
 /** Run the install flow. Pure orchestration; all I/O is installer-owned. */
 export async function runInstall(env: HostEnvironment, options: InstallOptions): Promise<InstallOutcome> {
+  // 0. Path-input defense: HOME/installDir/binDir must be absolute BEFORE
+  // any installation mutation — the receipt schema requires absolute
+  // paths, so a relative value could never produce self-valid state.
+  // Checked against the RESOLVED layout so direct callers cannot bypass
+  // the argument/prompt validation: no state dir, staging, package
+  // dirs, links, or receipts are created for invalid path inputs.
+  const homeProblem = absolutePathProblem(env.home, 'HOME');
+  if (homeProblem !== null) return { kind: 'REFUSED', reason: homeProblem };
+  const layout = layoutWithOverrides(env.home, options);
+  const pathGuard = validateInstallPaths(layout.shareDir, layout.binDir);
+  if (!pathGuard.ok) return { kind: 'REFUSED', reason: pathGuard.message };
+
   // 1. Platform/architecture lane.
   const laneCheck = checkPlatformLane(env);
   if (!laneCheck.ok) return { kind: 'UNSUPPORTED', reason: laneCheck.message };
@@ -222,7 +244,6 @@ export async function runInstall(env: HostEnvironment, options: InstallOptions):
   // 4. Layout + attempt bookkeeping. The attempt-spanning lock (SIR-PS3-009)
   // is acquired BEFORE the first installation mutation and before any
   // state-dependent decision (receipt inspection, layout creation).
-  const layout = layoutWithOverrides(env.home, options);
   const installLockPath = join(layout.stateDir, 'install.lock');
   const attempt: InstallAttempt = {
     layout,

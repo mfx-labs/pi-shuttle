@@ -32,9 +32,21 @@ test('host: home discovery comes from the environment seam only', () => {
     const env = hostEnvironmentFromProcess();
     assert.equal(env.ok, true);
     if (env.ok) assert.equal(env.environment.home, '/tmp/fake-home');
+
+    process.env.HOME = 'relative-home';
+    const relative = hostEnvironmentFromProcess();
+    assert.equal(relative.ok, false, 'relative HOME must fail closed');
+    if (!relative.ok) assert.match(relative.message, /HOME must be an absolute path/);
+
     process.env.HOME = '';
+    const empty = hostEnvironmentFromProcess();
+    assert.equal(empty.ok, false, 'empty HOME must fail closed');
+    if (!empty.ok) assert.equal(empty.message, 'HOME is not set; pi-shuttle requires an operator home directory');
+
+    delete process.env.HOME;
     const missing = hostEnvironmentFromProcess();
-    assert.equal(missing.ok, false, 'empty HOME must fail closed');
+    assert.equal(missing.ok, false, 'missing HOME must fail closed');
+    if (!missing.ok) assert.equal(missing.message, 'HOME is not set; pi-shuttle requires an operator home directory');
   } finally {
     if (original === undefined) delete process.env.HOME;
     else process.env.HOME = original;

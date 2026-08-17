@@ -6,6 +6,7 @@
  * components 1–2"). Interactive defaults are yes/yes per the contract.
  */
 import { createInterface } from 'node:readline/promises';
+import { isAbsolute } from 'node:path';
 
 export interface InstallerSelections {
   readonly gateway: boolean;
@@ -50,6 +51,19 @@ export const INSTALLER_USAGE = [
 const YES = new Set(['yes', 'y']);
 const NO = new Set(['no', 'n']);
 
+/**
+ * Absolute-path input contract for installDir/binDir: the receipt schema
+ * requires absolute paths, so a relative value can never be accepted —
+ * not even interactively — or the installer would write a receipt that
+ * its own validation rejects. Tilde is NOT expanded internally;
+ * `~/...` is relative and rejected here (the shell expands unquoted
+ * `~` before argv is built; a literal `~` must never be trusted).
+ */
+export function absolutePathProblem(value: string, what: string): string | null {
+  if (isAbsolute(value)) return null;
+  return `${what} must be an absolute path (got "${value}"); relative paths and ~-prefixed paths are not accepted — pass an absolute path starting with /`;
+}
+
 function parseYesNo(value: string): boolean | null {
   const v = value.toLowerCase();
   if (YES.has(v)) return true;
@@ -90,14 +104,20 @@ export function parseInstallerArgs(argv: readonly string[]): InstallerArgResult 
         break;
       }
       case '--install-dir':
-      case '--bin-dir':
+      case '--bin-dir': {
+        if (next === undefined || next.length === 0) return { ok: false, message: `${flag} requires a value\n${INSTALLER_USAGE}` };
+        const pathProblem = absolutePathProblem(next, flag);
+        if (pathProblem !== null) return { ok: false, message: `${pathProblem}\n${INSTALLER_USAGE}` };
+        if (flag === '--install-dir') installDir = next;
+        else binDir = next;
+        i += 2;
+        break;
+      }
       case '--artifact-dir':
       case '--expect-gateway-sha256':
       case '--expect-pi-guard-sha256': {
         if (next === undefined || next.length === 0) return { ok: false, message: `${flag} requires a value\n${INSTALLER_USAGE}` };
-        if (flag === '--install-dir') installDir = next;
-        else if (flag === '--bin-dir') binDir = next;
-        else if (flag === '--artifact-dir') artifactDir = next;
+        if (flag === '--artifact-dir') artifactDir = next;
         else if (flag === '--expect-gateway-sha256') expectGatewaySha256 = next;
         else expectPiGuardSha256 = next;
         i += 2;
@@ -176,8 +196,8 @@ export interface InteractiveResult {
 export async function promptSelections(ui: PromptUI, defaults: { readonly installDir: string; readonly binDir: string }): Promise<InteractiveResult> {
   const gateway = await askYesNo(ui, 'Install Project Gateway MCP?', true);
   const piGuard = await askYesNo(ui, 'Install Pi integration / pi-guard?', true);
-  const installDir = await ui.ask(`Installation directory [${defaults.installDir}]: `, defaults.installDir);
-  const binDir = await ui.ask(`Command/bin directory [${defaults.binDir}]: `, defaults.binDir);
+  const installDir = await askPath(ui, `Installation directory [${defaults.installDir}]: `, defaults.installDir, 'Installation directory');
+  const binDir = await askPath(ui, `Command/bin directory [${defaults.binDir}]: `, defaults.binDir, 'Command/bin directory');
   const configureProject = await askYesNo(ui, 'Configure a project now?', false);
   return {
     selections: { gateway, piGuard },
@@ -185,6 +205,22 @@ export async function promptSelections(ui: PromptUI, defaults: { readonly instal
     ...(binDir.trim().length > 0 ? { binDir: binDir.trim() } : {}),
     configureProject,
   };
+}
+
+/**
+ * Prompt for an absolute directory: empty input selects the absolute
+ * default; invalid (relative/~-prefixed) input is rejected with guidance
+ * and the prompt repeats — an invalid answer never advances to the next
+ * prompt.
+ */
+async function askPath(ui: PromptUI, question: string, defaultValue: string, label: string): Promise<string> {
+  for (;;) {
+    const answer = (await ui.ask(question, defaultValue)).trim();
+    if (answer.length === 0) return defaultValue;
+    const problem = absolutePathProblem(answer, label);
+    if (problem === null) return answer;
+    process.stderr.write(`pi-shuttle-installer: ${problem}\n`);
+  }
 }
 
 async function askYesNo(ui: PromptUI, question: string, defaultValue: boolean): Promise<boolean> {

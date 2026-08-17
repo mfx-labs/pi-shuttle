@@ -15,7 +15,7 @@
  * macOS host-lane semantics; PS-2 keeps the representation neutral).
  */
 import { realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 /** Minimal host facts observed by pi-shuttle (injectable for tests). */
 export interface HostEnvironment {
@@ -40,6 +40,9 @@ export function hostEnvironmentFromProcess(): { readonly ok: true; readonly envi
   const home = process.env.HOME;
   if (home === undefined || home.length === 0) {
     return { ok: false, message: 'HOME is not set; pi-shuttle requires an operator home directory' };
+  }
+  if (!isAbsolute(home)) {
+    return { ok: false, message: `HOME must be an absolute path (got "${home}"); relative HOME paths are not accepted` };
   }
   return { ok: true, environment: { home, platform: process.platform, arch: process.arch, pathEnv: process.env } };
 }
