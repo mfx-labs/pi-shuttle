@@ -4,9 +4,7 @@
 
 pi-shuttle packages **Project Gateway** and **pi-guard** into one operator-facing product. It installs and verifies the reviewed components, registers only the projects you choose, checks that the environment is healthy, and starts a constrained MCP gateway — without giving an AI agent a general-purpose shell, unrestricted filesystem access, or Git push authority.
 
-> **v0.1.0 is the current published release.**
->
-> **v0.1.1 (installer correctness hotfix) is prepared for publication but is not yet a published release.**
+> **v0.1.1 is available now.**
 >
 > Product-supported: **Linux x86_64** and **macOS Intel x86_64**.
 > Apple Silicon follows the same macOS installation path, but is not yet product-supported.
@@ -22,10 +20,8 @@ Requirements:
 Install the version-pinned release:
 
 ```bash
-curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.0/install.sh | bash
+curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/install.sh | bash
 ```
-
-v0.1.1 (installer correctness hotfix) is prepared for publication but is not yet published; the v0.1.0 installer above remains the currently usable public path until the v0.1.1 publication gate completes.
 
 Then verify the installation:
 
@@ -239,22 +235,20 @@ On macOS, quarantine handling occurs after artifact digest verification and befo
 
 ## Release
 
-Current published release: **[pi-shuttle v0.1.0](https://github.com/mfx-labs/pi-shuttle/releases/tag/v0.1.0)**
+Current release: **[pi-shuttle v0.1.1](https://github.com/mfx-labs/pi-shuttle/releases/tag/v0.1.1)**
 
 The public release contains one combined multi-platform inventory:
 
 ```text
 install.sh
-pi-shuttle-0.1.0-linux-x86_64.json
-pi-shuttle-0.1.0-macos.json
-pi-shuttle-0.1.0.tgz
+pi-shuttle-0.1.1-linux-x86_64.json
+pi-shuttle-0.1.1-macos.json
+pi-shuttle-0.1.1.tgz
 project-gateway-artifact-core-0.1.0.tgz
 project-gateway-macos-core-0.1.0.tgz
 pi-guard-0.1.2.tgz
 SHA256SUMS
 ```
-
-**v0.1.1** (installer correctness hotfix) is prepared for publication but is **not yet a published release**. Its intended inventory is structurally identical to v0.1.0, with only the pi-shuttle versioned assets renamed: `pi-shuttle-0.1.1-linux-x86_64.json`, `pi-shuttle-0.1.1-macos.json`, `pi-shuttle-0.1.1.tgz`.
 
 Use `SHA256SUMS` to independently verify downloaded release assets.
 
