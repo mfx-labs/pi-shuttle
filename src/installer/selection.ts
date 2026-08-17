@@ -162,6 +162,40 @@ export interface PromptUI {
   ask(question: string, defaultValue?: string): Promise<string>;
 }
 
+function upgradeNotice(installedVersion: string, installerVersion: string): string {
+  return [
+    'Existing pi-shuttle installation detected:',
+    `  Installed: ${installedVersion}`,
+    `  Installer: ${installerVersion}`,
+    '',
+  ].join('\n');
+}
+
+/** Ask for explicit interactive consent after the core proves ownership. */
+export async function promptUpgrade(installedVersion: string, installerVersion: string): Promise<boolean> {
+  process.stdout.write(upgradeNotice(installedVersion, installerVersion));
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const lines = rl[Symbol.asyncIterator]();
+  try {
+    return await askYesNo({
+      ask: async (question, defaultValue) => {
+        process.stdout.write(question);
+        const next = await lines.next();
+        const answer = next.done ? '' : next.value.trim();
+        return answer.length > 0 ? answer : (defaultValue ?? '');
+      },
+    }, `Upgrade ${installedVersion} → ${installerVersion}?`, true);
+  } finally {
+    rl.close();
+  }
+}
+
+/** Explicit batch installation is the non-interactive upgrade consent. */
+export async function approveBatchUpgrade(installedVersion: string, installerVersion: string): Promise<boolean> {
+  process.stdout.write(`${upgradeNotice(installedVersion, installerVersion)}Upgrade accepted by explicit batch invocation.\n`);
+  return true;
+}
+
 /**
  * The interactive prompt session (installation-contract §2, prompts 1–5)
  * backed by stdin/stdout readline. Shared by the local installer entry

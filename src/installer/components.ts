@@ -144,6 +144,13 @@ export function activatePackageRoot(packageRoot: string, targetDir: string, veri
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     if (code === 'EEXIST' || code === 'EISDIR') {
+      try {
+        if (!lstatSync(targetDir).isDirectory()) {
+          return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing component target at ${targetDir} is not an owned package directory; refusing to touch it` };
+        }
+      } catch {
+        return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing component target at ${targetDir} could not be inspected; refusing to touch it` };
+      }
       // The version dir already exists: idempotent rerun path — verify the
       // existing state rather than overwriting it (foreign/empty dirs fail
       // closed here: an empty dir has no readable package.json identity).
@@ -504,6 +511,15 @@ export function removeStaging(stagingDir: string): void {
  * identity.
  */
 export async function inspectExistingGateway(targetDir: string, nodeExecutable: string, identity: GatewayComponentIdentity, expectedVersion: string): Promise<ComponentResult<{ readonly present: true; readonly status: 'installed-verified' | 'installed-unverified'; readonly installPath: string; readonly binPath: string; readonly smoke: 'passed' | 'not-run' } | null>> {
+  try {
+    if (!lstatSync(targetDir).isDirectory()) {
+      return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway target at ${targetDir} is not an owned package directory; refusing to touch it` };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing gateway target at ${targetDir} could not be inspected; refusing to touch it` };
+    }
+  }
   const identityRead = readPackageIdentity(targetDir);
   if (identityRead === null) {
     if (existsSync(targetDir)) {
@@ -555,13 +571,29 @@ export async function inspectExistingGateway(targetDir: string, nodeExecutable: 
  * (name/version) plus the exact `pi list` source check. Returns null when
  * the target is absent; fails closed on incompatible identity.
  */
-export async function inspectExistingPiGuard(targetDir: string, piExecutable: string | null): Promise<ComponentResult<{ readonly present: true; readonly status: 'installed-verified' | 'installed-unverified'; readonly installPath: string; readonly sourcePath: string; readonly verifiedBy: 'pi-list' | 'unverified' } | null>> {
+export async function inspectExistingPiGuard(targetDir: string, piExecutable: string | null, expectedVersion: string): Promise<ComponentResult<{ readonly present: true; readonly status: 'installed-verified' | 'installed-unverified'; readonly installPath: string; readonly sourcePath: string; readonly verifiedBy: 'pi-list' | 'unverified' } | null>> {
+  try {
+    if (!lstatSync(targetDir).isDirectory()) {
+      return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing pi-guard target at ${targetDir} is not an owned package directory; refusing to touch it` };
+    }
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+      return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing pi-guard target at ${targetDir} could not be inspected; refusing to touch it` };
+    }
+  }
   const identity = readPackageIdentity(targetDir);
   if (identity === null) {
     if (existsSync(targetDir)) {
       return { ok: false, code: 'ERR-PS3-EXISTING-FOREIGN', message: `existing pi-guard installation at ${targetDir} has incompatible identity; refusing to touch it` };
     }
     return { ok: true, value: null };
+  }
+  if (identity.name !== PI_GUARD_PACKAGE_NAME || identity.version !== expectedVersion) {
+    return {
+      ok: false,
+      code: 'ERR-PS3-EXISTING-FOREIGN',
+      message: `existing pi-guard installation at ${targetDir} has incompatible identity: expected ${PI_GUARD_PACKAGE_NAME}@${expectedVersion}, found ${identity.name}@${identity.version}; refusing to touch it`,
+    };
   }
   if (piExecutable === null) {
     return {

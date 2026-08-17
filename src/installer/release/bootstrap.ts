@@ -29,10 +29,11 @@ import type { HostEnvironment } from '../../host/environment.js';
 import { hostEnvironmentFromProcess, hostLane, resolveLayout } from '../../host/environment.js';
 import { hashFile } from '../artifact.js';
 import { runInstall } from '../install.js';
-import type { InstallOutcome } from '../install.js';
+import type { InstallOptions, InstallOutcome } from '../install.js';
 import { INSTALLER_EXIT, exitCodeFor, formatOutcome } from '../main.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, parseInstallerArgs, promptInteractive } from '../selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from '../selection.js';
 import type { InteractiveResult } from '../selection.js';
+import { readReceipt } from '../receipt.js';
 import { acquireVerifiedFile, releaseBaseUrlFor } from './acquire.js';
 import type { ReleaseFetcher } from './acquire.js';
 import { parseEnvelope } from './envelope.js';
@@ -72,6 +73,8 @@ export interface ReleaseBootstrapOptions {
   readonly installRunner?: (env: HostEnvironment, options: Parameters<typeof runInstall>[1]) => Promise<InstallOutcome>;
   /** Injectable interactive prompt session (unit tests only). */
   readonly promptUI?: (defaults: { readonly installDir: string; readonly binDir: string }) => Promise<InteractiveResult>;
+  /** Injectable upgrade consent (tests); production prompts or accepts explicit batch invocation. */
+  readonly confirmUpgrade?: InstallOptions['confirmUpgrade'];
   /**
    * Injectable stdin-TTY observation (F-01 test seam; production reads
    * `process.stdin.isTTY`). When interactive prompts are needed and stdin
@@ -130,10 +133,12 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
   // Selections: batch/explicit args, or the same interactive prompts as
   // the local lane (prompts run before any download).
   const layout = resolveLayout(env.home);
+  const prior = readReceipt(layout.installReceiptPath);
   let selections = parsed.options.selections;
   let installDir = parsed.options.installDir;
   let binDir = parsed.options.binDir;
   let configureProject = false;
+  const interactiveMode = selections === undefined;
   if (selections === undefined) {
     // F-01: never interpret EOF on stdin as affirmative interactive
     // answers. Interactive prompting requires a terminal; when none is
@@ -145,7 +150,10 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
       return refuse('ERR-REL-INTERACTIVE-TTY', 'interactive selections require a terminal; piped or non-interactive installs must pass explicit selections, e.g. --batch --gateway yes --pi-guard no');
     }
     const prompt = options.promptUI ?? promptInteractive;
-    const interactive = await prompt({ installDir: parsed.options.installDir ?? layout.shareDir, binDir: parsed.options.binDir ?? layout.binDir });
+    const interactive = await prompt({
+      installDir: parsed.options.installDir ?? (prior.ok ? prior.receipt.installDir : layout.shareDir),
+      binDir: parsed.options.binDir ?? (prior.ok ? prior.receipt.binDir : layout.binDir),
+    });
     selections = interactive.selections;
     installDir = interactive.installDir;
     binDir = interactive.binDir;
@@ -233,6 +241,7 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
       ...(selections.gateway ? { expectGatewaySha256: envelope.gateway.sha256 } : {}),
       ...(selections.piGuard ? { expectPiGuardSha256: envelope.piGuard.sha256 } : {}),
       ...(options.uid !== undefined ? { uid: options.uid } : {}),
+      confirmUpgrade: options.confirmUpgrade ?? (interactiveMode ? promptUpgrade : approveBatchUpgrade),
     });
     return { kind: 'outcome', outcome, envelope };
   } finally {

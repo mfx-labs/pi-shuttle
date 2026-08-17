@@ -34,6 +34,8 @@ import {
 import { handoffFromEnv, runReleaseBootstrap } from '../../src/installer/release/bootstrap.js';
 import type { ReleaseBootstrapHandoff } from '../../src/installer/release/bootstrap.js';
 import type { ReleaseFetcher } from '../../src/installer/release/acquire.js';
+import { writeReceipt } from '../../src/installer/receipt.js';
+import { resolveLayout } from '../../src/host/environment.js';
 
 function sha256(buf: Buffer): string {
   return createHash('sha256').update(buf).digest('hex');
@@ -302,6 +304,43 @@ test('bootstrap: interactive prompts resolve selections before acquisition', asy
     assert.equal(options.installDir, join(h.home, 'share'));
     assert.equal(options.binDir, join(h.home, 'bin'));
     assert.equal(options.expectGatewaySha256, sha256(h.gatewayBytes));
+  } finally {
+    rmSync(h.dir, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap: interactive path defaults preserve a valid receipt\'s custom installation layout', async () => {
+  const h = makeHarness();
+  try {
+    const layout = resolveLayout(h.home);
+    const customInstall = join(h.home, 'custom-share');
+    const customBin = join(h.home, 'custom-bin');
+    mkdirSync(layout.stateDir, { recursive: true, mode: 0o700 });
+    const written = writeReceipt(layout.installReceiptPath, {
+      receiptVersion: 1,
+      piShuttleVersion: PI_SHUTTLE_VERSION,
+      installedAt: new Date(0).toISOString(),
+      platformLane: 'linux-x86_64-posix-utf8-node22',
+      result: 'PARTIAL',
+      installDir: customInstall,
+      binDir: customBin,
+      components: { gateway: null, piGuard: null },
+      omitted: ['project-gateway-mcp', 'pi-guard'],
+      notes: [],
+    });
+    assert.equal(written.ok, true);
+    let observedDefaults: { readonly installDir: string; readonly binDir: string } | null = null;
+    const result = await runReleaseBootstrap(envFor(h.home), { envelopePath: h.envelopePath, piShuttleTgzPath: h.tgzPath }, [], {
+      fetcher: h.fetcher,
+      uid: 12345,
+      installRunner: h.runner,
+      promptUI: async (defaults) => {
+        observedDefaults = defaults;
+        return { selections: { gateway: false, piGuard: false }, installDir: defaults.installDir, binDir: defaults.binDir, configureProject: false };
+      },
+    });
+    assert.equal(result.kind, 'outcome');
+    assert.deepEqual(observedDefaults, { installDir: customInstall, binDir: customBin });
   } finally {
     rmSync(h.dir, { recursive: true, force: true });
   }

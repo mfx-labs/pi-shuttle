@@ -5,26 +5,33 @@
  * --version) is unchanged; the installer is a separate operator surface
  * with its own closed argument grammar.
  *
- * Exit codes (documented, closed): 0 COMPLETE; 1 PARTIAL (truthful
- * opt-out/unverified stack); 2 FAILED / UNSUPPORTED / REFUSED / malformed
- * invocation.
+ * Exit codes (documented, closed): 0 COMPLETE or a successful no-change
+ * lifecycle result; 1 PARTIAL (truthful opt-out/unverified stack); 2
+ * FAILED / UNSUPPORTED / REFUSED / malformed invocation.
  */
 import { realpathSync } from 'node:fs';
 import { hostEnvironmentFromProcess } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, parseInstallerArgs, promptInteractive } from './selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
+import { readReceipt } from './receipt.js';
 
 export const INSTALLER_EXIT = { COMPLETE: 0, PARTIAL: 1, FAILED: 2 } as const;
 
 export function formatOutcome(outcome: InstallOutcome): string {
   switch (outcome.kind) {
     case 'COMPLETE':
-      return 'result: COMPLETE — all selected components installed and verified';
+      return `result: COMPLETE — all selected components installed and verified${outcome.upgradedFrom !== undefined ? `; upgraded pi-shuttle ${outcome.upgradedFrom} → ${PI_SHUTTLE_VERSION}` : ''}`;
     case 'PARTIAL':
-      return `result: PARTIAL INSTALLATION${outcome.omitted.length > 0 ? ` — not installed: ${outcome.omitted.join(', ')}` : ''}${outcome.notes.length > 0 ? `\n  notes: ${outcome.notes.join('\n  notes: ')}` : ''}`;
+      return `result: PARTIAL INSTALLATION${outcome.upgradedFrom !== undefined ? ` — upgraded pi-shuttle ${outcome.upgradedFrom} → ${PI_SHUTTLE_VERSION}` : ''}${outcome.omitted.length > 0 ? ` — not installed: ${outcome.omitted.join(', ')}` : ''}${outcome.notes.length > 0 ? `\n  notes: ${outcome.notes.join('\n  notes: ')}` : ''}`;
+    case 'ALREADY_INSTALLED':
+      return `result: ALREADY INSTALLED — pi-shuttle ${outcome.version} is verified; no changes were needed`;
+    case 'UPGRADE_AVAILABLE':
+      return `result: UPGRADE AVAILABLE — verified pi-shuttle ${outcome.installedVersion} can be upgraded to ${outcome.installerVersion}; explicit confirmation is required`;
+    case 'UPGRADE_DECLINED':
+      return `result: UPGRADE DECLINED — pi-shuttle ${outcome.installedVersion} was preserved unchanged`;
     case 'FAILED':
       return `result: FAILED at stage "${outcome.stage}" — ${outcome.message}\nrollback: ${outcome.rollback} (prior installation state preserved)`;
     case 'UNSUPPORTED':
@@ -37,6 +44,9 @@ export function formatOutcome(outcome: InstallOutcome): string {
 export function exitCodeFor(outcome: InstallOutcome): number {
   switch (outcome.kind) {
     case 'COMPLETE':
+    case 'ALREADY_INSTALLED':
+    case 'UPGRADE_AVAILABLE':
+    case 'UPGRADE_DECLINED':
       return INSTALLER_EXIT.COMPLETE;
     case 'PARTIAL':
       return INSTALLER_EXIT.PARTIAL;
@@ -65,6 +75,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
   const home = env.environment.home;
   const layout = resolveLayout(home);
+  const prior = readReceipt(layout.installReceiptPath);
 
   process.stdout.write(`pi-shuttle installer ${PI_SHUTTLE_VERSION} (pre-release, local lane)\n`);
 
@@ -72,8 +83,12 @@ export async function main(argv: readonly string[]): Promise<number> {
   let installDir = parsed.options.installDir;
   let binDir = parsed.options.binDir;
   let configureProject = false;
+  const interactiveMode = selections === undefined;
   if (selections === undefined) {
-    const interactive = await promptInteractive({ installDir: parsed.options.installDir ?? layout.shareDir, binDir: parsed.options.binDir ?? layout.binDir });
+    const interactive = await promptInteractive({
+      installDir: parsed.options.installDir ?? (prior.ok ? prior.receipt.installDir : layout.shareDir),
+      binDir: parsed.options.binDir ?? (prior.ok ? prior.receipt.binDir : layout.binDir),
+    });
     selections = interactive.selections;
     installDir = interactive.installDir;
     binDir = interactive.binDir;
@@ -91,6 +106,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ...(parsed.options.artifactDir !== undefined ? { artifactDir: parsed.options.artifactDir } : {}),
     ...(parsed.options.expectGatewaySha256 !== undefined ? { expectGatewaySha256: parsed.options.expectGatewaySha256 } : {}),
     ...(parsed.options.expectPiGuardSha256 !== undefined ? { expectPiGuardSha256: parsed.options.expectPiGuardSha256 } : {}),
+    confirmUpgrade: interactiveMode ? promptUpgrade : approveBatchUpgrade,
   });
 
   process.stdout.write(`${formatOutcome(outcome)}\n`);

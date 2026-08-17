@@ -9,8 +9,12 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { parseInstallerArgs, promptSelections } from '../../src/installer/selection.js';
 import type { PromptUI } from '../../src/installer/selection.js';
+import { REPO } from '../helpers/installer-fixtures.js';
 
 /** Scripted PromptUI: consumes one answer per ask, defaulting on empty (like the readline seam). */
 function uiWith(answers: readonly string[]): PromptUI & { readonly asked: string[] } {
@@ -28,6 +32,21 @@ function uiWith(answers: readonly string[]): PromptUI & { readonly asked: string
 }
 
 const BATCH = ['--batch', '--gateway', 'yes', '--pi-guard', 'yes'] as const;
+
+function runUpgradeConsent(name: 'promptUpgrade' | 'approveBatchUpgrade', input = ''): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
+  const moduleUrl = pathToFileURL(join(REPO, 'dist', 'installer', 'selection.js')).href;
+  const script = `import { ${name} } from ${JSON.stringify(moduleUrl)}; const decision = await ${name}('0.1.0', '0.1.1'); process.stdout.write('\\nDECISION=' + decision + '\\n');`;
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '--eval', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (data: Buffer) => { stdout += data.toString('utf8'); });
+    child.stderr.on('data', (data: Buffer) => { stderr += data.toString('utf8'); });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+    child.stdin.end(input);
+  });
+}
 
 test('selection: --install-dir / --bin-dir reject relative and ~-prefixed values at the argument boundary', () => {
   for (const flag of ['--install-dir', '--bin-dir'] as const) {
@@ -92,4 +111,33 @@ test('selection: interactive ~-prefixed and ./ input is rejected like any relati
   assert.equal(result.binDir, '/default/bin');
   assert.equal(ui.asked.filter((q) => q.startsWith('Installation directory')).length, 3);
   assert.equal(ui.asked.filter((q) => q.startsWith('Command/bin directory')).length, 2);
+});
+
+test('selection: production promptUpgrade supports default/yes/no and reprompts invalid input', async () => {
+  for (const [input, expected] of [['\n', true], ['yes\n', true], ['n\n', false]] as const) {
+    const run = await runUpgradeConsent('promptUpgrade', input);
+    assert.equal(run.code, 0, run.stdout + run.stderr);
+    assert.match(run.stdout, /Existing pi-shuttle installation detected:/);
+    assert.match(run.stdout, /Installed: 0\.1\.0/);
+    assert.match(run.stdout, /Installer: 0\.1\.1/);
+    assert.match(run.stdout, /Upgrade 0\.1\.0 → 0\.1\.1\? \[Y\/n\]:/);
+    assert.ok(run.stdout.includes(`DECISION=${expected}`), run.stdout);
+  }
+
+  const invalid = await runUpgradeConsent('promptUpgrade', 'maybe\ny\n');
+  assert.equal(invalid.code, 0, invalid.stdout + invalid.stderr);
+  assert.equal(invalid.stdout.split('Upgrade 0.1.0 → 0.1.1? [Y/n]:').length - 1, 2, 'invalid input must repeat the upgrade prompt');
+  assert.match(invalid.stderr, /please answer yes or no/);
+  assert.match(invalid.stdout, /DECISION=true/);
+});
+
+test('selection: production approveBatchUpgrade emits the upgrade notice and accepts', async () => {
+  const run = await runUpgradeConsent('approveBatchUpgrade');
+  assert.equal(run.code, 0, run.stdout + run.stderr);
+  assert.match(run.stdout, /Existing pi-shuttle installation detected:/);
+  assert.match(run.stdout, /Installed: 0\.1\.0/);
+  assert.match(run.stdout, /Installer: 0\.1\.1/);
+  assert.match(run.stdout, /Upgrade accepted by explicit batch invocation/);
+  assert.match(run.stdout, /DECISION=true/);
+  assert.equal(run.stderr, '');
 });

@@ -424,7 +424,7 @@ test('installer: missing pi executable refuses pi-guard selection', async () => 
   }
 });
 
-test('installer: pi-guard install failure rolls back the attempt and preserves prior state', async () => {
+test('installer: same-version pi-guard state drift is refused before repair and preserves prior state', async () => {
   const env = makeEnv();
   try {
     await gatewayArtifact(env);
@@ -436,14 +436,15 @@ test('installer: pi-guard install failure rolls back the attempt and preserves p
     const layout = resolveLayout(env);
     const packagesBefore = readdirSync(layout.packagesDir).sort();
 
-    // Now a failing attempt with a FRESH pi state: the pi-guard source is
-    // not pre-existing, so `pi install` runs and fails. Nothing may be lost.
+    // A fresh Pi state contradicts the valid receipt. Same-version reruns
+    // are no-op checks, not implicit repair attempts.
     const failingEnv = { ...runEnv, extraEnv: { ...runEnv.extraEnv, FIXTURE_PI_STATE: join(env, 'pi-state-2.txt'), FIXTURE_PI_FAIL_INSTALL: '1' } };
     const second = await runInstaller(installArgs(env), failingEnv);
     assert.equal(second.code, 2, second.stdout + second.stderr);
-    assert.ok(second.stdout.includes('rollback'), second.stdout);
-    // Prior components and receipt survive; staging is cleaned.
-    assert.deepEqual(readdirSync(layout.packagesDir).sort(), packagesBefore, 'prior component installs must survive rollback');
+    assert.ok(second.stdout.includes('no longer matches its receipt'), second.stdout);
+    assert.ok(second.stdout.includes('prior state was preserved'), second.stdout);
+    // Prior components and receipt survive; staging is untouched.
+    assert.deepEqual(readdirSync(layout.packagesDir).sort(), packagesBefore, 'prior component installs must survive refusal');
     const receipt = readReceipt(layout.installReceiptPath);
     assert.equal(receipt.ok, true, 'prior receipt must be preserved');
     if (receipt.ok) assert.equal(receipt.receipt.result, 'COMPLETE');
@@ -472,7 +473,7 @@ test('installer: fresh failure rolls back everything this attempt created', asyn
   }
 });
 
-test('installer: idempotent rerun reverifies and reports COMPLETE without churn', async () => {
+test('installer: same-version rerun verifies ownership and reports ALREADY INSTALLED without churn', async () => {
   const env = makeEnv();
   try {
     await gatewayArtifact(env);
@@ -485,9 +486,9 @@ test('installer: idempotent rerun reverifies and reports COMPLETE without churn'
     const receiptBefore = readFileSync(layout.installReceiptPath, 'utf8');
     const second = await runInstaller(installArgs(env), runEnv);
     assert.equal(second.code, 0, second.stdout + second.stderr);
-    assert.ok(second.stdout.includes('COMPLETE'), second.stdout);
+    assert.ok(second.stdout.includes('ALREADY INSTALLED'), second.stdout);
     assert.deepEqual(readdirSync(layout.packagesDir).sort(), packagesBefore, 'rerun must not recreate component dirs');
-    assert.equal(readFileSync(layout.installReceiptPath, 'utf8') !== receiptBefore, true, 'receipt is rewritten with a fresh timestamp (still valid)');
+    assert.equal(readFileSync(layout.installReceiptPath, 'utf8'), receiptBefore, 'verified no-op must not rewrite the receipt');
     const receipt = readReceipt(layout.installReceiptPath);
     assert.equal(receipt.ok, true);
   } finally {
@@ -509,6 +510,52 @@ test('installer: foreign receipt fails closed and is preserved', async () => {
     assert.equal(readFileSync(layout.installReceiptPath, 'utf8'), '{"foreign": true}', 'foreign receipt must be preserved');
   } finally {
     cleanupEnv(env);
+  }
+});
+
+test('installer: missing receipt plus existing entry remains fail-closed with actionable metadata recovery guidance', async (t) => {
+  for (const entryKind of ['owned-looking-link', 'foreign-file', 'owned-looking-package'] as const) {
+    await t.test(entryKind, async () => {
+      const env = makeEnv();
+      try {
+        const layout = resolveLayout(env);
+        if (entryKind === 'owned-looking-package') {
+          const packageDir = join(layout.packagesDir, 'pi-shuttle@0.1.0');
+          mkdirSync(packageDir, { recursive: true, mode: 0o700 });
+          writeFileSync(join(packageDir, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.0' }));
+        } else {
+          mkdirSync(layout.binDir, { recursive: true, mode: 0o700 });
+          const entry = join(layout.binDir, 'pi-shuttle');
+          if (entryKind === 'owned-looking-link') {
+            const target = join(env, 'orphan-cli.js');
+            writeFileSync(target, 'orphan');
+            symlinkSync(target, entry);
+          } else {
+            writeFileSync(entry, 'foreign command', { mode: 0o700 });
+          }
+        }
+        const entryBefore = entryKind === 'owned-looking-package'
+          ? readFileSync(join(layout.packagesDir, 'pi-shuttle@0.1.0', 'package.json'), 'utf8')
+          : entryKind === 'foreign-file'
+            ? readFileSync(join(layout.binDir, 'pi-shuttle'), 'utf8')
+            : readlinkSync(join(layout.binDir, 'pi-shuttle'));
+        const run = await runInstaller(['--batch', '--gateway', 'no', '--pi-guard', 'no'], { home: env });
+        assert.equal(run.code, 2, run.stdout + run.stderr);
+        assert.match(run.stdout, /installation metadata is missing/i);
+        assert.match(run.stdout, /automatic ownership cannot be established/i);
+        assert.match(run.stdout, /restore the matching install receipt/i);
+        assert.doesNotMatch(run.stdout, /\brm\b/, 'recovery must not recommend arbitrary deletion');
+        assert.equal(existsSync(layout.installReceiptPath), false);
+        const entryAfter = entryKind === 'owned-looking-package'
+          ? readFileSync(join(layout.packagesDir, 'pi-shuttle@0.1.0', 'package.json'), 'utf8')
+          : entryKind === 'foreign-file'
+            ? readFileSync(join(layout.binDir, 'pi-shuttle'), 'utf8')
+            : readlinkSync(join(layout.binDir, 'pi-shuttle'));
+        assert.equal(entryAfter, entryBefore, 'ambiguous/foreign state must be preserved');
+      } finally {
+        cleanupEnv(env);
+      }
+    });
   }
 });
 
@@ -774,7 +821,7 @@ test('installer: foreign EMPTY activation target is refused, never replaced (SIR
     mkdirSync(emptyTarget, { recursive: true, mode: 0o700 });
     const run = await runInstaller(['--batch', '--gateway', 'yes', '--pi-guard', 'no', '--artifact-dir', env], fullInstallEnv(env));
     assert.equal(run.code, 2, run.stdout + run.stderr);
-    assert.ok(run.stdout.includes('incompatible identity'), run.stdout);
+    assert.ok(run.stdout.includes('installation metadata is missing'), run.stdout);
     assert.equal(statSync(emptyTarget).isDirectory(), true, 'foreign empty dir must be preserved');
     assert.deepEqual(readdirSync(emptyTarget), [], 'foreign empty dir must stay empty');
   } finally {
