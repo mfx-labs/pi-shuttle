@@ -12,7 +12,7 @@
 import { realpathSync } from 'node:fs';
 import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from './selection.js';
+import { INSTALLER_USAGE, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
@@ -77,6 +77,27 @@ export function formatOutcome(outcome: InstallOutcome): string {
   }
 }
 
+export function printPostInstallNextSteps(outcome: InstallOutcome): void {
+  if (outcome.kind !== 'COMPLETE' && outcome.kind !== 'ALREADY_INSTALLED') return;
+  process.stdout.write([
+    '',
+    'Next steps:',
+    '',
+    '  Configure a project:',
+    '    pi-shuttle project add <path>',
+    '',
+    '  Check installation health:',
+    '    pi-shuttle doctor',
+    '',
+    '  List registered projects:',
+    '    pi-shuttle project list',
+    '',
+    '  Show available commands:',
+    '    pi-shuttle --help',
+    '',
+  ].join('\n'));
+}
+
 export function exitCodeFor(outcome: InstallOutcome): number {
   switch (outcome.kind) {
     case 'COMPLETE':
@@ -133,7 +154,6 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
   let selections = parsed.options.selections;
   let installDir = parsed.options.installDir;
   let binDir = parsed.options.binDir;
-  let configureProject = false;
   const interactiveMode = selections === undefined;
   if (selections === undefined) {
     if (latest !== null && process.stdin.isTTY !== true) {
@@ -147,7 +167,6 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
     selections = interactive.selections;
     installDir = interactive.installDir;
     binDir = interactive.binDir;
-    configureProject = interactive.configureProject;
   }
 
   let latestArtifactDir: string | undefined;
@@ -168,10 +187,6 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
     latestArtifactDir = acquired.artifactDir;
     latestGatewaySha256 = acquired.gatewaySha256;
     latestPiGuardSha256 = acquired.piGuardSha256;
-  }
-
-  if (configureProject) {
-    process.stdout.write(`${PROJECT_ONBOARDING_DEFERRED}\n`);
   }
 
   const outcome = await (dependencies.installRunner ?? runInstall)(env.environment, {
@@ -197,6 +212,7 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
   if (outcome.kind === 'PARTIAL' || outcome.kind === 'COMPLETE') {
     process.stdout.write(`platform lane: ${hostLane(env.environment.platform, env.environment.arch)}\n`);
   }
+  printPostInstallNextSteps(outcome);
   if (outcome.kind === 'FAILED' || outcome.kind === 'UNSUPPORTED' || outcome.kind === 'REFUSED') {
     process.stdout.write('no final installation receipt was written; unrelated operator state was preserved\n');
   }

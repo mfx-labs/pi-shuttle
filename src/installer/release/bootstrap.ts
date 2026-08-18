@@ -30,8 +30,8 @@ import { hostEnvironmentFromProcess, hostLane, resolveLayout } from '../../host/
 import { hashFile } from '../artifact.js';
 import { runInstall } from '../install.js';
 import type { InstallOptions, InstallOutcome } from '../install.js';
-import { INSTALLER_EXIT, exitCodeFor, formatOutcome } from '../main.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from '../selection.js';
+import { INSTALLER_EXIT, exitCodeFor, formatOutcome, printPostInstallNextSteps } from '../main.js';
+import { INSTALLER_USAGE, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from '../selection.js';
 import type { InteractiveResult } from '../selection.js';
 import { readReceipt } from '../receipt.js';
 import { acquireVerifiedFile, releaseBaseUrlFor } from './acquire.js';
@@ -139,7 +139,6 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
   let selections = parsed.options.selections;
   let installDir = parsed.options.installDir;
   let binDir = parsed.options.binDir;
-  let configureProject = false;
   const interactiveMode = selections === undefined;
   if (selections === undefined) {
     // F-01: never interpret EOF on stdin as affirmative interactive
@@ -159,7 +158,6 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
     selections = interactive.selections;
     installDir = interactive.installDir;
     binDir = interactive.binDir;
-    configureProject = interactive.configureProject;
   }
 
   if (!existsSync(handoff.envelopePath)) {
@@ -226,10 +224,6 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
       }
     }
 
-    if (configureProject) {
-      process.stdout.write(`${PROJECT_ONBOARDING_DEFERRED}\n`);
-    }
-
     const runner = options.installRunner ?? ((envArg, installOptions) => runInstall(envArg, installOptions));
     const outcome = await runner(env, {
       selections,
@@ -291,6 +285,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   if (result.outcome.kind === 'PARTIAL' || result.outcome.kind === 'COMPLETE') {
     process.stdout.write(`platform lane: ${hostLane(env.environment.platform, env.environment.arch)}\n`);
   }
+  printPostInstallNextSteps(result.outcome);
   if (result.outcome.kind === 'FAILED' || result.outcome.kind === 'UNSUPPORTED' || result.outcome.kind === 'REFUSED') {
     process.stdout.write('no final installation receipt was written; unrelated operator state was preserved\n');
   }

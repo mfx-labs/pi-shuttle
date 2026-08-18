@@ -221,7 +221,7 @@ export async function approveBatchIncompleteCleanup(): Promise<boolean> {
 }
 
 /**
- * The interactive prompt session (installation-contract §2, prompts 1–5)
+ * The interactive prompt session (installation-contract §2, prompts 1–4)
  * backed by stdin/stdout readline. Shared by the local installer entry
  * (main.ts) and the release installer entry (release/bootstrap.ts).
  */
@@ -247,21 +247,18 @@ export interface InteractiveResult {
   readonly selections: InstallerSelections;
   readonly installDir?: string;
   readonly binDir?: string;
-  readonly configureProject: boolean;
 }
 
-/** The five approved interactive prompts (installation-contract §2). */
+/** The four installer prompts (installation-contract §2). */
 export async function promptSelections(ui: PromptUI, defaults: { readonly installDir: string; readonly binDir: string }): Promise<InteractiveResult> {
   const gateway = await askYesNo(ui, 'Install Project Gateway MCP?', true);
   const piGuard = await askYesNo(ui, 'Install Pi integration / pi-guard?', true);
   const installDir = await askPath(ui, `Installation directory [${defaults.installDir}]: `, defaults.installDir, 'Installation directory');
   const binDir = await askPath(ui, `Command/bin directory [${defaults.binDir}]: `, defaults.binDir, 'Command/bin directory');
-  const configureProject = await askYesNo(ui, 'Configure a project now?', false);
   return {
     selections: { gateway, piGuard },
     ...(installDir.trim().length > 0 ? { installDir: installDir.trim() } : {}),
     ...(binDir.trim().length > 0 ? { binDir: binDir.trim() } : {}),
-    configureProject,
   };
 }
 
@@ -291,9 +288,3 @@ async function askYesNo(ui: PromptUI, question: string, defaultValue: boolean): 
     process.stderr.write(`pi-shuttle-installer: please answer yes or no\n`);
   }
 }
-
-/** Truthful deferred guidance for prompt 5 (project onboarding is PS-4-owned). */
-export const PROJECT_ONBOARDING_DEFERRED = [
-  'Project configuration is owned by the PS-4 work package and is not part of this installer.',
-  'Once available, configure a project with: pi-shuttle project add <path>',
-].join('\n');

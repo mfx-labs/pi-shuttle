@@ -19,8 +19,10 @@ downloaded through it (manifest + pinned artifacts), never inline.
 2. Install Pi integration / pi-guard? (default yes)
 3. Installation directory (default `~/.local/share/pi-shuttle`)
 4. Command/bin directory if necessary (default `~/.local/bin`)
-5. Configure a project immediately? (default no → prints
-   `pi-shuttle project add <path>` hint)
+
+After a usable installation, the installer prints next steps for
+`pi-shuttle project add <path>`, `pi-shuttle doctor`,
+`pi-shuttle project list`, and `pi-shuttle --help`.
 
 Any "no" answer for 1 or 2 produces a **PARTIAL INSTALLATION** report: a
 clear banner at install end, a record in the install receipt, and a
@@ -228,9 +230,8 @@ recognized INCOMPLETE residue. The invocation removes its lock on exit.
 ```
 
 All paths derive from `$HOME` at runtime; nothing is hardcoded. The
-installer does not write `~/.config/pi-shuttle/runtime.json` (that is the
-CLI's operator-owned state; the installer only invokes `pi-shuttle project
-add` when the user chooses "configure a project immediately").
+installer does not write `~/.config/pi-shuttle/runtime.json`; project
+registration remains the separate `pi-shuttle project add <path>` operation.
 
 ## 9. Explicitly NOT in the installer
 

@@ -18,6 +18,15 @@ import { resolveLayout } from '../../src/host/environment.js';
 import { GATEWAY_PS1_BASELINE_COMMIT } from '../../src/compat/manifest.js';
 
 const SHA_RE = /^[0-9a-f]{64}$/;
+const NEXT_STEPS = ['Next steps:', 'pi-shuttle project add <path>', 'pi-shuttle doctor', 'pi-shuttle project list', 'pi-shuttle --help'];
+
+function assertSuccessNextSteps(output: string): void {
+  for (const step of NEXT_STEPS) assert.ok(output.includes(step), `missing next step: ${step}\n${output}`);
+}
+
+function assertNoSuccessNextSteps(output: string): void {
+  assert.equal(output.includes('Next steps:'), false, output);
+}
 
 async function gatewayArtifact(env: string, overrides: Record<string, string> = {}): Promise<string> {
   return buildTarball(env, gatewayFixtureFiles(overrides), GATEWAY_ARTIFACT_NAME);
@@ -59,6 +68,7 @@ test('installer: COMPLETE install of both components (batch)', async () => {
     const run = await runInstaller(installArgs(env), runEnv);
     assert.equal(run.code, 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes('result: COMPLETE'), run.stdout);
+    assertSuccessNextSteps(run.stdout);
 
     const layout = resolveLayout(env);
     const receipt = readReceipt(layout.installReceiptPath);
@@ -206,11 +216,13 @@ test('installer: interactive invalid directory input reprompts; Enter selects th
     // (interactive mode has no artifact prompt).
     const run = await runInstallerInteractive(
       ['--artifact-dir', env],
-      ['yes', 'yes', 'y', '', 'rel', '', 'no'],
+      ['yes', 'yes', 'y', '', 'rel', ''],
       runEnv,
     );
     assert.equal(run.code, 0, run.stdout + run.stderr);
     assert.ok(run.stdout.includes('result: COMPLETE'), run.stdout);
+    assertSuccessNextSteps(run.stdout);
+    assert.doesNotMatch(run.stdout, /Configure a project now\?/);
     assert.equal(run.stdout.split('Installation directory [').length - 1, 2, 'invalid installation directory must reprompt');
     assert.equal(run.stdout.split('Command/bin directory [').length - 1, 2, 'invalid bin directory must reprompt');
     assert.ok(run.stderr.includes('Installation directory must be an absolute path'), run.stderr);
@@ -468,6 +480,7 @@ test('installer: fresh failure rolls back everything this attempt created', asyn
     assert.deepEqual(readdirSync(layout.packagesDir), [], 'attempt-created component dirs must be removed on rollback');
     assert.equal(existsSync(layout.installReceiptPath), false, 'no receipt for a failed fresh install');
     assert.equal(existsSync(join(layout.binDir, 'pi-shuttle')), false, 'bin link must not remain from a rolled-back attempt');
+    assertNoSuccessNextSteps(run.stdout);
   } finally {
     cleanupEnv(env);
   }
@@ -487,6 +500,7 @@ test('installer: same-version rerun verifies ownership and reports ALREADY INSTA
     const second = await runInstaller(installArgs(env), runEnv);
     assert.equal(second.code, 0, second.stdout + second.stderr);
     assert.ok(second.stdout.includes('ALREADY INSTALLED'), second.stdout);
+    assertSuccessNextSteps(second.stdout);
     assert.deepEqual(readdirSync(layout.packagesDir).sort(), packagesBefore, 'rerun must not recreate component dirs');
     assert.equal(readFileSync(layout.installReceiptPath, 'utf8'), receiptBefore, 'verified no-op must not rewrite the receipt');
     const receipt = readReceipt(layout.installReceiptPath);
@@ -507,7 +521,23 @@ test('installer: foreign receipt fails closed and is preserved', async () => {
     const run = await runInstaller(installArgs(env), runEnv);
     assert.equal(run.code, 2);
     assert.ok(run.stdout.includes('REFUSED'), run.stdout);
+    assertNoSuccessNextSteps(run.stdout);
     assert.equal(readFileSync(layout.installReceiptPath, 'utf8'), '{"foreign": true}', 'foreign receipt must be preserved');
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('installer: BUSY does not print success next steps', async () => {
+  const env = makeEnv();
+  try {
+    const layout = resolveLayout(env);
+    mkdirSync(layout.stateDir, { recursive: true, mode: 0o700 });
+    writeFileSync(join(layout.stateDir, 'install.lock'), `${process.pid}\n`, { mode: 0o600 });
+    const run = await runInstaller(['--batch', '--gateway', 'no', '--pi-guard', 'no'], fullInstallEnv(env));
+    assert.equal(run.code, 2, run.stdout + run.stderr);
+    assert.match(run.stdout, /BUSY/);
+    assertNoSuccessNextSteps(run.stdout);
   } finally {
     cleanupEnv(env);
   }
@@ -573,7 +603,7 @@ test('installer: both descriptor-bound Darwin targets enter the technical path a
   }
 });
 
-test('installer: interactive prompts route project configuration to deferred guidance', async () => {
+test('installer: interactive installer omits project configuration and prints next steps', async () => {
   const env = makeEnv();
   try {
     await gatewayArtifact(env);
@@ -591,14 +621,15 @@ test('installer: interactive prompts route project configuration to deferred gui
       proc.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
       proc.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
       proc.on('error', reject);
-      // answers: gateway yes, pi-guard yes, install-dir default, bin-dir default, configure project YES
-      proc.stdin.write('y\ny\n\n\ny\n');
+      // answers: gateway yes, pi-guard yes, install-dir default, bin-dir default
+      proc.stdin.write('y\ny\n\n\n');
       proc.stdin.end();
       proc.on('close', (code) => resolve({ code, stdout, stderr }));
     });
     assert.equal(child.code, 0, child.stdout + child.stderr);
     assert.ok(child.stdout.includes('COMPLETE'), child.stdout);
-    assert.ok(child.stdout.includes('pi-shuttle project add <path>'), 'prompt 5 must route to truthful deferred guidance');
+    assertSuccessNextSteps(child.stdout);
+    assert.doesNotMatch(child.stdout, /Configure a project now\?/);
   } finally {
     cleanupEnv(env);
   }
@@ -617,7 +648,7 @@ test('installer: interactive both-decline yields PARTIAL', async () => {
       let stdout = '';
       proc.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
       proc.on('error', reject);
-      proc.stdin.write('n\nn\n\n\n\n');
+      proc.stdin.write('n\nn\n\n\n');
       proc.stdin.end();
       proc.on('close', (code) => resolve({ code, stdout }));
     });

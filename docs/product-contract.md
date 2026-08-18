@@ -48,7 +48,9 @@ until the omitted component is installed.
    The public URL is **not finalized in this gate** (human authorization gate).
 2. Installer interactively asks at minimum: (1) install Gateway?; (2) install
    Pi integration / pi-guard?; (3) installation directory; (4) command/bin
-   directory if necessary; (5) configure a project immediately?
+   directory if necessary. A usable install prints next-step command guidance;
+   project registration remains the separate `pi-shuttle project add <path>`
+   operation.
 3. Installer pins compatible component versions; never silently installs
    arbitrary latest versions.
 4. CLI is `pi-shuttle` with exactly `doctor`, `project add <path>`,

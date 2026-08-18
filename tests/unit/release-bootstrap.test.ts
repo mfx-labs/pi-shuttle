@@ -296,7 +296,7 @@ test('bootstrap: both components selected acquires both with both digest expecta
 test('bootstrap: interactive prompts resolve selections before acquisition', async () => {
   const h = makeHarness();
   try {
-    const promptUI = async () => ({ selections: { gateway: true, piGuard: false }, installDir: join(h.home, 'share'), binDir: join(h.home, 'bin'), configureProject: false });
+    const promptUI = async () => ({ selections: { gateway: true, piGuard: false }, installDir: join(h.home, 'share'), binDir: join(h.home, 'bin') });
     const result = await runReleaseBootstrap(envFor(h.home), { envelopePath: h.envelopePath, piShuttleTgzPath: h.tgzPath }, [], { fetcher: h.fetcher, uid: 12345, installRunner: h.runner, promptUI });
     assert.equal(result.kind, 'outcome');
     const options = h.recordedOptions[0]!;
@@ -336,7 +336,7 @@ test('bootstrap: interactive path defaults preserve a valid receipt\'s custom in
       installRunner: h.runner,
       promptUI: async (defaults) => {
         observedDefaults = defaults;
-        return { selections: { gateway: false, piGuard: false }, installDir: defaults.installDir, binDir: defaults.binDir, configureProject: false };
+        return { selections: { gateway: false, piGuard: false }, installDir: defaults.installDir, binDir: defaults.binDir };
       },
     });
     assert.equal(result.kind, 'outcome');
@@ -366,7 +366,7 @@ test('bootstrap: relative HOME is refused before prompt, acquisition, install, o
         installRunner: h.runner,
         promptUI: async () => {
           promptCalls += 1;
-          return { selections: { gateway: true, piGuard: false }, installDir: join(h.home, 'share'), binDir: join(h.home, 'bin'), configureProject: false };
+          return { selections: { gateway: true, piGuard: false }, installDir: join(h.home, 'share'), binDir: join(h.home, 'bin') };
         },
       },
     );
@@ -511,7 +511,7 @@ test('bootstrap: an injected prompt session still resolves selections (interacti
       uid: 12345,
       installRunner: h.runner,
       stdinIsTTY: false,
-      promptUI: async () => ({ selections: { gateway: false, piGuard: false }, configureProject: false }),
+      promptUI: async () => ({ selections: { gateway: false, piGuard: false } }),
     });
     assert.equal(result.kind, 'outcome');
     assert.equal(h.runnerCalls, 1);

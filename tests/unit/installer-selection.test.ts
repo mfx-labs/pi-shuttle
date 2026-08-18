@@ -84,12 +84,12 @@ test('selection: interactive invalid directory input reprompts and never advance
   // 'y' for Installation directory → rejected, reprompted; '/abs/share'
   // accepted. 'rel' for Command/bin directory → rejected, reprompted;
   // empty → existing absolute default.
-  const ui = uiWith(['yes', 'yes', 'y', '/abs/share', 'rel', '', 'no']);
+  const ui = uiWith(['yes', 'yes', 'y', '/abs/share', 'rel', '']);
   const result = await promptSelections(ui, { installDir: '/default/share', binDir: '/default/bin' });
   assert.deepEqual(result.selections, { gateway: true, piGuard: true });
   assert.equal(result.installDir, '/abs/share', 'invalid y must never become the installation directory');
   assert.equal(result.binDir, '/default/bin', 'invalid rel must never become the bin directory');
-  assert.equal(result.configureProject, false);
+  assert.equal(ui.asked.some((q) => q.includes('Configure a project now?')), false);
   const installAsks = ui.asked.filter((q) => q.startsWith('Installation directory'));
   const binAsks = ui.asked.filter((q) => q.startsWith('Command/bin directory'));
   assert.equal(installAsks.length, 2, 'invalid installation directory must reprompt');
@@ -97,15 +97,15 @@ test('selection: interactive invalid directory input reprompts and never advance
 });
 
 test('selection: interactive empty input selects the existing absolute defaults', async () => {
-  const ui = uiWith(['', '', '', '', '']);
+  const ui = uiWith(['', '', '', '']);
   const result = await promptSelections(ui, { installDir: '/default/share', binDir: '/default/bin' });
   assert.equal(result.installDir, '/default/share');
   assert.equal(result.binDir, '/default/bin');
-  assert.equal(result.configureProject, false);
+  assert.equal(ui.asked.some((q) => q.includes('Configure a project now?')), false);
 });
 
 test('selection: interactive ~-prefixed and ./ input is rejected like any relative path', async () => {
-  const ui = uiWith(['yes', 'yes', '~/home/share', './share', '/abs/share', '~/home/bin', '', 'no']);
+  const ui = uiWith(['yes', 'yes', '~/home/share', './share', '/abs/share', '~/home/bin', '']);
   const result = await promptSelections(ui, { installDir: '/default/share', binDir: '/default/bin' });
   assert.equal(result.installDir, '/abs/share');
   assert.equal(result.binDir, '/default/bin');

@@ -90,7 +90,7 @@ if (!process.stdin.isTTY) {
   process.stderr.write('pi-shuttle-installer: interactive Latest installation requires a controlling terminal\\n');
   process.exit(2);
 }
-const prompts = ['Gateway? ', 'pi-guard? ', 'Install dir? ', 'Bin dir? ', 'Configure project? ', 'Upgrade? '];
+const prompts = ['Gateway? ', 'pi-guard? ', 'Install dir? ', 'Bin dir? ', 'Upgrade? '];
 const answers = [];
 const rl = require('node:readline').createInterface({ input: process.stdin, terminal: false });
 process.stdout.write(prompts[0]);
@@ -104,7 +104,7 @@ rl.on('line', (line) => {
     mode: 'interactive', answers,
     selections: { gateway: answers[0] === 'yes', piGuard: answers[1] === 'yes' },
     installDir: answers[2], binDir: answers[3],
-    configureProject: answers[4] === 'yes', upgradeConsent: answers[5] === 'yes',
+    upgradeConsent: answers[4] === 'yes',
   }) + '\\n');
   if (process.env.FAKE_MUTATION_LOG) fs.writeFileSync(process.env.FAKE_MUTATION_LOG, 'interactive completed\\n');
   recordExecution();
@@ -320,7 +320,7 @@ test('latest public pipe binds interactive answers and upgrade consent only to t
     const mutationLog = join(dir, 'mutation.log');
     const fixture = latestFixture(dir, { FAKE_STDIN_LOG: stdinLog, FAKE_MUTATION_LOG: mutationLog });
     const command = `cat "${fixture.entry}" | bash -s --`;
-    const answers = ['no', 'yes', join(dir, 'install'), join(dir, 'bin'), 'no', 'yes'];
+    const answers = ['no', 'yes', join(dir, 'install'), join(dir, 'bin'), 'yes'];
     const child = spawn('script', ['-q', '/dev/null', 'bash', '-c', command], {
       cwd: dir,
       env: fixture.env,
@@ -344,6 +344,7 @@ test('latest public pipe binds interactive answers and upgrade consent only to t
     assert.deepEqual(observed.answers, answers);
     assert.deepEqual(observed.selections, { gateway: false, piGuard: true });
     assert.equal(observed.upgradeConsent, true);
+    assert.equal(Object.hasOwn(observed, 'configureProject'), false);
     assert.equal((observed.answers as string[]).some((answer) => /status=\$\?|set -e|exit "\$status"/.test(answer)), false);
     assert.equal(readFileSync(mutationLog, 'utf8'), 'interactive completed\n');
   } finally {
@@ -564,10 +565,11 @@ test('latest interactive selections acquire only the selected artifacts', async 
     await t.test(label, async () => {
       const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-interactive-'));
       try {
-        const answers = [gateway ? 'yes' : 'no', piGuard ? 'yes' : 'no', dir, join(dir, 'bin'), 'no'];
+        const answers = [gateway ? 'yes' : 'no', piGuard ? 'yes' : 'no', dir, join(dir, 'bin')];
         let answer = 0;
         const events: string[] = [];
         const interactive = await promptSelections({ ask: async () => { events.push(`prompt-${answer}`); return answers[answer++]!; } }, { installDir: dir, binDir: join(dir, 'bin') });
+        assert.equal(answer, 4, 'Latest interactive selection has four prompts');
         events.push('selection-complete');
         const calls: string[] = [];
         const fetcher = async (url: string) => {
@@ -591,10 +593,11 @@ test('latest interactive selections acquire only the selected artifacts', async 
 test('latest interactive yes/yes acquires both planned artifacts after the prompt', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-interactive-'));
   try {
-    const answers = ['yes', 'yes', dir, join(dir, 'bin'), 'no'];
+    const answers = ['yes', 'yes', dir, join(dir, 'bin')];
     let answer = 0;
     const events: string[] = [];
     const interactive = await promptSelections({ ask: async () => { events.push(`prompt-${answer}`); return answers[answer++]!; } }, { installDir: dir, binDir: join(dir, 'bin') });
+    assert.equal(answer, 4, 'Latest interactive selection has four prompts');
     events.push('selection-complete');
     const plan = latestArtifactPlan(LINUX_HOST_LANE);
     assert.equal(plan.ok, true);
