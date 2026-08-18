@@ -174,7 +174,7 @@ function upgradeNotice(installedVersion: string, installerVersion: string): stri
 /** Ask for explicit interactive consent after the core proves ownership. */
 export async function promptUpgrade(installedVersion: string, installerVersion: string): Promise<boolean> {
   process.stdout.write(upgradeNotice(installedVersion, installerVersion));
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, terminal: false });
   const lines = rl[Symbol.asyncIterator]();
   try {
     return await askYesNo({
@@ -196,13 +196,37 @@ export async function approveBatchUpgrade(installedVersion: string, installerVer
   return true;
 }
 
+/** Ask before removing narrow blockers and performing a fresh install. */
+export async function promptIncompleteCleanup(): Promise<boolean> {
+  const rl = createInterface({ input: process.stdin, terminal: false });
+  const lines = rl[Symbol.asyncIterator]();
+  try {
+    return await askYesNo({
+      ask: async (question, defaultValue) => {
+        process.stdout.write(question);
+        const next = await lines.next();
+        const answer = next.done ? '' : next.value.trim();
+        return answer.length > 0 ? answer : (defaultValue ?? '');
+      },
+    }, 'Clean recognized incomplete installer state and reinstall?', false);
+  } finally {
+    rl.close();
+  }
+}
+
+/** Complete batch arguments are explicit non-interactive reinstall consent. */
+export async function approveBatchIncompleteCleanup(): Promise<boolean> {
+  process.stdout.write('Incomplete cleanup/reinstall accepted by explicit batch invocation.\n');
+  return true;
+}
+
 /**
  * The interactive prompt session (installation-contract §2, prompts 1–5)
  * backed by stdin/stdout readline. Shared by the local installer entry
  * (main.ts) and the release installer entry (release/bootstrap.ts).
  */
 export async function promptInteractive(defaults: { readonly installDir: string; readonly binDir: string }): Promise<InteractiveResult> {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const rl = createInterface({ input: process.stdin, terminal: false });
   const lines = rl[Symbol.asyncIterator]();
   const ui: PromptUI = {
     ask: async (question: string, defaultValue?: string) => {

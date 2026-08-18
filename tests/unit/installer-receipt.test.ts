@@ -5,10 +5,10 @@
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, chmodSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { newReceipt, readReceipt, serializeReceipt, validateReceipt, writeReceipt } from '../../src/installer/receipt.js';
+import { inspectInstallerReceipt, newReceipt, readReceipt, serializeReceipt, validateReceipt, writeReceipt } from '../../src/installer/receipt.js';
 import type { InstallReceipt } from '../../src/installer/receipt.js';
 
 const SHA = 'a'.repeat(64);
@@ -95,7 +95,7 @@ test('receipt: never serializes authority/secrets vocabulary', () => {
   assert.ok(text.includes('"receiptVersion"'), 'structural version field is the closed versioning mechanism');
 });
 
-test('receipt: atomic 0600 write through the single transactional writer', () => {
+test('receipt: atomic 0600 write has no nested receipt lock', () => {
   const env = makeEnv();
   try {
     const path = join(env, 'deep', 'state', 'install.json');
@@ -103,6 +103,7 @@ test('receipt: atomic 0600 write through the single transactional writer', () =>
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(statSync(path).mode & 0o777, 0o600);
+    assert.equal(existsSync(`${path}.lock`), false, 'receipt publication must not create install.json.lock');
     const read = readReceipt(path);
     assert.equal(read.ok, true);
     if (read.ok) assert.equal(read.receipt.result, 'COMPLETE');
@@ -152,33 +153,44 @@ test('receipt: absent receipt reads as absent; PARTIAL receipts round-trip', () 
   }
 });
 
-test('receipt: recovered state keeps unknown original facts separate from recovery provenance', () => {
-  const recovered = newReceipt({
-    platformLane: 'linux-x86_64-posix-utf8-node22',
-    result: 'COMPLETE',
-    installDir: '/home/op/.local/share/pi-shuttle',
-    binDir: '/home/op/.local/bin',
-    gateway: null,
-    piGuard: null,
-    omitted: [],
-    notes: ['recovered'],
-    recovery: {
+test('receipt: known legacy recovery shapes are INCOMPLETE evidence, never FINAL authority', () => {
+  const env = makeEnv();
+  try {
+    const path = join(env, 'install.json');
+    const direct = JSON.parse(serializeReceipt(sampleReceipt())) as Record<string, unknown>;
+    delete direct.installedAt;
+    direct.recovery = {
       recoveredAt: '2026-08-17T00:00:00.000Z',
       recoveredBy: `mfx-labs/pi-shuttle@${'b'.repeat(40)}`,
       originalInstalledAt: null,
       originalChannel: 'unknown',
-    },
-  });
-  assert.equal(recovered.installedAt, undefined);
-  assert.equal(recovered.channel, undefined);
-  const serialized = serializeReceipt(recovered);
-  assert.equal(validateReceipt(JSON.parse(serialized)).ok, true);
-  assert.match(serialized, /"recoveredAt"/);
-  assert.doesNotMatch(serialized, /"installedAt"/);
+    };
+    writeFileSync(path, `${JSON.stringify(direct)}\n`, { mode: 0o600 });
+    assert.equal(inspectInstallerReceipt(path).kind, 'INCOMPLETE');
+    assert.equal(readReceipt(path).ok, false, 'operational readers must not accept recovered state');
 
-  const ordinaryWithoutTime = JSON.parse(serializeReceipt(sampleReceipt())) as Record<string, unknown>;
-  delete ordinaryWithoutTime.installedAt;
-  assert.equal(validateReceipt(ordinaryWithoutTime).ok, false);
-  const fabricated = { ...JSON.parse(serialized), installedAt: '2026-08-17T00:00:00.000Z' };
-  assert.equal(validateReceipt(fabricated).ok, false);
+    const projection = {
+      receiptVersion: 1,
+      piShuttleVersion: '0.1.0',
+      installedAt: 'unknown',
+      platformLane: 'linux-x86_64-posix-utf8-node22',
+      result: 'PARTIAL',
+      installDir: '/home/op/.local/share/pi-shuttle',
+      binDir: '/home/op/.local/bin',
+      components: { gateway: null, piGuard: null },
+      omitted: [],
+      notes: [`pi-shuttle:recovery:v2:${JSON.stringify({
+        recovery: { recoveredAt: '2026-08-17T00:00:00.000Z', originalInstalledAt: null, originalChannel: 'unknown' },
+        observations: { piShuttle: null, gateway: null, piGuard: null },
+      })}`],
+    };
+    writeFileSync(path, `${JSON.stringify(projection)}\n`, { mode: 0o600 });
+    assert.equal(inspectInstallerReceipt(path).kind, 'INCOMPLETE');
+
+    projection.notes = ['pi-shuttle:recovery:v2:{'];
+    writeFileSync(path, `${JSON.stringify(projection)}\n`, { mode: 0o600 });
+    assert.equal(inspectInstallerReceipt(path).kind, 'REFUSE', 'malformed recovery markers remain ambiguous');
+  } finally {
+    rmSync(env, { recursive: true, force: true });
+  }
 });

@@ -62,7 +62,7 @@ export function componentDirName(name: string, version: string): string {
 /** Stable keeps its historical slot; Latest binds storage to the exact source SHA. */
 export function piShuttlePackageDirName(version: string, sourceIdentity?: string): string {
   if (sourceIdentity === undefined) return componentDirName(PI_SHUTTLE_PACKAGE_NAME, version);
-  const match = /^mfx-labs\/pi-shuttle@([0-9a-f]{40})$/.exec(sourceIdentity);
+  const match = sourceIdentity.match(/^mfx-labs\/pi-shuttle@([0-9a-f]{40})$/);
   if (match === null) throw new Error('invalid latest source identity');
   return componentDirName(PI_SHUTTLE_PACKAGE_NAME, `${version}+latest.${match[1]}`);
 }

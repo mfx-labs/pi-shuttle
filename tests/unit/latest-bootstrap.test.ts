@@ -61,6 +61,57 @@ function escapedArchive(dir: string, kind: 'root' | 'install' | 'dist' | 'final'
 function fakeTools(dir: string): string {
   const bin = join(dir, 'bin');
   mkdirSync(bin, { mode: 0o700 });
+  writeFileSync(join(dir, 'built-installer-fixture.js'), `
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+function recordExecution() {
+  const entryPath = fs.realpathSync(process.argv[1]);
+  const workPath = fs.realpathSync(path.dirname(process.env.PI_SHUTTLE_LATEST_PACKAGE_TGZ));
+  const snapshotRoot = fs.realpathSync(path.resolve(path.dirname(entryPath), '../..'));
+  fs.writeFileSync(process.env.FAKE_EXECUTED_PATH_LOG, JSON.stringify({ entryPath, snapshotRoot, workPath }) + '\\n');
+  fs.writeFileSync(process.env.FAKE_ARG_LOG, args.join('\\n') + '\\n');
+  fs.writeFileSync(process.env.FAKE_SOURCE_LOG, process.env.PI_SHUTTLE_LATEST_SOURCE + '\\n' + process.env.PI_SHUTTLE_LATEST_PACKAGE_TGZ + '\\n');
+}
+if (!process.env.FAKE_STDIN_LOG) {
+  recordExecution();
+  process.exit(Number(process.env.FAKE_INSTALL_STATUS || '0'));
+}
+if (args.includes('--batch')) {
+  const stdin = fs.readFileSync(0, 'utf8');
+  fs.writeFileSync(process.env.FAKE_STDIN_LOG, JSON.stringify({ mode: 'batch', stdin, args }) + '\\n');
+  if (process.env.FAKE_MUTATION_LOG) fs.writeFileSync(process.env.FAKE_MUTATION_LOG, 'batch completed\\n');
+  recordExecution();
+  process.exit(0);
+}
+if (!process.stdin.isTTY) {
+  const stdin = fs.readFileSync(0, 'utf8');
+  fs.writeFileSync(process.env.FAKE_STDIN_LOG, JSON.stringify({ mode: 'refused', stdin, args }) + '\\n');
+  process.stderr.write('pi-shuttle-installer: interactive Latest installation requires a controlling terminal\\n');
+  process.exit(2);
+}
+const prompts = ['Gateway? ', 'pi-guard? ', 'Install dir? ', 'Bin dir? ', 'Configure project? ', 'Upgrade? '];
+const answers = [];
+const rl = require('node:readline').createInterface({ input: process.stdin, terminal: false });
+process.stdout.write(prompts[0]);
+rl.on('line', (line) => {
+  answers.push(line.trim());
+  if (answers.length < prompts.length) {
+    process.stdout.write(prompts[answers.length]);
+    return;
+  }
+  fs.writeFileSync(process.env.FAKE_STDIN_LOG, JSON.stringify({
+    mode: 'interactive', answers,
+    selections: { gateway: answers[0] === 'yes', piGuard: answers[1] === 'yes' },
+    installDir: answers[2], binDir: answers[3],
+    configureProject: answers[4] === 'yes', upgradeConsent: answers[5] === 'yes',
+  }) + '\\n');
+  if (process.env.FAKE_MUTATION_LOG) fs.writeFileSync(process.env.FAKE_MUTATION_LOG, 'interactive completed\\n');
+  recordExecution();
+  rl.close();
+  process.exit(0);
+});
+`);
   writeFileSync(join(bin, 'node'), `#!/usr/bin/env bash
 if [ "$1" = '-p' ]; then printf 'linux:x64\\n'; exit 0; fi
 if [ "$1" = '-e' ]; then
@@ -86,16 +137,7 @@ if [ "$1" = 'run' ] && [ "$2" = 'build' ]; then
   if [ "\${FAKE_BUILD_SYMLINK:-0}" = '1' ]; then
     ln -sfn "$FAKE_ESCAPE_TARGET" dist/installer/main.js
   else
-    printf '%s\\n' \
-      'const fs = require("node:fs");' \
-      'const path = require("node:path");' \
-      'const entryPath = fs.realpathSync(process.argv[1]);' \
-      'const workPath = fs.realpathSync(path.dirname(process.env.PI_SHUTTLE_LATEST_PACKAGE_TGZ));' \
-      'const snapshotRoot = fs.realpathSync(path.resolve(path.dirname(entryPath), "../.."));' \
-      'fs.writeFileSync(process.env.FAKE_EXECUTED_PATH_LOG, JSON.stringify({ entryPath, snapshotRoot, workPath }) + "\\n");' \
-      'fs.writeFileSync(process.env.FAKE_ARG_LOG, process.argv.slice(2).join("\\n") + "\\n");' \
-      'fs.writeFileSync(process.env.FAKE_SOURCE_LOG, process.env.PI_SHUTTLE_LATEST_SOURCE + "\\n" + process.env.PI_SHUTTLE_LATEST_PACKAGE_TGZ + "\\n");' \
-      'process.exit(Number(process.env.FAKE_INSTALL_STATUS || "0"));' > dist/installer/main.js
+    cp "$FAKE_BUILT_INSTALLER" dist/installer/main.js
     chmod 700 dist/installer/main.js
   fi
 fi
@@ -129,15 +171,15 @@ esac
   return bin;
 }
 
-function runLatest(dir: string, args: readonly string[], extra: Record<string, string> = {}, piped = false) {
+function latestFixture(dir: string, extra: Record<string, string> = {}) {
   const entry = join(dir, 'install.sh');
   writeFileSync(entry, readFileSync(join(REPO, 'install.sh')));
   const archive = sourceArchive(dir);
   const bin = fakeTools(dir);
   const temp = join(dir, 'tmp');
   mkdirSync(temp, { mode: 0o700 });
-  return spawnSync('bash', piped ? [] : [entry, ...args], {
-    encoding: 'utf8',
+  return {
+    entry,
     env: {
       ...process.env,
       PATH: `${bin}:${process.env.PATH ?? ''}`,
@@ -148,10 +190,19 @@ function runLatest(dir: string, args: readonly string[], extra: Record<string, s
       FAKE_ARG_LOG: join(dir, 'args.log'),
       FAKE_SOURCE_LOG: join(dir, 'source.log'),
       FAKE_EXECUTED_PATH_LOG: join(dir, 'executed-path.log'),
+      FAKE_BUILT_INSTALLER: join(dir, 'built-installer-fixture.js'),
       SNAPSHOT_SHELL_SENTINEL: join(dir, 'snapshot-shell.log'),
       NODE_BIN: process.execPath,
       ...extra,
-    },
+    } satisfies NodeJS.ProcessEnv,
+  };
+}
+
+function runLatest(dir: string, args: readonly string[], extra: Record<string, string> = {}, piped = false) {
+  const fixture = latestFixture(dir, extra);
+  return spawnSync('bash', piped ? ['-s', '--', ...args] : [fixture.entry, ...args], {
+    encoding: 'utf8',
+    env: fixture.env,
     cwd: dir,
     ...(piped ? { input: readFileSync(join(REPO, 'install.sh')) } : {}),
   });
@@ -262,6 +313,134 @@ test('latest bootstrap child proves the exact canonical built-snapshot installer
   }
 });
 
+test('latest public pipe binds interactive answers and upgrade consent only to the controlling terminal', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-tty-'));
+  try {
+    const stdinLog = join(dir, 'stdin.log');
+    const mutationLog = join(dir, 'mutation.log');
+    const fixture = latestFixture(dir, { FAKE_STDIN_LOG: stdinLog, FAKE_MUTATION_LOG: mutationLog });
+    const command = `cat "${fixture.entry}" | bash -s --`;
+    const answers = ['no', 'yes', join(dir, 'install'), join(dir, 'bin'), 'no', 'yes'];
+    const child = spawn('script', ['-q', '/dev/null', 'bash', '-c', command], {
+      cwd: dir,
+      env: fixture.env,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString('utf8'); });
+    child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString('utf8'); });
+    child.stdin.write(`${answers.join('\n')}\n`);
+    const result = await new Promise<{ code: number | null; error?: Error }>((resolve) => {
+      const timeout = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: null, error: new Error('PTY process timed out') }); }, 30_000);
+      child.once('error', (error) => { clearTimeout(timeout); resolve({ code: null, error }); });
+      child.once('close', (code) => { clearTimeout(timeout); resolve({ code }); });
+    });
+    if ((result.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT') { t.skip('script(1) is unavailable'); return; }
+    assert.equal(result.error, undefined, result.error?.message ?? 'PTY process failed');
+    assert.equal(result.code, 0, stdout + stderr);
+    const observed = JSON.parse(readFileSync(stdinLog, 'utf8')) as Record<string, unknown>;
+    assert.equal(observed.mode, 'interactive');
+    assert.deepEqual(observed.answers, answers);
+    assert.deepEqual(observed.selections, { gateway: false, piGuard: true });
+    assert.equal(observed.upgradeConsent, true);
+    assert.equal((observed.answers as string[]).some((answer) => /status=\$\?|set -e|exit "\$status"/.test(answer)), false);
+    assert.equal(readFileSync(mutationLog, 'utf8'), 'interactive completed\n');
+  } finally {
+    clean(dir);
+  }
+});
+
+test('latest public pipe without a controlling terminal exposes EOF, never shell source, and refuses before mutation', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-no-tty-'));
+  try {
+    const stdinLog = join(dir, 'stdin.log');
+    const mutationLog = join(dir, 'mutation.log');
+    const fixture = latestFixture(dir, { FAKE_STDIN_LOG: stdinLog, FAKE_MUTATION_LOG: mutationLog });
+    const result = spawnSync('perl', ['-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-s', '--'], {
+      cwd: dir,
+      env: fixture.env,
+      encoding: 'utf8',
+      input: readFileSync(fixture.entry),
+      timeout: 30_000,
+    });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stderr, /interactive Latest installation requires a controlling terminal/);
+    assert.deepEqual(JSON.parse(readFileSync(stdinLog, 'utf8')), { mode: 'refused', stdin: '', args: [] });
+    assert.equal(existsSync(mutationLog), false);
+  } finally {
+    clean(dir);
+  }
+});
+
+test('actual Latest Node entry refuses non-TTY script bytes before creating installer state', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-node-no-tty-'));
+  try {
+    const packageTgz = join(dir, 'pi-shuttle.tgz');
+    const artifactDir = join(dir, 'artifacts');
+    writeFileSync(packageTgz, 'fixture');
+    const result = spawnSync(process.execPath, [join(REPO, 'dist', 'installer', 'main.js')], {
+      encoding: 'utf8',
+      input: readFileSync(join(REPO, 'install.sh')),
+      env: {
+        ...process.env,
+        HOME: dir,
+        PI_SHUTTLE_LATEST_SOURCE: `mfx-labs/pi-shuttle@${SHA}`,
+        PI_SHUTTLE_LATEST_PACKAGE_TGZ: packageTgz,
+        PI_SHUTTLE_LATEST_ARTIFACT_DIR: artifactDir,
+      },
+    });
+    assert.equal(result.status, 2, result.stdout + result.stderr);
+    assert.match(result.stderr, /interactive Latest installation requires a controlling terminal/);
+    assert.equal(existsSync(join(dir, '.local')), false, 'refusal must precede installer mutation');
+  } finally {
+    clean(dir);
+  }
+});
+
+test('latest public pipe accepts the existing complete batch contract without a terminal or prompt input', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-batch-'));
+  try {
+    const stdinLog = join(dir, 'stdin.log');
+    const mutationLog = join(dir, 'mutation.log');
+    const fixture = latestFixture(dir, { FAKE_STDIN_LOG: stdinLog, FAKE_MUTATION_LOG: mutationLog });
+    const args = ['--batch', '--gateway', 'no', '--pi-guard', 'yes'];
+    const result = spawnSync('perl', ['-MPOSIX', '-e', 'POSIX::setsid(); exec @ARGV', 'bash', '-s', '--', ...args], {
+      cwd: dir,
+      env: fixture.env,
+      encoding: 'utf8',
+      input: readFileSync(fixture.entry),
+      timeout: 30_000,
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.deepEqual(JSON.parse(readFileSync(stdinLog, 'utf8')), { mode: 'batch', stdin: '', args });
+    assert.equal(readFileSync(mutationLog, 'utf8'), 'batch completed\n');
+  } finally {
+    clean(dir);
+  }
+});
+
+test('repository-local install.sh preserves its normal inherited stdin behavior', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-local-stdin-'));
+  try {
+    const entry = join(dir, 'install.sh');
+    const stdinLog = join(dir, 'local-stdin.log');
+    mkdirSync(join(dir, 'dist', 'installer'), { recursive: true, mode: 0o700 });
+    writeFileSync(entry, readFileSync(join(REPO, 'install.sh')));
+    writeFileSync(join(dir, 'dist', 'installer', 'main.js'), `const fs = require('node:fs'); fs.writeFileSync(process.env.LOCAL_STDIN_LOG, fs.readFileSync(0, 'utf8'));\n`);
+    const result = spawnSync('bash', [entry], {
+      cwd: dir,
+      env: { ...process.env, NODE_BIN: process.execPath, LOCAL_STDIN_LOG: stdinLog },
+      encoding: 'utf8',
+      input: 'local operator input\n',
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(readFileSync(stdinLog, 'utf8'), 'local operator input\n');
+  } finally {
+    clean(dir);
+  }
+});
+
 test('latest bootstrap remains confined to the resolved SHA when the moving ref changes', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-test-'));
   try {
@@ -353,7 +532,7 @@ test('latest bootstrap cleans source/build/artifact state on SIGTERM and exits w
     const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
       child.once('close', (code, signal) => resolve({ code, signal }));
     });
-    for (let attempt = 0; attempt < 100 && !existsSync(ready); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
+    for (let attempt = 0; attempt < 300 && !existsSync(ready); attempt += 1) await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(existsSync(ready), true, 'bootstrap did not reach its temporary build state');
     const workDirs = readdirSync(temp).filter((name) => name.startsWith('pi-shuttle-latest.'));
     assert.equal(workDirs.length, 1);

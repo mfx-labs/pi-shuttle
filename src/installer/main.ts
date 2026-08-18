@@ -12,7 +12,7 @@
 import { realpathSync } from 'node:fs';
 import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from './selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
@@ -66,8 +66,10 @@ export function formatOutcome(outcome: InstallOutcome): string {
       return `result: UPGRADE AVAILABLE — verified pi-shuttle ${outcome.installedVersion} can be upgraded to ${outcome.installerVersion}; explicit confirmation is required`;
     case 'UPGRADE_DECLINED':
       return `result: UPGRADE DECLINED — pi-shuttle ${outcome.installedVersion} was preserved unchanged`;
+    case 'INCOMPLETE_DECLINED':
+      return 'result: INCOMPLETE CLEANUP DECLINED — No installation changes were made.';
     case 'FAILED':
-      return `result: FAILED at stage "${outcome.stage}" — ${outcome.message}\nrollback: ${outcome.rollback} (prior installation state preserved)`;
+      return `result: FAILED at stage "${outcome.stage}" — ${outcome.message}\nrollback: ${outcome.rollback}`;
     case 'UNSUPPORTED':
       return `result: UNSUPPORTED — ${outcome.reason}`;
     case 'REFUSED':
@@ -81,6 +83,7 @@ export function exitCodeFor(outcome: InstallOutcome): number {
     case 'ALREADY_INSTALLED':
     case 'UPGRADE_AVAILABLE':
     case 'UPGRADE_DECLINED':
+    case 'INCOMPLETE_DECLINED':
       return INSTALLER_EXIT.COMPLETE;
     case 'PARTIAL':
       return INSTALLER_EXIT.PARTIAL;
@@ -133,6 +136,10 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
   let configureProject = false;
   const interactiveMode = selections === undefined;
   if (selections === undefined) {
+    if (latest !== null && process.stdin.isTTY !== true) {
+      process.stderr.write('pi-shuttle-installer: interactive Latest installation requires a controlling terminal; use curl | bash from a terminal or pass the complete existing batch arguments\n');
+      return 2;
+    }
     const interactive = await promptInteractive({
       installDir: parsed.options.installDir ?? (prior.ok ? prior.receipt.installDir : layout.shareDir),
       binDir: parsed.options.binDir ?? (prior.ok ? prior.receipt.binDir : layout.binDir),
@@ -182,6 +189,7 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
       ...(latestPiGuardSha256 !== undefined ? { expectPiGuardSha256: latestPiGuardSha256 } : {}),
     } : {}),
     confirmUpgrade: interactiveMode ? promptUpgrade : approveBatchUpgrade,
+    confirmIncompleteCleanup: interactiveMode ? promptIncompleteCleanup : approveBatchIncompleteCleanup,
   });
 
   process.stdout.write(`${formatOutcome(outcome)}\n`);
@@ -190,7 +198,7 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
     process.stdout.write(`platform lane: ${hostLane(env.environment.platform, env.environment.arch)}\n`);
   }
   if (outcome.kind === 'FAILED' || outcome.kind === 'UNSUPPORTED' || outcome.kind === 'REFUSED') {
-    process.stdout.write('no installation changes were finalized; prior installation state (if any) is preserved\n');
+    process.stdout.write('no final installation receipt was written; unrelated operator state was preserved\n');
   }
   return exitCodeFor(outcome);
 }

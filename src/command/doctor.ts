@@ -31,11 +31,8 @@
  *     (`pi-shuttle project add <path>`), which doctor never invokes
  *     (mutation-free discipline). The limitation is reported truthfully;
  *   - doctor never mutates anything: no bootstrap, no lock deletion, no
- *     repair. Stale/busy coordination locks are DETECTED and reported
- *     with recovery guidance; a lock artifact's liveness cannot be
- *     confirmed without PID introspection, so its verdict maps to
- *     `installed but unverified` (present, state unconfirmable) — a
- *     finding (exit 1), never auto-stolen;
+ *     repair. Ordinary coordination lock paths are reported as findings;
+ *     install.lock is inspected boundedly for a live or stale PID;
  *   - ChatGPT/tunnel readiness is not locally observable (external
  *     platform state; PS-7 owns onboarding) and is reported as a note,
  *     never fabricated.
@@ -62,6 +59,7 @@ import { readReceipt } from '../installer/receipt.js';
 import type { InstallReceipt } from '../installer/receipt.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
 import { projectLockPath } from '../lifecycle/state.js';
+import { inspectInstallLock } from '../persistence/lock.js';
 
 /** The closed status vocabulary (operator-cli-contract §2, used exactly). */
 export const STATUS_VOCABULARY = ['supported', 'unsupported', 'installed but unverified', 'missing', 'partial installation'] as const;
@@ -86,16 +84,6 @@ export type DoctorResult =
   | { readonly ok: false; readonly exitCode: 1; readonly message: string };
 
 function receiptDistribution(receipt: InstallReceipt): string {
-  if (receipt.recovery !== undefined) {
-    const recoveredBy = receipt.recovery.recoveredBy === undefined
-      ? 'unknown'
-      : `latest @ ${receipt.recovery.recoveredBy.slice(receipt.recovery.recoveredBy.lastIndexOf('@') + 1)}`;
-    const originalTime = receipt.recovery.originalInstalledAt ?? 'unknown';
-    const originalOrigin = receipt.recovery.originalChannel === 'unknown'
-      ? 'unknown'
-      : `${receipt.recovery.originalChannel}${receipt.recovery.originalSourceIdentity === undefined ? '' : ` @ ${receipt.recovery.originalSourceIdentity.slice(receipt.recovery.originalSourceIdentity.lastIndexOf('@') + 1)}`}`;
-    return `installation metadata: recovered; recovered at: ${receipt.recovery.recoveredAt}; original installation time: ${originalTime}; original distribution provenance: ${originalOrigin}; recovered by: ${recoveredBy}`;
-  }
   return receipt.channel === 'latest' && receipt.sourceIdentity
     ? `latest ${receipt.piShuttleVersion} @ ${receipt.sourceIdentity.slice(receipt.sourceIdentity.lastIndexOf('@') + 1)}`
     : `stable ${receipt.piShuttleVersion}`;
@@ -185,15 +173,17 @@ function modeNote(path: string, expected: number): string {
 
 /** New package-backed receipts prove the command, semantic identity, source slot, and bytes. */
 async function piShuttleReceiptProblem(receipt: InstallReceipt, layout: LayoutPaths): Promise<string | null> {
-  if (receipt.piShuttleInstallPath === undefined || receipt.piShuttleTreeSha256 === undefined) {
-    return receipt.channel === 'latest' ? 'latest receipt predates exact source-package byte binding' : null;
-  }
   const root = receipt.piShuttleInstallPath;
-  if (receipt.channel === 'latest') {
-    if (receipt.sourceIdentity === undefined || root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion, receipt.sourceIdentity))) {
+  const treeSha256 = receipt.piShuttleTreeSha256;
+  const sourceIdentity = receipt.sourceIdentity;
+  if (root === undefined || treeSha256 === undefined) {
+    return receipt.channel === 'latest' ? 'latest receipt lacks its exact active package binding' : null;
+  }
+  if (sourceIdentity !== undefined) {
+    if (root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion, sourceIdentity))) {
       return 'latest package path does not match its semantic version and exact source SHA';
     }
-  } else if (receipt.recovery === undefined && root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion))) {
+  } else if (root !== join(layout.packagesDir, piShuttlePackageDirName(receipt.piShuttleVersion))) {
     return 'stable package path does not match its semantic version';
   }
   try {
@@ -221,7 +211,7 @@ async function piShuttleReceiptProblem(receipt: InstallReceipt, layout: LayoutPa
     return 'pi-shuttle command entry is missing or is not a symlink';
   }
   const digest = await hashPackageTree(root);
-  if (!digest.ok || digest.value !== receipt.piShuttleTreeSha256) return `pi-shuttle package bytes do not match the receipt tree SHA-256: ${root}`;
+  if (!digest.ok || digest.value !== treeSha256) return `pi-shuttle package bytes do not match the receipt tree SHA-256: ${root}`;
   return null;
 }
 
@@ -369,6 +359,8 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
 
   // 5. Installation receipt (single source of installed truth; never inferred from disk).
   const receipt = readReceipt(layout.installReceiptPath);
+  const gatewayReceipt = receipt.ok ? receipt.receipt.components.gateway : null;
+  const piGuardReceipt = receipt.ok ? receipt.receipt.components.piGuard : null;
   if (!receipt.ok) {
     if (receipt.code === 'absent') {
       checks.push(check('receipt', 'installation receipt', 'missing', `${layout.installReceiptPath} does not exist; run the installer`));
@@ -376,11 +368,12 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
       return { ok: false, exitCode: 1, message: `installation receipt is invalid (${receipt.code}): ${receipt.message}` };
     }
   } else {
-    const entry = receipt.receipt.components.gateway;
+    const entry = gatewayReceipt;
     const distribution = receiptDistribution(receipt.receipt);
     const shuttleProblem = await piShuttleReceiptProblem(receipt.receipt, layout);
+    const shuttlePath = receipt.receipt.piShuttleInstallPath;
     const binding = shuttleProblem === null
-      ? (receipt.receipt.piShuttleInstallPath === undefined ? '' : `; pi-shuttle package bytes verified at ${receipt.receipt.piShuttleInstallPath}`)
+      ? (shuttlePath === undefined ? '' : `; pi-shuttle package bytes verified at ${shuttlePath}`)
       : `; ${shuttleProblem}`;
     if (receipt.receipt.result === 'PARTIAL') {
       const mode = modeNote(layout.installReceiptPath, 0o600);
@@ -400,9 +393,9 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   //    lane's package identity).
   if (!laneDescriptor.ok) {
     checks.push(check('gateway', 'gateway component', 'missing', `gateway identity is not bound for host lane ${lane}; refusing to validate any installed package (no fallback to another lane identity)`));
-  } else if (receipt.ok && receipt.receipt.components.gateway !== null) {
+  } else if (receipt.ok && gatewayReceipt !== null) {
     const descriptor = laneDescriptor.descriptor;
-    const gatewayEntry = receipt.receipt.components.gateway;
+    const gatewayEntry = gatewayReceipt;
     if (gatewayEntry.status === 'failed') {
       checks.push(check('gateway', 'gateway component', 'missing', 'installation receipt records a failed Gateway install; re-run the installer'));
     } else if (gatewayEntry.status === 'installed-unverified') {
@@ -456,8 +449,8 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   }
 
   // 7. pi-guard component (receipt + read-only Pi store inspection).
-  if (receipt.ok && receipt.receipt.components.piGuard !== null) {
-    const piGuardEntry = receipt.receipt.components.piGuard;
+  if (receipt.ok && piGuardReceipt !== null) {
+    const piGuardEntry = piGuardReceipt;
     if (piGuardEntry.status === 'failed') {
       checks.push(check('pi-guard', 'pi-guard component', 'missing', 'installation receipt records a failed pi-guard install; re-run the installer'));
     } else if (piGuardEntry.status === 'installed-unverified') {
@@ -550,17 +543,15 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   }
 
   // 11. Coordination locks (PS-2/PS-3/PS-4): presence can block operation.
-  //     Detected, never auto-deleted; recovery guidance reported.
-  const lockCandidates = [
-    `${layout.runtimeConfigPath}.lock`,
-    join(layout.stateDir, 'install.lock'),
-    projectLockPath(layout),
-  ];
-  const presentLocks = lockCandidates.filter((p) => existsSync(p));
-  if (presentLocks.length === 0) {
-    checks.push(check('locks', 'coordination locks', 'supported', 'no lock artifacts present'));
+  //     Doctor is read-only; the next writer revalidates lock ownership.
+  const presentLocks = [`${layout.runtimeConfigPath}.lock`, projectLockPath(layout)].filter((p) => existsSync(p));
+  const installLockPath = join(layout.stateDir, 'install.lock');
+  const installLock = inspectInstallLock(installLockPath);
+  if (presentLocks.length === 0 && installLock.ok && !installLock.active && !installLock.stale) {
+    checks.push(check('locks', 'coordination locks', 'supported', installLock.detail));
   } else {
-    checks.push(check('locks', 'coordination locks', 'installed but unverified', `lock artifact(s) present: ${presentLocks.join(', ')} — a pi-shuttle operation may be running or the lock is stale; locks are never auto-stolen: verify no operation is running, then remove the stale file and re-run doctor`));
+    const detail = !installLock.ok ? installLock.detail : installLock.active ? installLock.detail : '';
+    checks.push(check('locks', 'coordination locks', 'installed but unverified', `lock state requires attention${presentLocks.length > 0 ? `: ${presentLocks.join(', ')}` : ''}${detail.length > 0 ? `; ${detail}` : ''} — doctor is read-only`));
   }
 
   notes.push('trusted-store integrity verification is available only through the Gateway operator bootstrap replay (`pi-shuttle project add <path>`); doctor performs read-only local observation and never invokes bootstrap or mutates state');

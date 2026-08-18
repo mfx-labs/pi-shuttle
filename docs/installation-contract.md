@@ -60,10 +60,11 @@ gates installation (ADR-003 §3).
   candidate `>=0.83.0` with `0.83.0` as the known-good baseline — a
   non-baseline candidate requires the committed pi-guard compatibility
   probe to PASS.
-- No `latest`, no floating versions, no "if newer is available" behavior.
-  The installer never installs arbitrary Node/Git/Pi versions; a runtime
-  version is accepted only through the minimum/probe policy of §4, never
-  silently.
+- Component versions never float. Stable stores `pi-shuttle@0.1.1`;
+  Latest first resolves the source ref to one exact commit and stores
+  `pi-shuttle@0.1.1+latest.<exact-source-sha>`. Both channels keep semantic
+  version `0.1.1`. The installer never installs arbitrary Node/Git/Pi
+  versions; runtime acceptance follows §4.
 
 ## 4. Preflight and refusal boundaries
 
@@ -101,7 +102,37 @@ gates installation (ADR-003 §3).
 - The installer refuses to run with `sudo`/root for user-content
   installation (per-user layout, no privileged operations).
 
-## 5. Install sequence and failure boundaries
+## 5. Persistent state and install sequence
+
+The persistent installation classifier has exactly three states:
+
+- **CLEAN** — no valid final receipt and no recognized pi-shuttle leftovers.
+- **INSTALLED** — a valid final receipt selects a supported installation;
+  its command, package, and selected components are verified at point of use.
+- **INCOMPLETE** — a known prior attempt left pi-shuttle-owned command/package,
+  staging, non-final receipt, exact Latest target, dead-PID `install.lock`, or
+  obsolete historical `install.json.lock` state without a trustworthy final
+  installation. The installer explains the evidence and requires explicit
+  cleanup/reinstall consent.
+
+A foreign/unrecognized receipt, an out-of-namespace command target, or
+ambiguous/malformed owned-looking state is refused. INCOMPLETE cleanup removes
+only a recognized non-final receipt, recognized staging, a safely proven
+*inactive* exact Latest destination, an obsolete receipt lock, and a dead-PID
+installer lock. If the exact Latest destination is the current command target,
+it remains until a freshly staged candidate proves the same package/path/bin
+identity and tree; a mismatch is refused. It never deletes Gateway, pi-guard,
+Pi state, projects, configuration, stores, or unrelated files; retained
+pi-shuttle versions do not select the active installation and may remain after
+success.
+
+One ordinary `install.lock` is acquired with O_EXCL and contains the installer
+PID; it is the only installer mutation lock. A live PID reports BUSY; an
+OS-confirmed absent PID is removed and acquisition retried; malformed,
+unreadable, symlink, directory, FIFO, or other special lock objects are
+refused. FINAL receipt publication happens atomically while this lock is held
+and has no `install.json.lock`; an obsolete regular receipt lock is only
+recognized INCOMPLETE residue. The invocation removes its lock on exit.
 
 1. **Fetch + verify manifest** (SHA-pinned). Failure → abort, nothing written.
 2. **Preflight** (§4). Failure → abort, nothing written.
@@ -137,18 +168,19 @@ gates installation (ADR-003 §3).
    git, pi, gateway bin, pi-guard manifest, permissions). Failure → report
    with rollback guidance; the receipt marks the failed component `partial`.
 8. **Install receipt**: `~/.local/state/pi-shuttle/install.json` (0600):
-   manifest id, installed component versions + SHAs, install dir, bin dir,
-   opt-outs (partial flags), timestamps. This is the single source of truth
-   for doctor and for rollback.
+   installed component state, install/bin dirs, opt-outs, timestamp, and for
+   Latest the exact source identity, source-qualified package path, and tree
+   SHA-256. This one FINAL receipt is written only after command activation;
+   no recovered/non-final receipt is persistent lifecycle authority.
 
 ## 6. Rollback semantics
 
 - **Pre-activation failures**: remove staging; prior installation (if any)
   untouched and still active. Nothing to restore.
-- **Post-activation failure** (verification step 7): restore the previous
-  receipt + previous package version pointers from the retained
-  pre-install snapshot; report both the failure and the successful
-  restoration.
+- **Post-activation failure**: restore a previously selected command when it
+  is still safely available, remove objects positively created by this
+  attempt, and write no false final receipt. Do not reconstruct forensic
+  state. Authorized obsolete INCOMPLETE metadata is not restored.
 - **Full uninstall/rollback of a component**: re-run installer with the
   component explicitly opted out → receipt updated; the removed component's
   package directory is retained under
@@ -186,7 +218,8 @@ gates installation (ADR-003 §3).
   git-home/<store-id>/  git-tmp/<store-id>/   operator Git isolation dirs (empty, 0700)
   manifests/pi-shuttle-<v>.json       installed manifest copy
 ~/.local/state/pi-shuttle/            disposable state
-  install.json                        install receipt (0600)
+  install.json                        FINAL install receipt (0600)
+  install.lock                        ordinary PID/O_EXCL installer lock (temporary)
   staging/                            install staging (removed on success)
   logs/                               bounded install logs
 ~/.config/pi-shuttle/                 operator configuration

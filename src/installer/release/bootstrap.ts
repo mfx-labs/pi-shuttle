@@ -31,7 +31,7 @@ import { hashFile } from '../artifact.js';
 import { runInstall } from '../install.js';
 import type { InstallOptions, InstallOutcome } from '../install.js';
 import { INSTALLER_EXIT, exitCodeFor, formatOutcome } from '../main.js';
-import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchUpgrade, parseInstallerArgs, promptInteractive, promptUpgrade } from '../selection.js';
+import { INSTALLER_USAGE, PROJECT_ONBOARDING_DEFERRED, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from '../selection.js';
 import type { InteractiveResult } from '../selection.js';
 import { readReceipt } from '../receipt.js';
 import { acquireVerifiedFile, releaseBaseUrlFor } from './acquire.js';
@@ -75,6 +75,8 @@ export interface ReleaseBootstrapOptions {
   readonly promptUI?: (defaults: { readonly installDir: string; readonly binDir: string }) => Promise<InteractiveResult>;
   /** Injectable upgrade consent (tests); production prompts or accepts explicit batch invocation. */
   readonly confirmUpgrade?: InstallOptions['confirmUpgrade'];
+  /** Injectable INCOMPLETE cleanup/reinstall consent. */
+  readonly confirmIncompleteCleanup?: InstallOptions['confirmIncompleteCleanup'];
   /**
    * Injectable stdin-TTY observation (F-01 test seam; production reads
    * `process.stdin.isTTY`). When interactive prompts are needed and stdin
@@ -242,6 +244,7 @@ export async function runReleaseBootstrap(env: HostEnvironment, handoff: Release
       ...(selections.piGuard ? { expectPiGuardSha256: envelope.piGuard.sha256 } : {}),
       ...(options.uid !== undefined ? { uid: options.uid } : {}),
       confirmUpgrade: options.confirmUpgrade ?? (interactiveMode ? promptUpgrade : approveBatchUpgrade),
+      confirmIncompleteCleanup: options.confirmIncompleteCleanup ?? (interactiveMode ? promptIncompleteCleanup : approveBatchIncompleteCleanup),
     });
     return { kind: 'outcome', outcome, envelope };
   } finally {
@@ -289,7 +292,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stdout.write(`platform lane: ${hostLane(env.environment.platform, env.environment.arch)}\n`);
   }
   if (result.outcome.kind === 'FAILED' || result.outcome.kind === 'UNSUPPORTED' || result.outcome.kind === 'REFUSED') {
-    process.stdout.write('no installation changes were finalized; prior installation state (if any) is preserved\n');
+    process.stdout.write('no final installation receipt was written; unrelated operator state was preserved\n');
   }
   return exitCodeFor(result.outcome);
 }

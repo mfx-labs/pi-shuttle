@@ -68,15 +68,15 @@ const NETWORK_EXEMPT = new Set(['src/installer/release/acquire.ts']);
 /** Exact node:fs named-import allowlists per fs-bearing module. */
 const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/persistence/writer.ts': ['mkdirSync', 'openSync', 'closeSync', 'writeSync', 'fsyncSync', 'renameSync', 'unlinkSync', 'fchmodSync'],
-  'src/persistence/lock.ts': ['openSync', 'closeSync', 'writeSync', 'unlinkSync'],
+  'src/persistence/lock.ts': ['closeSync', 'constants', 'fstatSync', 'lstatSync', 'openSync', 'readSync', 'unlinkSync', 'writeSync'],
   'src/host/environment.ts': ['realpathSync'],
   'src/compat/pi-guard-probe.ts': ['existsSync', 'realpathSync'],
   'src/config/json.ts': ['openSync', 'closeSync', 'readSync', 'fstatSync'],
   // PS-3 installer boundary (ordinary local operator package management):
   'src/installer/preflight.ts': ['mkdirSync'],
   'src/installer/components.ts': ['existsSync', 'lstatSync', 'mkdirSync', 'renameSync', 'rmSync'],
-  'src/installer/install.ts': ['lstatSync', 'mkdirSync', 'readdirSync', 'readlinkSync', 'renameSync', 'rmSync', 'symlinkSync'],
-  'src/installer/artifact.ts': ['createReadStream'],
+  'src/installer/install.ts': ['lstatSync', 'mkdirSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'renameSync', 'rmSync', 'symlinkSync'],
+  'src/installer/artifact.ts': ['createReadStream', 'lstatSync', 'readdirSync'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
   // PS-8A release boundary (verified staging + handoff files):
   'src/installer/release/acquire.ts': ['createWriteStream', 'rmSync', 'mkdirSync'],
@@ -88,7 +88,7 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/lifecycle/state.ts': ['existsSync'],
   'src/lifecycle/projects.ts': ['mkdirSync', 'statSync', 'unlinkSync', 'existsSync'],
   'src/lifecycle/start.ts': ['statSync'],
-  'src/command/doctor.ts': ['existsSync', 'readdirSync', 'statSync'],
+  'src/command/doctor.ts': ['existsSync', 'lstatSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'statSync'],
 };
 
 test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src (PS-8A release acquisition boundary exempt)', () => {
@@ -154,7 +154,7 @@ test('ps2/ps3 static guard: node:fs is confined to leaf modules with exact allow
 });
 
 test('ps2/ps3 static guard: filesystem mutation vocabulary lives only in the writer, the shared lock, the installer boundary, and the approved lifecycle operator-directory boundary', () => {
-  const MUTATING = ['renameSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'cpSync', 'chmodSync', 'symlinkSync', 'writeFileSync', 'copyFileSync', 'truncateSync', 'readlinkSync'];
+  const MUTATING = ['renameSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'cpSync', 'chmodSync', 'symlinkSync', 'writeFileSync', 'copyFileSync', 'truncateSync'];
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
     if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;

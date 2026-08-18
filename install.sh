@@ -171,7 +171,15 @@ export PI_SHUTTLE_LATEST_ARTIFACT_DIR="$ARTIFACT_DIR"
 # Invoke only the verified built installer from the exact source snapshot.
 # The archived install.sh is intentionally never executed recursively.
 set +e
-"$NODE_BIN" "$SOURCE_DIR/dist/installer/main.js" "$@"
-status=$?
+if { exec 3</dev/tty; } 2>/dev/null; then
+  "$NODE_BIN" "$SOURCE_DIR/dist/installer/main.js" "$@" <&3
+  status=$?
+  exec 3<&-
+else
+  # fd 0 may still contain this shell program (curl | bash). Never expose
+  # those bytes to Node prompts; complete batch invocations need no input.
+  "$NODE_BIN" "$SOURCE_DIR/dist/installer/main.js" "$@" </dev/null
+  status=$?
+fi
 set -e
 exit "$status"

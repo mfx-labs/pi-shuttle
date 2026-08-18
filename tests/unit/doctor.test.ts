@@ -64,31 +64,6 @@ test('doctor: complete healthy local setup exits 0 (all implemented checks pass)
   }
 });
 
-test('doctor: recovered receipt reports recovery and does not invent original Stable/Latest provenance', async () => {
-  const { env, ctx } = healthyContext();
-  try {
-    writeReceiptFixture(env, {
-      recovery: {
-        recoveredAt: '2026-08-17T00:00:00.000Z',
-        recoveredBy: `mfx-labs/pi-shuttle@${'a'.repeat(40)}`,
-        originalInstalledAt: null,
-        originalChannel: 'unknown',
-      },
-    });
-    const result = await runDoctor(ctx);
-    assert.equal(result.ok, true);
-    if (!result.ok) return;
-    const detail = result.report.checks.find((check) => check.id === 'receipt')!.detail;
-    assert.match(detail, /installation metadata: recovered/);
-    assert.match(detail, /original installation time: unknown/);
-    assert.match(detail, /original distribution provenance: unknown/);
-    assert.match(detail, /recovered by: latest @ a{40}/);
-    assert.doesNotMatch(detail, /stable 0\.1\.1|latest 0\.1\.1/);
-  } finally {
-    cleanupEnv(env);
-  }
-});
-
 test('doctor: Latest receipt verifies its semantic version, exact source slot, command target, and package bytes', async () => {
   const { env, ctx, layout } = healthyContext();
   try {
@@ -420,7 +395,7 @@ test('doctor: project root missing is a finding (exit 1)', async () => {
   }
 });
 
-test('doctor: stale coordination lock artifacts are detected with recovery guidance (exit 1, never auto-deleted)', async () => {
+test('doctor: coordination lock artifacts are reported read-only for next-writer ownership revalidation', async () => {
   const { env, ctx, layout } = healthyContext();
   try {
     writeFileSync(`${layout.runtimeConfigPath}.lock`, '9999\n', { mode: 0o600 });
@@ -430,8 +405,8 @@ test('doctor: stale coordination lock artifacts are detected with recovery guida
     assert.equal(result.exitCode, 1);
     const lockCheck = result.report.checks.find((c) => c.id === 'locks')!;
     assert.equal(lockCheck.verdict, 'installed but unverified');
-    assert.ok(lockCheck.detail.includes('never auto-stolen'), lockCheck.detail);
-    assert.ok(lockCheck.detail.includes('remove'), lockCheck.detail);
+    assert.ok(lockCheck.detail.includes('doctor is read-only'), lockCheck.detail);
+    assert.ok(lockCheck.detail.includes(layout.runtimeConfigPath), lockCheck.detail);
     // Doctor must NOT delete the lock.
     assert.equal(existsSync(`${layout.runtimeConfigPath}.lock`), true);
   } finally {

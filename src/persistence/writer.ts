@@ -39,9 +39,10 @@
  * stale-lock recovery guidance (the operator removes the lock file).
  * Operational limitation recorded for PS-4/doctor follow-up.
  *
- * The raw `writeFileAtomic` publisher carries no concurrency or
- * compatibility guarantee (single-writer contexts only); state transitions
- * MUST go through `mutateDocumentAtomically`. Filesystem mutation
+ * The raw `writeFileAtomic` publisher carries no concurrency guarantee
+ * (single-writer contexts only). Ordinary state transitions MUST go through
+ * `mutateDocumentAtomically`; the installer receipt is the one exception,
+ * published while its caller owns install.lock. Filesystem mutation
  * vocabulary is confined to this module (static guard enforced).
  */
 import { closeSync, fchmodSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeSync } from 'node:fs';

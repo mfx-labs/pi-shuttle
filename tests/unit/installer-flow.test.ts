@@ -513,7 +513,7 @@ test('installer: foreign receipt fails closed and is preserved', async () => {
   }
 });
 
-test('installer: missing receipt plus existing entry remains fail-closed with actionable metadata recovery guidance', async (t) => {
+test('installer: foreign or malformed receipt-less command/package state is refused and preserved', async (t) => {
   for (const entryKind of ['owned-looking-link', 'foreign-file', 'owned-looking-package'] as const) {
     await t.test(entryKind, async () => {
       const env = makeEnv();
@@ -541,10 +541,8 @@ test('installer: missing receipt plus existing entry remains fail-closed with ac
             : readlinkSync(join(layout.binDir, 'pi-shuttle'));
         const run = await runInstaller(['--batch', '--gateway', 'no', '--pi-guard', 'no'], { home: env });
         assert.equal(run.code, 2, run.stdout + run.stderr);
-        assert.match(run.stdout, /installation metadata is missing/i);
-        assert.match(run.stdout, /automatic ownership cannot be established/i);
-        assert.match(run.stdout, /restore the matching install receipt/i);
-        assert.doesNotMatch(run.stdout, /\brm\b/, 'recovery must not recommend arbitrary deletion');
+        assert.match(run.stdout, /outside the canonical|not a pi-shuttle-owned symlink|ambiguous state/i);
+        assert.doesNotMatch(run.stdout, /cleanup.*accepted/i, 'foreign state must never enter authorized cleanup');
         assert.equal(existsSync(layout.installReceiptPath), false);
         const entryAfter = entryKind === 'owned-looking-package'
           ? readFileSync(join(layout.packagesDir, 'pi-shuttle@0.1.0', 'package.json'), 'utf8')
@@ -821,7 +819,7 @@ test('installer: foreign EMPTY activation target is refused, never replaced (SIR
     mkdirSync(emptyTarget, { recursive: true, mode: 0o700 });
     const run = await runInstaller(['--batch', '--gateway', 'yes', '--pi-guard', 'no', '--artifact-dir', env], fullInstallEnv(env));
     assert.equal(run.code, 2, run.stdout + run.stderr);
-    assert.ok(run.stdout.includes('installation metadata is missing'), run.stdout);
+    assert.ok(run.stdout.includes('ambiguous identity'), run.stdout);
     assert.equal(statSync(emptyTarget).isDirectory(), true, 'foreign empty dir must be preserved');
     assert.deepEqual(readdirSync(emptyTarget), [], 'foreign empty dir must stay empty');
   } finally {
@@ -859,12 +857,11 @@ test('installer: concurrent different-selection installers serialize via the ins
     const b = await runInstaller(argsB, runEnv);
     const aResult = await a;
     assert.equal(aResult.code, 0, aResult.stdout + aResult.stderr);
-    // Acceptable outcomes (SIR-PS3-009): B fails BUSY, locked revalidation
-    // refuses B's stale receipt-absent pre-proof after A finalizes, or B runs
+    // Acceptable outcomes (SIR-PS3-009): B fails BUSY or runs
     // sequentially against A's final state. UNACCEPTABLE: a success whose
     // receipt disagrees with the actual component state.
     if (b.code === 2) {
-      assert.match(b.stdout, /in progress|state changed between receipt-less ownership pre-proof and locked revalidation/);
+      assert.match(b.stdout, /installer is running|in progress/);
     } else {
       assert.ok(b.code === 0 || b.code === 1, b.stdout + b.stderr);
     }
