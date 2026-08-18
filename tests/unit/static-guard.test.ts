@@ -76,7 +76,7 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/installer/preflight.ts': ['mkdirSync'],
   'src/installer/components.ts': ['existsSync', 'lstatSync', 'mkdirSync', 'renameSync', 'rmSync'],
   'src/installer/install.ts': ['lstatSync', 'mkdirSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'renameSync', 'rmSync', 'symlinkSync'],
-  'src/installer/artifact.ts': ['createReadStream', 'lstatSync', 'readdirSync'],
+  'src/installer/artifact.ts': ['closeSync', 'constants', 'createReadStream', 'fstatSync', 'lstatSync', 'openSync', 'readdirSync', 'readSync'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
   // PS-8A release boundary (verified staging + handoff files):
   'src/installer/release/acquire.ts': ['createWriteStream', 'rmSync', 'mkdirSync'],
@@ -89,6 +89,9 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/lifecycle/projects.ts': ['mkdirSync', 'statSync', 'unlinkSync', 'existsSync'],
   'src/lifecycle/start.ts': ['statSync'],
   'src/command/doctor.ts': ['existsSync', 'lstatSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'statSync'],
+  // Manifest-native authority validation (NEW-STATE Slice A; read-only):
+  'src/manifest-native/fs.ts': ['closeSync', 'constants', 'fstatSync', 'lstatSync', 'openSync', 'readSync'],
+  'src/manifest-native/state.ts': ['readdirSync'],
 };
 
 test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src (PS-8A release acquisition boundary exempt)', () => {
@@ -151,6 +154,19 @@ test('slice1 static guard: generic trust construction stays behind the fixed pro
   assert.equal(exportsGenericVerifier("export { createTrustVerifier as verifierFactory } from './trust-internal.js';"), true);
   const boundary = readFileSync(join(SRC, 'installer', 'release', 'trust.ts'), 'utf8');
   assert.equal(exportsGenericVerifier(boundary), false, 'production trust boundary must not export arbitrary-policy verifier construction');
+  // NEW-STATE Slice A correction: the ONLY require*/provenance exports on
+  // the production boundary are the two narrow runtime provenance gates;
+  // nothing else (no WeakSet, no mutation, no verifier factory) is exported.
+  const exportedFunctions = [...boundary.matchAll(/export\s+(?:async\s+)?function\s+([A-Za-z0-9_]+)/g)].map((m) => m[1]!);
+  assert.deepEqual(
+    exportedFunctions.filter((name) => name.startsWith('require')),
+    ['requireVerifiedReleaseSelection', 'requireVerifiedInstalledEvidence'],
+    'the production trust boundary exports exactly the two narrow provenance gates',
+  );
+  assert.equal(exportedFunctions.includes('createTrustVerifier'), false, 'createTrustVerifier must never be exported');
+  for (const forbidden of ['WeakSet', 'selectionAuthority', 'installedEvidenceAuthority', 'keyringAuthority']) {
+    assert.equal(boundary.includes(forbidden), false, `production trust boundary must not expose ${forbidden}`);
+  }
 });
 
 test('ps2/ps3 static guard: node:fs is confined to leaf modules with exact allowlists', () => {

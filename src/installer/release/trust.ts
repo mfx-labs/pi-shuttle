@@ -17,6 +17,7 @@ import type {
   VerifiedKeyring,
   VerifiedReleaseSelection,
 } from './trust-internal.js';
+import type { InstalledEvidence, VerifiedInstalledEvidence } from './trust-internal.js';
 
 export {
   canonicalBytes,
@@ -32,6 +33,7 @@ export type {
   DocumentKind,
   GatewayPackageContract,
   GatewayTrustPolicy,
+  InstalledEvidence,
   Signature,
   SignedDocument,
   SigningKey,
@@ -40,6 +42,7 @@ export type {
   UpgradePolicy,
   VerifiedChannel,
   VerifiedGatewayRelease,
+  VerifiedInstalledEvidence,
   VerifiedKeyring,
   VerifiedReleaseSelection,
 } from './trust-internal.js';
@@ -76,4 +79,42 @@ export function verifyGatewayReleaseManifest(text: string, keyring: VerifiedKeyr
 
 export function verifyReleaseSelection(channel: VerifiedChannel, releaseText: string, keyring: VerifiedKeyring): TrustResult<VerifiedReleaseSelection> {
   return productionVerifier.verifyReleaseSelection(channel, releaseText, keyring);
+}
+
+/**
+ * Installed-evidence verification purpose (NEW-STATE Slice A): verifies a
+ * cached signed selection chain against the compiled policy WITHOUT the
+ * keyring/channel expiration liveness gate. This is a narrow offline
+ * purpose for locally cached metadata only — it never weakens
+ * fresh-selection verification, never fetches network revocation, and is
+ * bound to the exact cached root-signed keyring snapshot. The result is
+ * branded VerifiedInstalledEvidence and is NOT a fresh-selection
+ * authority.
+ */
+export function verifyInstalledEvidence(input: InstalledEvidence): TrustResult<VerifiedInstalledEvidence> {
+  return productionVerifier.verifyInstalledEvidence(input);
+}
+
+/**
+ * Narrow production provenance gate (NEW-STATE Slice A correction):
+ * accepts ONLY values produced by the fixed production verifier's
+ * verifyReleaseSelection(). Rejects structural lookalikes, casts,
+ * copies, JSON round-trips, test/fixture verifier output, and any other
+ * verifier instance. This is the ONLY provenance API exported here — no
+ * runtime-authority-set access, no mutation, no verifier construction,
+ * no policy/clock/root override is exposed.
+ */
+export function requireVerifiedReleaseSelection(value: unknown): TrustResult<VerifiedReleaseSelection> {
+  return productionVerifier.requireVerifiedReleaseSelection(value);
+}
+
+/**
+ * Narrow production provenance gate (NEW-STATE Slice A correction):
+ * accepts ONLY values produced by the fixed production verifier's
+ * verifyInstalledEvidence(). Rejects structural lookalikes, casts,
+ * copies, JSON round-trips, test/fixture verifier output, and any other
+ * verifier instance.
+ */
+export function requireVerifiedInstalledEvidence(value: unknown): TrustResult<VerifiedInstalledEvidence> {
+  return productionVerifier.requireVerifiedInstalledEvidence(value);
 }

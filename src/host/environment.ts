@@ -93,6 +93,49 @@ export function resolveLayout(home: string): LayoutPaths {
 }
 
 /**
+ * Manifest-native lifecycle layout (NEW-STATE Slice A). Pure policy
+ * derivation only — no filesystem access, no caller-selected roots.
+ * The authoritative durable namespace lives under the operator share
+ * dir; the non-authoritative work namespace under the state dir:
+ *
+ *   H/.local/share/pi-shuttle/manifest-native/   authority
+ *     receipt.json
+ *     manifests/<releaseId>/<releaseManifestSha256>.json
+ *     packages/sha256/<packageTreeSha256>/
+ *   H/.local/state/pi-shuttle/manifest-native/   work (not authoritative)
+ *     install.lock
+ *     staging/<attempt-id>/
+ *
+ * Symlink/ownership/mode enforcement happens in the manifest-native
+ * validation layer, never in this pure derivation.
+ */
+export interface ManifestNativeLayout {
+  readonly authorityRoot: string; // share/pi-shuttle/manifest-native
+  readonly receiptPath: string; // authority/receipt.json
+  readonly manifestsRoot: string; // authority/manifests
+  readonly packagesRoot: string; // authority/packages
+  readonly packagesSha256Root: string; // authority/packages/sha256
+  readonly stateRoot: string; // state/pi-shuttle/manifest-native
+  readonly installLockPath: string; // state/install.lock
+  readonly stagingRoot: string; // state/staging
+}
+
+/** Derive the manifest-native layout from the canonical operator home. */
+export function resolveManifestNativeLayout(home: string): ManifestNativeLayout {
+  const base = resolveLayout(home);
+  return {
+    authorityRoot: join(base.shareDir, 'manifest-native'),
+    receiptPath: join(base.shareDir, 'manifest-native', 'receipt.json'),
+    manifestsRoot: join(base.shareDir, 'manifest-native', 'manifests'),
+    packagesRoot: join(base.shareDir, 'manifest-native', 'packages'),
+    packagesSha256Root: join(base.shareDir, 'manifest-native', 'packages', 'sha256'),
+    stateRoot: join(base.stateDir, 'manifest-native'),
+    installLockPath: join(base.stateDir, 'manifest-native', 'install.lock'),
+    stagingRoot: join(base.stateDir, 'manifest-native', 'staging'),
+  };
+}
+
+/**
  * Canonicalize an existing path (symlink-resolved). Returns null when the
  * path does not resolve (fail closed). Security-relevant canonicalization
  * (project roots, store parents) must go through this seam.

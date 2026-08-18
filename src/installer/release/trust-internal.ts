@@ -26,6 +26,7 @@ const verifiedKeyringType: unique symbol = Symbol('VerifiedKeyring');
 const verifiedChannelType: unique symbol = Symbol('VerifiedChannel');
 const verifiedReleaseType: unique symbol = Symbol('VerifiedGatewayRelease');
 const verifiedSelectionType: unique symbol = Symbol('VerifiedReleaseSelection');
+const verifiedInstalledEvidenceType: unique symbol = Symbol('VerifiedInstalledEvidence');
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
 export type DocumentKind = 'keyring' | 'channel' | 'gateway-release';
@@ -145,11 +146,53 @@ export interface VerifiedReleaseSelection {
   readonly releaseManifestSha256: string;
 }
 
+/**
+ * Installed-evidence verification input: the complete cached signed
+ * selection chain, byte-exact (see the manifest-native cache Schema 1).
+ * Verification is bound to this exact cached root-signed keyring
+ * snapshot; later network keyring revocation is never fetched or applied.
+ */
+export interface InstalledEvidence {
+  readonly keyringText: string;
+  readonly channelText: string;
+  readonly releaseText: string;
+}
+
+/**
+ * Installed-evidence verification output. Branded separately from
+ * VerifiedReleaseSelection: this value proves cryptographic/static
+ * authority of the cached chain at the cached keyring snapshot — it is
+ * NOT a fresh-selection authority and does not imply liveness.
+ */
+export interface VerifiedInstalledEvidence {
+  readonly [verifiedInstalledEvidenceType]: true;
+  readonly keyring: VerifiedKeyring;
+  readonly channel: VerifiedChannel;
+  readonly release: VerifiedGatewayRelease;
+  readonly releaseManifestSha256: string;
+}
+
 export interface TrustVerifier {
   verifyRootSignedKeyring(text: string): TrustResult<VerifiedKeyring>;
   verifyChannelManifest(text: string, keyring: VerifiedKeyring): TrustResult<VerifiedChannel>;
   verifyGatewayReleaseManifest(text: string, keyring: VerifiedKeyring): TrustResult<VerifiedGatewayRelease>;
   verifyReleaseSelection(channel: VerifiedChannel, releaseText: string, keyring: VerifiedKeyring): TrustResult<VerifiedReleaseSelection>;
+  /**
+   * Installed-evidence purpose: verifies the cached signed selection chain
+   * without any keyring/channel expiration liveness gate. Fresh-selection
+   * verification remains unchanged and still enforces liveness.
+   */
+  verifyInstalledEvidence(input: InstalledEvidence): TrustResult<VerifiedInstalledEvidence>;
+  /**
+   * Runtime provenance gate for fresh-selection authority (this verifier
+   * instance only).
+   */
+  requireVerifiedReleaseSelection(value: unknown): TrustResult<VerifiedReleaseSelection>;
+  /**
+   * Runtime provenance gate for installed-evidence authority (this
+   * verifier instance only).
+   */
+  requireVerifiedInstalledEvidence(value: unknown): TrustResult<VerifiedInstalledEvidence>;
 }
 
 function fail<T = never>(code: TrustErrorCode, message: string): TrustResult<T> {
@@ -305,6 +348,12 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
   const channelAuthority = new WeakSet<object>();
   const releaseAuthority = new WeakSet<object>();
   const selectionAuthority = new WeakSet<object>();
+  // Installed-evidence authority set: static-only verification. Values
+  // here are usable ONLY through the installed-evidence purpose; the
+  // fresh-selection path never accepts them.
+  const installedKeyringAuthority = new WeakSet<object>();
+  /** Complete installed-evidence values produced by verifyInstalledEvidence. */
+  const installedEvidenceAuthority = new WeakSet<object>();
 
   function nowMilliseconds(): TrustResult<number> {
     let value: unknown;
@@ -313,10 +362,19 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     return { ok: true, value: value.getTime() };
   }
 
-  function freshness(issuedAt: string, expiresAt: string): TrustResult<true> {
+  function validityWindow(issuedAt: string, expiresAt: string): TrustResult<true> {
     const issued = parseTimestamp(issuedAt);
     const expires = parseTimestamp(expiresAt);
     if (issued === null || expires === null || expires <= issued) return fail('ERR-TRUST-TIMESTAMP', 'metadata validity window is malformed or empty');
+    return { ok: true, value: true };
+  }
+
+  function freshness(issuedAt: string, expiresAt: string): TrustResult<true> {
+    const window = validityWindow(issuedAt, expiresAt);
+    if (!window.ok) return window;
+    const issued = parseTimestamp(issuedAt);
+    const expires = parseTimestamp(expiresAt);
+    if (issued === null || expires === null) return fail('ERR-TRUST-TIMESTAMP', 'metadata validity window is malformed or empty');
     const now = nowMilliseconds();
     if (!now.ok) return now;
     if (now.value < issued) return fail('ERR-TRUST-FUTURE-ISSUED', 'metadata document is not yet valid');
@@ -324,7 +382,7 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     return { ok: true, value: true };
   }
 
-  function parseKeyringPayload(payload: unknown): TrustResult<VerifiedKeyring> {
+  function parseKeyringPayload(payload: unknown, liveness: 'required' | 'deferred'): TrustResult<VerifiedKeyring> {
     const root = closedObject(payload, ['schemaVersion', 'generation', 'issuedAt', 'expiresAt', 'keys'], 'keyring');
     if (root === null) return fail('ERR-TRUST-KEYRING-SCHEMA', 'keyring payload has unknown fields or is not an object');
     const schemaVersion = integerField(root, 'schemaVersion');
@@ -334,8 +392,12 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     const issuedAt = stringField(root, 'issuedAt', 32);
     const expiresAt = stringField(root, 'expiresAt', 32);
     if (generation === null || issuedAt === null || expiresAt === null || parseTimestamp(issuedAt) === null || parseTimestamp(expiresAt) === null) return fail('ERR-TRUST-KEYRING-SCHEMA', 'keyring generation or validity timestamp is malformed');
-    const valid = freshness(issuedAt, expiresAt);
-    if (!valid.ok) return valid;
+    const window = validityWindow(issuedAt, expiresAt);
+    if (!window.ok) return window;
+    if (liveness === 'required') {
+      const valid = freshness(issuedAt, expiresAt);
+      if (!valid.ok) return valid;
+    }
     if (!Array.isArray(root['keys']) || root['keys'].length === 0 || root['keys'].length > MAX_KEYS) return fail('ERR-TRUST-KEYRING-SCHEMA', 'keyring keys must be a non-empty bounded array');
     const keys: SigningKey[] = [];
     for (const rawKey of root['keys']) {
@@ -351,14 +413,46 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     if (new Set(keys.map((key) => key.keyId)).size !== keys.length) return fail('ERR-TRUST-KEYRING-DUPLICATE-KEY-ID', 'keyring contains duplicate key IDs');
     if (new Set(keys.map((key) => key.publicKey)).size !== keys.length) return fail('ERR-TRUST-DUPLICATE-PUBLIC-KEY', 'keyring contains the same public key under multiple IDs');
     const value = Object.freeze({ generation, issuedAt, expiresAt, keys: Object.freeze(keys) }) as VerifiedKeyring;
-    keyringAuthority.add(value);
+    if (liveness === 'required') keyringAuthority.add(value);
+    else installedKeyringAuthority.add(value);
     return { ok: true, value };
   }
 
-  function requireKeyring(value: VerifiedKeyring): TrustResult<VerifiedKeyring> {
-    if (typeof value !== 'object' || value === null || !keyringAuthority.has(value as object)) return fail('ERR-TRUST-AUTHORITY', 'keyring was not produced by this verifier');
+  function requireKeyring(value: VerifiedKeyring, liveness: 'required' | 'deferred' = 'required'): TrustResult<VerifiedKeyring> {
+    if (typeof value !== 'object' || value === null) return fail('ERR-TRUST-AUTHORITY', 'keyring was not produced by this verifier');
+    if (liveness === 'deferred') {
+      if (!installedKeyringAuthority.has(value as object)) return fail('ERR-TRUST-AUTHORITY', 'keyring was not produced by this verifier');
+      return { ok: true, value };
+    }
+    if (!keyringAuthority.has(value as object)) return fail('ERR-TRUST-AUTHORITY', 'keyring was not produced by this verifier');
     const current = freshness(value.issuedAt, value.expiresAt);
     return current.ok ? { ok: true, value } : current;
+  }
+
+  /**
+   * Runtime provenance gate: accepts ONLY objects produced by THIS
+   * verifier instance's verifyReleaseSelection(). Structural lookalikes,
+   * casts, copies, JSON round-trips, and cross-verifier values all fail
+   * closed with the typed authority error.
+   */
+  function requireVerifiedReleaseSelection(value: unknown): TrustResult<VerifiedReleaseSelection> {
+    if (typeof value !== 'object' || value === null || !selectionAuthority.has(value as object)) {
+      return fail('ERR-TRUST-AUTHORITY', 'release selection was not produced by this verifier');
+    }
+    return { ok: true, value: value as VerifiedReleaseSelection };
+  }
+
+  /**
+   * Runtime provenance gate: accepts ONLY objects produced by THIS
+   * verifier instance's verifyInstalledEvidence(). Structural lookalikes,
+   * casts, copies, JSON round-trips, and cross-verifier values all fail
+   * closed with the typed authority error.
+   */
+  function requireVerifiedInstalledEvidence(value: unknown): TrustResult<VerifiedInstalledEvidence> {
+    if (typeof value !== 'object' || value === null || !installedEvidenceAuthority.has(value as object)) {
+      return fail('ERR-TRUST-AUTHORITY', 'installed evidence was not produced by this verifier');
+    }
+    return { ok: true, value: value as VerifiedInstalledEvidence };
   }
 
   function authorizedKey(keyring: VerifiedKeyring, keyId: string, role: 'channel' | 'release'): TrustResult<SigningKey> {
@@ -377,10 +471,10 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     if (signed.value.signature.keyId !== policy.rootKeyId) return fail('ERR-TRUST-UNKNOWN-KEY', 'keyring signer is not the compiled root key ID');
     const signature = verifySignature('keyring', signed.value.payload, signed.value.signature, policy.rootPublicKey);
     if (!signature.ok) return signature;
-    return parseKeyringPayload(signed.value.payload);
+    return parseKeyringPayload(signed.value.payload, 'required');
   }
 
-  function parseChannelPayload(payload: unknown): TrustResult<Omit<VerifiedChannel, typeof verifiedChannelType | 'signerKeyId'>> {
+  function parseChannelPayload(payload: unknown, liveness: 'required' | 'deferred'): TrustResult<Omit<VerifiedChannel, typeof verifiedChannelType | 'signerKeyId'>> {
     const root = closedObject(payload, ['schemaVersion', 'channel', 'releaseId', 'releaseManifestSha256', 'issuedAt', 'expiresAt'], 'channel');
     if (root === null) return fail('ERR-TRUST-CHANNEL-SCHEMA', 'channel payload has unknown fields or is malformed');
     const schemaVersion = integerField(root, 'schemaVersion');
@@ -392,8 +486,12 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     const issuedAt = stringField(root, 'issuedAt', 32);
     const expiresAt = stringField(root, 'expiresAt', 32);
     if (channel !== 'stable' || releaseId === null || !ID_RE.test(releaseId) || releaseManifestSha256 === null || !SHA256_HEX_RE.test(releaseManifestSha256) || issuedAt === null || expiresAt === null || parseTimestamp(issuedAt) === null || parseTimestamp(expiresAt) === null) return fail('ERR-TRUST-CHANNEL-SCHEMA', 'channel payload is malformed');
-    const valid = freshness(issuedAt, expiresAt);
-    if (!valid.ok) return valid;
+    const window = validityWindow(issuedAt, expiresAt);
+    if (!window.ok) return window;
+    if (liveness === 'required') {
+      const valid = freshness(issuedAt, expiresAt);
+      if (!valid.ok) return valid;
+    }
     return { ok: true, value: { channel, releaseId, releaseManifestSha256, issuedAt, expiresAt } };
   }
 
@@ -408,7 +506,7 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     if (!key.ok) return key;
     const signature = verifySignature('channel', signed.value.payload, signed.value.signature, key.value.publicKey);
     if (!signature.ok) return signature;
-    const channel = parseChannelPayload(signed.value.payload);
+    const channel = parseChannelPayload(signed.value.payload, 'required');
     if (!channel.ok) return channel;
     const value = Object.freeze({ ...channel.value, signerKeyId: key.value.keyId }) as VerifiedChannel;
     channelAuthority.add(value);
@@ -504,5 +602,73 @@ export function createTrustVerifier(policyInput: GatewayTrustPolicy, clock: () =
     return { ok: true, value };
   }
 
-  return Object.freeze({ verifyRootSignedKeyring, verifyChannelManifest, verifyGatewayReleaseManifest, verifyReleaseSelection });
+  /**
+   * Installed-evidence purpose: verify the exact cached signed chain
+   * (keyring -> channel -> release) against the compiled policy WITHOUT
+   * using keyring/channel expiration as a runtime liveness gate. All
+   * cryptographic/static authority checks (root signature, document
+   * signatures, protected domain, key roles/status in the cached keyring
+   * snapshot, timestamp syntax and ordering, schemas, digest/releaseId
+   * binding, lane/protocol/package/bin compatibility) are identical to
+   * fresh selection. No clock is consulted; no network revocation is
+   * fetched. Values are branded VerifiedInstalledEvidence and never enter
+   * the fresh-selection authority sets.
+   */
+  function verifyInstalledEvidence(input: InstalledEvidence): TrustResult<VerifiedInstalledEvidence> {
+    const keyringDoc = parseDocument(input.keyringText);
+    if (!keyringDoc.ok) return keyringDoc;
+    const keyringSigned = signedDocument(keyringDoc.value);
+    if (!keyringSigned.ok) return keyringSigned;
+    if (keyringSigned.value.signature.keyId !== policy.rootKeyId) return fail('ERR-TRUST-UNKNOWN-KEY', 'keyring signer is not the compiled root key ID');
+    const keyringSignature = verifySignature('keyring', keyringSigned.value.payload, keyringSigned.value.signature, policy.rootPublicKey);
+    if (!keyringSignature.ok) return keyringSignature;
+    const keyring = parseKeyringPayload(keyringSigned.value.payload, 'deferred');
+    if (!keyring.ok) return keyring;
+
+    const channelDoc = parseDocument(input.channelText);
+    if (!channelDoc.ok) return channelDoc;
+    const channelSigned = signedDocument(channelDoc.value);
+    if (!channelSigned.ok) return channelSigned;
+    const channelKey = authorizedKey(keyring.value, channelSigned.value.signature.keyId, 'channel');
+    if (!channelKey.ok) return channelKey;
+    const channelSignature = verifySignature('channel', channelSigned.value.payload, channelSigned.value.signature, channelKey.value.publicKey);
+    if (!channelSignature.ok) return channelSignature;
+    const channel = parseChannelPayload(channelSigned.value.payload, 'deferred');
+    if (!channel.ok) return channel;
+    const channelValue = Object.freeze({ ...channel.value, signerKeyId: channelKey.value.keyId }) as VerifiedChannel;
+
+    const releaseDoc = parseDocument(input.releaseText);
+    if (!releaseDoc.ok) return releaseDoc;
+    let digest: string;
+    try { digest = canonicalSha256(releaseDoc.value); } catch { return fail('ERR-TRUST-CANONICALIZATION', 'release document cannot be canonicalized as RFC 8785 JSON'); }
+    if (digest !== channel.value.releaseManifestSha256) return fail('ERR-TRUST-SELECTION-DIGEST', 'cached channel release-manifest digest does not match the cached release document');
+    const releaseSigned = signedDocument(releaseDoc.value);
+    if (!releaseSigned.ok) return releaseSigned;
+    const releaseKey = authorizedKey(keyring.value, releaseSigned.value.signature.keyId, 'release');
+    if (!releaseKey.ok) return releaseKey;
+    const releaseSignature = verifySignature('gateway-release', releaseSigned.value.payload, releaseSigned.value.signature, releaseKey.value.publicKey);
+    if (!releaseSignature.ok) return releaseSignature;
+    const release = parseReleasePayload(releaseSigned.value.payload);
+    if (!release.ok) return release;
+    if (release.value.releaseId !== channel.value.releaseId) return fail('ERR-TRUST-SELECTION-RELEASE-ID', 'cached channel releaseId does not match the cached release manifest');
+
+    const value = Object.freeze({
+      keyring: keyring.value,
+      channel: channelValue,
+      release: release.value,
+      releaseManifestSha256: digest,
+    }) as VerifiedInstalledEvidence;
+    installedEvidenceAuthority.add(value);
+    return { ok: true, value };
+  }
+
+  return Object.freeze({
+    verifyRootSignedKeyring,
+    verifyChannelManifest,
+    verifyGatewayReleaseManifest,
+    verifyReleaseSelection,
+    verifyInstalledEvidence,
+    requireVerifiedReleaseSelection,
+    requireVerifiedInstalledEvidence,
+  });
 }
