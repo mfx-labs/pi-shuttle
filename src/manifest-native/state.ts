@@ -231,7 +231,11 @@ export async function classifyManifestNativeState(layout: ManifestNativeLayout, 
 
   const treeCheck = checkNativeObject(expectedTreeRoot, uid, 'directory', DIR_MODE);
   if (!treeCheck.ok) return malformed(treeCheck.message);
-  const treeDigest = await hashPackageTree(expectedTreeRoot);
+  // MN-B-04: the runtime mode policy is enforced during the same bounded
+  // no-follow walk that verifies type/ownership/identity/bounds/digest:
+  // directories exactly 0700, regular files owner-private. Unsafe nested
+  // modes fail closed (MALFORMED) without changing the digest framing.
+  const treeDigest = await hashPackageTree(expectedTreeRoot, {}, { requireOwnerPrivateModes: true });
   if (!treeDigest.ok) return malformed(`installed package tree failed verification (${treeDigest.code}): ${treeDigest.message}`);
   const packageIdentity = readPackageIdentity(expectedTreeRoot);
   if (packageIdentity === null) return malformed('installed package tree does not expose a valid package identity');

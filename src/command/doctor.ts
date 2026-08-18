@@ -51,12 +51,15 @@ import { resolvePiLoaderFromBin } from '../compat/pi-guard-probe.js';
 import { classifyNodeRuntime } from '../installer/preflight.js';
 import { readRuntimeDocument } from '../config/document.js';
 import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
-import { canonicalizePath, hostLane, resolveLayout } from '../host/environment.js';
+import { canonicalizePath, hostLane, resolveLayout, resolveManifestNativeLayout } from '../host/environment.js';
+import type { ManifestNativeLayout } from '../host/environment.js';
 import { hashPackageTree, readPackageIdentity } from '../installer/artifact.js';
 import { regularFileOrNull } from '../installer/archive.js';
 import { componentDirName, isPiShuttlePackageDirName, PI_GUARD_PACKAGE_NAME, PI_SHUTTLE_PACKAGE_NAME, piListConfirmsSource, piShuttlePackageDirName, validateBinPath } from '../installer/components.js';
 import { readReceipt } from '../installer/receipt.js';
 import type { InstallReceipt } from '../installer/receipt.js';
+import { resolveManifestNativeLifecycle } from '../manifest-native/resolve.js';
+import type { ManifestNativeResolution } from '../manifest-native/resolve.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
 import { projectLockPath } from '../lifecycle/state.js';
 import { inspectInstallLock } from '../persistence/lock.js';
@@ -105,6 +108,12 @@ export interface DoctorContext {
    * >= 0.83.0 other than the known-good baseline) require a PASS.
    */
   readonly piGuardProbe?: (piExecutable: string, piGuardDir: string) => Promise<{ readonly ok: boolean; readonly detail: string; readonly infrastructure: boolean }>;
+  /**
+   * Manifest-native lifecycle resolution (test seam only; defaults to the
+   * production boundary). Fixture-verified namespaces require the paired
+   * fixture provenance gate; production callers never pass this.
+   */
+  readonly resolveManifestNative?: (layout: ManifestNativeLayout, lane: string) => Promise<ManifestNativeResolution>;
 }
 
 /** Render a report deterministically; verdicts are printed exactly as vocabulary values. */
@@ -357,7 +366,46 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     }
   }
 
-  // 5. Installation receipt (single source of installed truth; never inferred from disk).
+  // 5. Manifest-native installation (NEW-STATE lifecycle; the future
+  //     fresh-install generation). Health is determined ONLY by the exact
+  //     locally authenticated installed release: receipt + exact cached
+  //     signed metadata + installed-evidence verification + canonical
+  //     paths + current supported lane/protocol contract + complete
+  //     installed package-tree digest (including the runtime mode policy).
+  //     NEVER compared against a compiled concrete Gateway patch release.
+  //     Fully offline; expired cached keyring/channel metadata is NOT a
+  //     health failure by itself; malformed signatures/static authority
+  //     still reject. Read-only: no repair, no chmod, no mutation.
+  //
+  //     AGGREGATE AUTHORITY (MN-B-03): when the manifest-native state is
+  //     VALID, the manifest-native check OWNS installation health and the
+  //     previous-generation installation checks (receipt / gateway /
+  //     pi-guard — category B: dependent on the previous receipt,
+  //     component, and install layout) become NOT APPLICABLE and are
+  //     omitted; they must never contribute a finding against a fully
+  //     authenticated manifest-native installation. Generation-independent
+  //     checks (platform/node/git/pi/runtime-config/projects/git-isolation/
+  //     locks — category C) continue to run and influence health normally.
+  //     Under CLEAN/MALFORMED the previous-generation checks remain visible
+  //     as honest state observation — never as fallback authority.
+  const mnLayout = resolveManifestNativeLayout(ctx.env.home);
+  const mnResolve = ctx.resolveManifestNative ?? ((layout: ManifestNativeLayout, hostLaneName: string) => resolveManifestNativeLifecycle(layout, hostLaneName));
+  const mn = await mnResolve(mnLayout, lane);
+  const previousGenerationChecksApplicable = mn.kind !== 'VALID';
+  if (mn.kind === 'VALID') {
+    const installation = mn.installation;
+    checks.push(check('manifest-native', 'manifest-native installation', 'supported', `release ${installation.receipt.gateway.releaseId} (lane ${installation.hostLane}) — receipt + exact cached signed chain + installed package-tree digest verified; no compiled release comparison involved`));
+  } else if (mn.kind === 'CLEAN') {
+    checks.push(check('manifest-native', 'manifest-native installation', 'missing', 'no manifest-native installation (clean manifest-native lifecycle)'));
+  } else {
+    checks.push(check('manifest-native', 'manifest-native installation', 'installed but unverified', `manifest-native state is malformed; doctor is read-only and performs no repair: ${mn.reason}`));
+  }
+
+  // 6. Previous-generation installation checks (category B): applicable
+  //     only when the manifest-native state is NOT VALID.
+  if (previousGenerationChecksApplicable) {
+  // 6a. Installation receipt (previous-generation single source of
+  //     installed truth; never inferred from disk).
   const receipt = readReceipt(layout.installReceiptPath);
   const gatewayReceipt = receipt.ok ? receipt.receipt.components.gateway : null;
   const piGuardReceipt = receipt.ok ? receipt.receipt.components.piGuard : null;
@@ -448,7 +496,8 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
     }
   }
 
-  // 7. pi-guard component (receipt + read-only Pi store inspection).
+  // 7. pi-guard component (previous-generation; receipt + read-only Pi
+  //     store inspection).
   if (receipt.ok && piGuardReceipt !== null) {
     const piGuardEntry = piGuardReceipt;
     if (piGuardEntry.status === 'failed') {
@@ -474,6 +523,8 @@ export async function runDoctor(ctx: DoctorContext): Promise<DoctorResult> {
   } else {
     checks.push(check('pi-guard', 'pi-guard component', 'missing', 'no pi-guard component recorded in the installation receipt (Pi-side enforcement absent)'));
   }
+
+  } // end previous-generation installation checks (omitted when manifest-native is VALID)
 
   // 8. Runtime configuration (exists / parses / closed model valid).
   const config = readRuntimeDocument(layout.runtimeConfigPath);

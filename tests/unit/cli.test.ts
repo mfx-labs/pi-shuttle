@@ -103,7 +103,7 @@ test('cli dispatch: PS-4 operational handlers fail closed without an installatio
   assert.equal(start.exitCode, 1);
   assert.equal(start.stdout, '');
   assert.ok(start.stderr.includes('start'), start.stderr);
-  assert.ok(start.stderr.includes('receipt'), start.stderr);
+  assert.ok(start.stderr.includes('no manifest-native installation'), start.stderr);
 
   // project list works without any installation (empty registry is valid).
   const list = await run(['project', 'list'], { env: LINUX_ENV });

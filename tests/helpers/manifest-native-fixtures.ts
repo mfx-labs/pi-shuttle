@@ -17,6 +17,8 @@ import type { TrustResult, VerifiedInstalledEvidence, VerifiedReleaseSelection }
 import type { TrustVerifier } from '../../src/installer/release/trust-internal.js';
 import { hashPackageTree, readPackageIdentity } from '../../src/installer/artifact.js';
 import type { PackageIdentity } from '../../src/installer/artifact.js';
+import { resolveManifestNativeLifecycle } from '../../src/manifest-native/resolve.js';
+import type { ManifestNativeResolution } from '../../src/manifest-native/resolve.js';
 import { buildManifestNativeReceipt, serializeManifestNativeReceipt } from '../../src/manifest-native/receipt.js';
 import type { ParsedManifestNativeReceipt } from '../../src/manifest-native/receipt.js';
 import { serializeManifestNativeCache } from '../../src/manifest-native/cache.js';
@@ -249,4 +251,15 @@ export function nativeClassifyDeps(verifier = fixtureVerifier(FIXTURE_NOW)): {
     verifyInstalledEvidence: (input) => verifier.verifyInstalledEvidence(input),
     requireInstalledEvidence: (value) => verifier.requireVerifiedInstalledEvidence(value),
   };
+}
+
+/**
+ * Fixture lifecycle-resolution seam (Slice B): resolves a namespace
+ * through the production Slice-B resolution boundary with the fixture
+ * verifier's provenance gates. Doctor/start tests inject this; production
+ * defaults never include it.
+ */
+export function nativeResolver(verifier = fixtureVerifier(FIXTURE_NOW)): (layout: ManifestNativeLayout, lane: string) => Promise<ManifestNativeResolution> {
+  const deps = nativeClassifyDeps(verifier);
+  return (layout, lane) => resolveManifestNativeLifecycle(layout, lane, deps);
 }

@@ -74,10 +74,24 @@ export async function hashFile(path: string): Promise<string> {
  *
  * The optional `bounds` argument is a test seam for exercising the
  * ceilings; production callers never pass it.
+ *
+ * The optional `options.requireOwnerPrivateModes` flag (MN-B-04) enables
+ * the manifest-native runtime mode policy WITHOUT changing the digest
+ * framing: every directory must be exactly 0700, every regular file must
+ * have no group/world permission bits ((mode & 0o077) == 0), and owner ==
+ * effective UID for every entry (already enforced). Mode validation is
+ * filesystem-safety metadata validation, separate from digest identity —
+ * no mode bytes enter the hash stream, and a mode-only change leaves the
+ * digest byte-identical while failing runtime tree validation.
  */
 export interface PackageTreeBounds {
   readonly maxEntries?: number;
   readonly maxFileBytes?: number;
+}
+
+export interface PackageTreeOptions {
+  /** Manifest-native runtime mode policy (directories exact 0700; files owner-private). */
+  readonly requireOwnerPrivateModes?: boolean;
 }
 
 export const PACKAGE_TREE_MAX_ENTRIES = 100_000;
@@ -112,13 +126,14 @@ function utf8ByteOrder(a: string, b: string): number {
 }
 
 /** Hash one regular file through a no-follow descriptor, verifying identity. */
-function hashTreeFile(path: string, expected: { readonly dev: number; readonly ino: number }, maxFileBytes: number, alreadyHashed: number): { readonly sha256: string; readonly bytes: number } {
+function hashTreeFile(path: string, expected: { readonly dev: number; readonly ino: number }, maxFileBytes: number, alreadyHashed: number, requireOwnerPrivateModes: boolean): { readonly sha256: string; readonly bytes: number } {
   const flags = constants.O_RDONLY | (typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0);
   const fd = openSync(path, flags);
   try {
     const stat = fstatSync(fd);
     if (!stat.isFile()) throw new Error(`entry is no longer a regular file: ${path}`);
     if (stat.dev !== expected.dev || stat.ino !== expected.ino) throw new Error(`entry changed between enumeration and hashing: ${path}`);
+    if (requireOwnerPrivateModes && (stat.mode & 0o077) !== 0) throw new Error(`file exposes group/world permission bits (mode ${(stat.mode & 0o777).toString(8).padStart(4, '0')}): ${path}`);
     if (stat.size > maxFileBytes - alreadyHashed) throw new Error('package tree exceeds the total regular-file byte ceiling');
     const hash = createHash('sha256');
     const buffer = Buffer.allocUnsafe(1024 * 1024);
@@ -137,9 +152,10 @@ function hashTreeFile(path: string, expected: { readonly dev: number; readonly i
 }
 
 /** Deterministic byte/inventory digest of an extracted or installed package tree. */
-export async function hashPackageTree(packageRoot: string, bounds: PackageTreeBounds = {}): Promise<ArtifactResult<string>> {
+export async function hashPackageTree(packageRoot: string, bounds: PackageTreeBounds = {}, options: PackageTreeOptions = {}): Promise<ArtifactResult<string>> {
   const maxEntries = bounds.maxEntries ?? PACKAGE_TREE_MAX_ENTRIES;
   const maxFileBytes = bounds.maxFileBytes ?? PACKAGE_TREE_MAX_FILE_BYTES;
+  const requireOwnerPrivateModes = options.requireOwnerPrivateModes === true;
   const entries: TreeEntry[] = [];
   const fileInodes = new Set<string>();
   const uid = process.getuid?.() ?? -1;
@@ -150,6 +166,12 @@ export async function hashPackageTree(packageRoot: string, bounds: PackageTreeBo
     if (Buffer.byteLength(rel, 'utf8') > PACKAGE_TREE_MAX_RELATIVE_PATH_BYTES) throw new Error(`package path exceeds the ${PACKAGE_TREE_MAX_RELATIVE_PATH_BYTES}-byte ceiling: ${rel}`);
     if (stat.isSymbolicLink()) throw new Error(`symbolic link rejected at ${rel}`);
     if (stat.uid !== uid) throw new Error(`package entry ${rel} is not owned by the effective user`);
+    // MN-B-04 mode policy (runtime safety metadata; never part of the digest):
+    // directories exactly 0700; regular files owner-private (no group/world bits).
+    if (requireOwnerPrivateModes) {
+      if (stat.isDirectory() && (stat.mode & 0o7777) !== 0o700) throw new Error(`directory mode ${(stat.mode & 0o7777).toString(8)} is not exactly 0700: ${rel}`);
+      if (stat.isFile() && (stat.mode & 0o077) !== 0) throw new Error(`file exposes group/world permission bits (mode ${(stat.mode & 0o777).toString(8).padStart(4, '0')}): ${rel}`);
+    }
     // F-02: the entry ceiling is enforced DURING traversal — the moment
     // the next accepted entry would exceed the limit, work stops. This
     // bounds inventory allocation, inode-set allocation, and recursive
@@ -182,7 +204,7 @@ export async function hashPackageTree(packageRoot: string, bounds: PackageTreeBo
       digest.update(entry.rel);
       digest.update('\0');
       if (entry.kind === 'file') {
-        const file = hashTreeFile(join(packageRoot, entry.rel), entry, maxFileBytes, totalBytes);
+        const file = hashTreeFile(join(packageRoot, entry.rel), entry, maxFileBytes, totalBytes, requireOwnerPrivateModes);
         totalBytes += file.bytes;
         digest.update(file.sha256);
         digest.update('\0');
@@ -191,6 +213,9 @@ export async function hashPackageTree(packageRoot: string, bounds: PackageTreeBo
         const stat = lstatSync(join(packageRoot, entry.rel));
         if (!stat.isDirectory() || stat.isSymbolicLink() || stat.dev !== entry.dev || stat.ino !== entry.ino) {
           throw new Error(`directory changed between enumeration and hashing: ${entry.rel}`);
+        }
+        if (requireOwnerPrivateModes && (stat.mode & 0o7777) !== 0o700) {
+          throw new Error(`directory mode ${(stat.mode & 0o7777).toString(8)} is not exactly 0700: ${entry.rel}`);
         }
       }
     }

@@ -43,7 +43,7 @@ export function checkNativeObject(path: string, uid: number, kind: 'directory' |
 }
 
 export type NativeReadResult =
-  | { readonly ok: true; readonly text: string }
+  | { readonly ok: true; readonly text: string; readonly stat: Stats }
   | { readonly ok: false; readonly code: 'absent' | 'symlink' | 'type' | 'owner' | 'mode' | 'too-large' | 'read-failed'; readonly message: string };
 
 /**
@@ -71,7 +71,10 @@ export function readBoundedNativeFile(path: string, ceiling: number, uid: number
       total += n;
     }
     if (total > ceiling) return { ok: false, code: 'too-large', message: `${path} exceeds the ${ceiling}-byte ceiling` };
-    return { ok: true, text: buffer.subarray(0, total).toString('utf8') };
+    // The fstat'd identity (dev/ino/type/owner/mode) of the object actually
+    // read is returned so later durability barriers can bind to the exact
+    // verified inode (MN-B-02b).
+    return { ok: true, text: buffer.subarray(0, total).toString('utf8'), stat };
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
     return {

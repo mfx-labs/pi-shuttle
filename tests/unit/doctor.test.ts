@@ -13,17 +13,29 @@ import type { DoctorCheck } from '../../src/command/doctor.js';
 import { resolveLayout } from '../../src/host/environment.js';
 import { cleanupEnv, installFixtureGateway, makeEnv, makeHealthyEnv, makeProjectRoot, writeReceiptFixture, writeFakeGit, writeRuntimeDocument } from '../helpers/lifecycle-fixtures.js';
 import { writeFakePi } from '../helpers/installer-fixtures.js';
+import { fixtureVerifier, FIXTURE_NOW } from '../helpers/release-trust-fixtures.js';
+import { materializeNativeNamespace, nativeResolver } from '../helpers/manifest-native-fixtures.js';
 import { hashPackageTree } from '../../src/installer/artifact.js';
 import { piShuttlePackageDirName } from '../../src/installer/components.js';
 import { readReceipt, writeReceipt } from '../../src/installer/receipt.js';
 
-function healthyContext(options: { readonly withRuntimeConfig?: boolean; readonly withPiGuard?: boolean } = {}) {
+async function healthyContext(options: { readonly withRuntimeConfig?: boolean; readonly withPiGuard?: boolean; readonly manifestNative?: boolean } = {}) {
   const healthy = makeHealthyEnv(options);
+  // NEW-STATE lifecycle: when `manifestNative` is set, a valid
+  // manifest-native installation (fixture verifier + paired provenance
+  // gate) makes the new-world doctor check healthy AND makes the
+  // previous-generation installation checks (receipt/gateway/pi-guard)
+  // not applicable (MN-B-03 aggregate transition). Default off: the
+  // previous-generation-focused tests observe the old checks unchanged.
+  const verifier = fixtureVerifier(FIXTURE_NOW);
+  if (options.manifestNative === true) {
+    await materializeNativeNamespace(healthy.env, {}, undefined, verifier);
+  }
   return {
     env: healthy.env,
     root: healthy.root,
     layout: healthy.layout,
-    ctx: { env: { home: healthy.env, platform: 'linux', arch: 'x64' }, layout: healthy.layout, nodeExecutable: process.execPath, pathEnv: healthy.pathEnv },
+    ctx: { env: { home: healthy.env, platform: 'linux', arch: 'x64' }, layout: healthy.layout, nodeExecutable: process.execPath, pathEnv: healthy.pathEnv, ...(options.manifestNative === true ? { resolveManifestNative: nativeResolver(verifier) } : {}) },
   };
 }
 
@@ -47,15 +59,20 @@ test('doctor: every status vocabulary value renders exactly on synthetic states'
 });
 
 test('doctor: complete healthy local setup exits 0 (all implemented checks pass)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext({ manifestNative: true });
   try {
     const result = await runDoctor(ctx);
     assert.equal(result.ok, true);
     if (!result.ok) return;
     assert.equal(result.exitCode, 0, formatDoctorReport(result.report));
     const v = verdicts(result.report);
-    for (const id of ['platform', 'node', 'git', 'pi', 'receipt', 'gateway', 'pi-guard', 'runtime-config', 'project-0', 'git-isolation-0', 'locks']) {
+    for (const id of ['platform', 'node', 'git', 'pi', 'manifest-native', 'runtime-config', 'project-0', 'git-isolation-0', 'locks']) {
       assert.equal(v[id], 'supported', `check ${id} must be supported: ${formatDoctorReport(result.report)}`);
+    }
+    // MN-B-03: previous-generation installation checks are NOT APPLICABLE
+    // under a VALID manifest-native installation — never reported missing.
+    for (const id of ['receipt', 'gateway', 'pi-guard']) {
+      assert.equal(v[id], undefined, `previous-generation check ${id} must be omitted under VALID manifest-native state`);
     }
     assert.ok(result.report.notes.some((n) => n.includes('PS-7')), 'tunnel/ChatGPT deferral must be noted');
     assert.ok(result.report.notes.some((n) => n.includes('read-only')), 'trusted-store limitation must be noted truthfully');
@@ -65,7 +82,7 @@ test('doctor: complete healthy local setup exits 0 (all implemented checks pass)
 });
 
 test('doctor: Latest receipt verifies its semantic version, exact source slot, command target, and package bytes', async () => {
-  const { env, ctx, layout } = healthyContext();
+  const { env, ctx, layout } = await healthyContext();
   try {
     const sourceIdentity = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
     const root = join(layout.packagesDir, piShuttlePackageDirName('0.1.1', sourceIdentity));
@@ -132,7 +149,7 @@ test('doctor: Latest receipt verifies its semantic version, exact source slot, c
 });
 
 test('doctor: missing installation receipt is a finding (exit 1)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     rmSync(join(env, '.local', 'state', 'pi-shuttle', 'install.json'));
     const result = await runDoctor(ctx);
@@ -146,7 +163,7 @@ test('doctor: missing installation receipt is a finding (exit 1)', async () => {
 });
 
 test('doctor: partial installation is reported with the omitted components (exit 1)', async () => {
-  const { env, ctx } = healthyContext({ withPiGuard: false });
+  const { env, ctx } = await healthyContext({ withPiGuard: false });
   try {
     const result = await runDoctor(ctx);
     assert.equal(result.ok, true);
@@ -160,7 +177,7 @@ test('doctor: partial installation is reported with the omitted components (exit
 });
 
 test('doctor: invalid installation receipt fails closed (exit 1)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     writeFileSync(join(env, '.local', 'state', 'pi-shuttle', 'install.json'), '{"foreign": true}', { mode: 0o600 });
     const result = await runDoctor(ctx);
@@ -173,7 +190,7 @@ test('doctor: invalid installation receipt fails closed (exit 1)', async () => {
 });
 
 test('doctor: gateway missing (receipt entry gone, package absent) is a finding (exit 1)', async () => {
-  const { env, ctx, layout } = healthyContext();
+  const { env, ctx, layout } = await healthyContext();
   try {
     const gatewayDir = join(layout.packagesDir, 'project-gateway-artifact-core@0.1.0');
     rmSync(gatewayDir, { recursive: true, force: true });
@@ -189,7 +206,7 @@ test('doctor: gateway missing (receipt entry gone, package absent) is a finding 
 });
 
 test('doctor: gateway package present without a receipt record is installed but unverified (exit 1)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     writeReceiptFixture(env, { gateway: null, piGuard: null, result: 'PARTIAL', omitted: ['project-gateway-mcp'] });
     const result = await runDoctor(ctx);
@@ -203,7 +220,7 @@ test('doctor: gateway package present without a receipt record is installed but 
 });
 
 test('doctor: gateway installed-unverified is reported truthfully (exit 1)', async () => {
-  const { env, root, ctx } = healthyContext({ withRuntimeConfig: false });
+  const { env, root, ctx } = await healthyContext({ withRuntimeConfig: false });
   try {
     const layout = resolveLayout(env);
     const gateway = installFixtureGateway(env);
@@ -220,7 +237,7 @@ test('doctor: gateway installed-unverified is reported truthfully (exit 1)', asy
 });
 
 test('doctor: gateway package removed from disk after install is missing (exit 1)', async () => {
-  const { env, root, ctx } = healthyContext({ withRuntimeConfig: false });
+  const { env, root, ctx } = await healthyContext({ withRuntimeConfig: false });
   try {
     const layout = resolveLayout(env);
     const gateway = installFixtureGateway(env);
@@ -239,7 +256,7 @@ test('doctor: gateway package removed from disk after install is missing (exit 1
 });
 
 test('doctor: pi baseline is supported; pi non-baseline is unsupported (exit 2, never claimed)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const supported = await runDoctor(ctx);
     assert.equal(supported.ok, true);
@@ -250,7 +267,7 @@ test('doctor: pi baseline is supported; pi non-baseline is unsupported (exit 2, 
 });
 
 test('doctor: pi below the minimum is unsupported (exit 2); a candidate is healthy only with a PASSING probe', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext({ manifestNative: true });
   try {
     const binDir = join(env, 'fixture-bin');
     writeFakePi(binDir);
@@ -273,6 +290,7 @@ test('doctor: pi below the minimum is unsupported (exit 2); a candidate is healt
       ...ctx,
       pathEnv: { ...ctx.pathEnv, FIXTURE_PI_VERSION: '0.84.1' },
       piGuardProbe: async () => ({ ok: true, detail: 'fixture probe PASS', infrastructure: false }),
+      resolveManifestNative: ctx.resolveManifestNative,
     });
     assert.equal(passed.ok, true);
     if (!passed.ok) return;
@@ -295,7 +313,7 @@ test('doctor: pi below the minimum is unsupported (exit 2); a candidate is healt
 });
 
 test('doctor: git missing is a finding; wrong evidence lane is unsupported (exit 2)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const noGitPathEnv = { ...ctx.pathEnv, PATH: join(env, 'no-git') };
     mkdirSync(join(env, 'no-git'), { mode: 0o700 });
@@ -311,7 +329,7 @@ test('doctor: git missing is a finding; wrong evidence lane is unsupported (exit
 });
 
 test('doctor: git wrong version below the minimum is unsupported (exit 2); newer versions are healthy', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext({ manifestNative: true });
   try {
     const binDir = join(env, 'fixture-bin');
     // Below the minimum 2.30.0 → unsupported (exit 2).
@@ -345,7 +363,7 @@ test('doctor: git wrong version below the minimum is unsupported (exit 2); newer
 });
 
 test('doctor: git present with unparseable version is installed but unverified (exit 1)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const binDir = join(env, 'fixture-bin');
     writeFileSync(join(binDir, 'git'), `#!/usr/bin/env node
@@ -363,7 +381,7 @@ process.exit(0);
 });
 
 test('doctor: runtime config missing is a finding; malformed fails closed (exit 1)', async () => {
-  const { env, ctx, layout } = healthyContext({ withRuntimeConfig: false });
+  const { env, ctx, layout } = await healthyContext({ withRuntimeConfig: false });
   try {
     const missing = await runDoctor(ctx);
     assert.equal(missing.ok, true);
@@ -382,7 +400,7 @@ test('doctor: runtime config missing is a finding; malformed fails closed (exit 
 });
 
 test('doctor: project root missing is a finding (exit 1)', async () => {
-  const { env, root, ctx } = healthyContext();
+  const { env, root, ctx } = await healthyContext();
   try {
     rmSync(root, { recursive: true, force: true });
     const result = await runDoctor(ctx);
@@ -396,7 +414,7 @@ test('doctor: project root missing is a finding (exit 1)', async () => {
 });
 
 test('doctor: coordination lock artifacts are reported read-only for next-writer ownership revalidation', async () => {
-  const { env, ctx, layout } = healthyContext();
+  const { env, ctx, layout } = await healthyContext();
   try {
     writeFileSync(`${layout.runtimeConfigPath}.lock`, '9999\n', { mode: 0o600 });
     const result = await runDoctor(ctx);
@@ -415,7 +433,7 @@ test('doctor: coordination lock artifacts are reported read-only for next-writer
 });
 
 test('doctor: x86_64 is support-promoted, arm64 remains technically eligible but unpromoted, and windows fails closed', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const arm64Node = writeFakeNode(env, 'arm64');
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: arm64Node });
@@ -460,7 +478,7 @@ function writeFakeNode(binDir: string, arch: string | null): string {
 }
 
 test('doctor: descriptor-bound darwin-arm64 still requires a native arm64 Node', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const node = writeFakeNode(env, 'arm64');
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
@@ -475,7 +493,7 @@ test('doctor: descriptor-bound darwin-arm64 still requires a native arm64 Node',
 });
 
 test('doctor: darwin-arm64 Rosetta/x64 node check still fails closed', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const node = writeFakeNode(env, 'x64');
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
@@ -491,7 +509,7 @@ test('doctor: darwin-arm64 Rosetta/x64 node check still fails closed', async () 
 });
 
 test('doctor: darwin-arm64 unobservable-arch probe remains installed but unverified', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const node = writeFakeNode(env, null);
     const darwin = await runDoctor({ ...ctx, env: { home: env, platform: 'darwin', arch: 'arm64' }, nodeExecutable: node });
@@ -505,7 +523,7 @@ test('doctor: darwin-arm64 unobservable-arch probe remains installed but unverif
 });
 
 test('doctor: Linux behavior is unaffected by the darwin arch probe (no arch probe on linux)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const node = writeFakeNode(env, 'x64'); // would fail the darwin lane
     const linux = await runDoctor({ ...ctx, env: { home: env, platform: 'linux', arch: 'x64' }, nodeExecutable: node });
@@ -518,7 +536,7 @@ test('doctor: Linux behavior is unaffected by the darwin arch probe (no arch pro
 });
 
 test('doctor: Windows-like platform is unsupported (exit 2)', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const win = await runDoctor({ ...ctx, env: { home: env, platform: 'win32', arch: 'x64' } });
     assert.equal(win.ok, true);
@@ -531,7 +549,7 @@ test('doctor: Windows-like platform is unsupported (exit 2)', async () => {
 });
 
 test('doctor: tunnel/ChatGPT readiness is reported as not locally observable, never fabricated', async () => {
-  const { env, ctx } = healthyContext();
+  const { env, ctx } = await healthyContext();
   try {
     const result = await runDoctor(ctx);
     assert.equal(result.ok, true);
@@ -545,7 +563,7 @@ test('doctor: tunnel/ChatGPT readiness is reported as not locally observable, ne
 });
 
 test('doctor: git isolation dirs missing is a finding (exit 1)', async () => {
-  const { env, ctx, layout } = healthyContext();
+  const { env, ctx, layout } = await healthyContext();
   try {
     rmSync(join(layout.gitHomeDir, '0123456789abcdef0123456789abcdef'), { recursive: true, force: true });
     const result = await runDoctor(ctx);
@@ -567,7 +585,9 @@ test('doctor: symlinked project root resolves canonically in the project check',
     const real = makeProjectRoot(healthy.env, 'real-root');
     symlinkSync(real, healthy.root);
     const layout = resolveLayout(healthy.env);
-    const result = await runDoctor({ env: { home: healthy.env, platform: 'linux', arch: 'x64' }, layout, nodeExecutable: process.execPath, pathEnv: healthy.pathEnv });
+    const verifier = fixtureVerifier(FIXTURE_NOW);
+    await materializeNativeNamespace(healthy.env, {}, undefined, verifier);
+    const result = await runDoctor({ env: { home: healthy.env, platform: 'linux', arch: 'x64' }, layout, nodeExecutable: process.execPath, pathEnv: healthy.pathEnv, resolveManifestNative: nativeResolver(verifier) });
     assert.equal(result.ok, true);
     if (result.ok) {
       assert.equal(verdicts(result.report)['project-0'], 'supported');

@@ -26,7 +26,8 @@ const reconciledType: unique symbol = Symbol('ReconciledManifestNativeInstallati
  * Only reconcileManifestNativeInstallation() adds to this set, so only it
  * can produce a runtime-recognized reconciled installation. No public
  * check API is exposed in this slice; a narrow require function for
- * Slice-B consumers can be added later without any new authority seam.
+ * consumed through requireReconciledManifestNativeInstallation() only;
+ * no WeakSet or authority-set is exported.
  */
 const reconciledAuthority = new WeakSet<object>();
 
@@ -52,6 +53,30 @@ export interface ReconciledManifestNativeInstallation {
 export type ReconciliationResult =
   | { readonly ok: true; readonly value: ReconciledManifestNativeInstallation }
   | { readonly ok: false; readonly code: string; readonly message: string };
+
+export type ReconciledGateResult =
+  | { readonly ok: true; readonly value: ReconciledManifestNativeInstallation }
+  | { readonly ok: false; readonly code: 'ERR-MN-RECONCILED-AUTHORITY'; readonly message: string };
+
+/**
+ * Runtime provenance gate for reconciled installations (NEW-STATE Slice B).
+ * Accepts ONLY the exact object registered by a successful
+ * reconcileManifestNativeInstallation() call. Structural lookalikes,
+ * casts, shallow/spread/Object.assign copies, JSON round-trips, and
+ * mutated objects all fail closed — membership is by exact object
+ * identity in the private reconciledAuthority set, which no other code
+ * can add to.
+ */
+export function requireReconciledManifestNativeInstallation(value: unknown): ReconciledGateResult {
+  if (typeof value !== 'object' || value === null || !reconciledAuthority.has(value as object)) {
+    return {
+      ok: false,
+      code: 'ERR-MN-RECONCILED-AUTHORITY',
+      message: 'value is not a runtime-proven reconciled manifest-native installation (exact object identity required)',
+    };
+  }
+  return { ok: true, value: value as ReconciledManifestNativeInstallation };
+}
 
 export interface ReconciliationInput {
   readonly receipt: ParsedManifestNativeReceipt;

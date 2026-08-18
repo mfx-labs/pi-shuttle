@@ -87,11 +87,15 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   // PS-4 lifecycle boundary (approved operator-directory creation + probes):
   'src/lifecycle/state.ts': ['existsSync'],
   'src/lifecycle/projects.ts': ['mkdirSync', 'statSync', 'unlinkSync', 'existsSync'],
-  'src/lifecycle/start.ts': ['statSync'],
+  'src/lifecycle/start.ts': [],
   'src/command/doctor.ts': ['existsSync', 'lstatSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'statSync'],
   // Manifest-native authority validation (NEW-STATE Slice A; read-only):
   'src/manifest-native/fs.ts': ['closeSync', 'constants', 'fstatSync', 'lstatSync', 'openSync', 'readSync'],
   'src/manifest-native/state.ts': ['readdirSync'],
+  'src/manifest-native/resolve.ts': ['lstatSync'],
+  // Manifest-native durable publication (NEW-STATE Slice B; the only
+  // manifest-native mutation surface — same class as the persistence writer):
+  'src/manifest-native/write.ts': ['closeSync', 'constants', 'fchmodSync', 'fstatSync', 'fsyncSync', 'linkSync', 'mkdirSync', 'openSync', 'unlinkSync', 'writeSync'],
 };
 
 test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src (PS-8A release acquisition boundary exempt)', () => {
@@ -131,6 +135,14 @@ test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the
     // CLI boundary (spawned by the release install.sh).
     if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts' || rel(file) === 'src/compat/pi-guard-probe.ts' || rel(file) === 'src/installer/release/bootstrap.ts') continue;
     assert.equal(content.includes('process.env'), false, `${rel(file)} must not read the environment directly`);
+  }
+});
+
+test('slice-b static guard: manifest-native durable publication is confined to the manifest-native module and tests', () => {
+  for (const file of files) {
+    if (rel(file).startsWith('src/manifest-native/')) continue;
+    const content = readFileSync(file, 'utf8');
+    assert.equal(content.includes('manifest-native/write.js'), false, `${rel(file)} must not reach the manifest-native durable publication primitive (fresh-install slice owns that wiring)`);
   }
 });
 
@@ -187,7 +199,7 @@ test('ps2/ps3 static guard: filesystem mutation vocabulary lives only in the wri
   const MUTATING = ['renameSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'cpSync', 'chmodSync', 'symlinkSync', 'writeFileSync', 'copyFileSync', 'truncateSync'];
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;
+    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || rel(file) === 'src/manifest-native/write.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;
     for (const name of MUTATING) {
       assert.equal(content.includes(name), false, `${rel(file)} must not mutate the filesystem (${name})`);
     }
