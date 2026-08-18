@@ -32,10 +32,12 @@ function uiWith(answers: readonly string[]): PromptUI & { readonly asked: string
 }
 
 const BATCH = ['--batch', '--gateway', 'yes', '--pi-guard', 'yes'] as const;
+const SOURCE_A = `mfx-labs/pi-shuttle@${'a'.repeat(40)}`;
+const SOURCE_B = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
 
-function runUpgradeConsent(name: 'promptUpgrade' | 'approveBatchUpgrade', input = ''): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
+function runUpgradeConsent(name: 'promptUpgrade' | 'approveBatchUpgrade', input = '', args: readonly unknown[] = ['0.1.0', '0.1.1']): Promise<{ readonly code: number | null; readonly stdout: string; readonly stderr: string }> {
   const moduleUrl = pathToFileURL(join(REPO, 'dist', 'installer', 'selection.js')).href;
-  const script = `import { ${name} } from ${JSON.stringify(moduleUrl)}; const decision = await ${name}('0.1.0', '0.1.1'); process.stdout.write('\\nDECISION=' + decision + '\\n');`;
+  const script = `import { ${name} } from ${JSON.stringify(moduleUrl)}; const decision = await ${name}(...${JSON.stringify(args)}); process.stdout.write('\\nDECISION=' + decision + '\\n');`;
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, ['--input-type=module', '--eval', script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
@@ -113,7 +115,7 @@ test('selection: interactive ~-prefixed and ./ input is rejected like any relati
   assert.equal(ui.asked.filter((q) => q.startsWith('Command/bin directory')).length, 2);
 });
 
-test('selection: production promptUpgrade supports default/yes/no and reprompts invalid input', async () => {
+test('selection: semantic-version promptUpgrade supports default/yes/no and reprompts invalid input', async () => {
   for (const [input, expected] of [['\n', true], ['yes\n', true], ['n\n', false]] as const) {
     const run = await runUpgradeConsent('promptUpgrade', input);
     assert.equal(run.code, 0, run.stdout + run.stderr);
@@ -129,6 +131,31 @@ test('selection: production promptUpgrade supports default/yes/no and reprompts 
   assert.equal(invalid.stdout.split('Upgrade 0.1.0 → 0.1.1? [Y/n]:').length - 1, 2, 'invalid input must repeat the upgrade prompt');
   assert.match(invalid.stderr, /please answer yes or no/);
   assert.match(invalid.stdout, /DECISION=true/);
+});
+
+test('selection: source transitions use source-aware consent wording', async () => {
+  const latest = await runUpgradeConsent('promptUpgrade', '\n', ['0.1.1', '0.1.1', {
+    kind: 'latest-source', installedSource: SOURCE_A, latestSource: SOURCE_B,
+  }]);
+  assert.equal(latest.code, 0, latest.stdout + latest.stderr);
+  assert.match(latest.stdout, /Existing pi-shuttle Latest installation detected:/);
+  assert.ok(latest.stdout.includes(`Installed source: ${SOURCE_A}`), latest.stdout);
+  assert.ok(latest.stdout.includes(`Latest source:    ${SOURCE_B}`), latest.stdout);
+  assert.match(latest.stdout, /Update to the new Latest source\? \[Y\/n\]:/);
+  assert.doesNotMatch(latest.stdout, /Upgrade 0\.1\.1 → 0\.1\.1/);
+  assert.match(latest.stdout, /DECISION=true/);
+
+  const stable = await runUpgradeConsent('promptUpgrade', '\n', ['0.1.1', '0.1.1', {
+    kind: 'stable-to-latest', latestSource: SOURCE_B,
+  }]);
+  assert.equal(stable.code, 0, stable.stdout + stable.stderr);
+  assert.match(stable.stdout, /Existing pi-shuttle Stable installation detected:/);
+  assert.match(stable.stdout, /Installed channel: stable/);
+  assert.match(stable.stdout, /Target channel:    latest/);
+  assert.ok(stable.stdout.includes(`Latest source:     ${SOURCE_B}`), stable.stdout);
+  assert.match(stable.stdout, /Switch from Stable 0\.1\.1 to Latest 0\.1\.1\? \[Y\/n\]:/);
+  assert.doesNotMatch(stable.stdout, /Upgrade 0\.1\.1 → 0\.1\.1/);
+  assert.match(stable.stdout, /DECISION=true/);
 });
 
 test('selection: production approveBatchUpgrade emits the upgrade notice and accepts', async () => {

@@ -13,6 +13,7 @@ import { realpathSync } from 'node:fs';
 import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
 import { hostLane, resolveLayout } from '../host/environment.js';
 import { INSTALLER_USAGE, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from './selection.js';
+import type { SourceTransition } from './selection.js';
 import { runInstall } from './install.js';
 import type { InstallOutcome } from './install.js';
 import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
@@ -54,17 +55,31 @@ function latestHandoffFromEnv(env: NodeJS.ProcessEnv): LatestHandoff | { readonl
   };
 }
 
+function successfulChange(upgradedFrom: string | undefined, sourceTransition: SourceTransition | undefined): string | undefined {
+  if (sourceTransition?.kind === 'latest-source') return 'updated pi-shuttle Latest source';
+  if (sourceTransition?.kind === 'stable-to-latest') return `switched pi-shuttle ${upgradedFrom ?? PI_SHUTTLE_VERSION} from Stable to Latest`;
+  return upgradedFrom !== undefined ? `upgraded pi-shuttle ${upgradedFrom} → ${PI_SHUTTLE_VERSION}` : undefined;
+}
+
 export function formatOutcome(outcome: InstallOutcome): string {
   switch (outcome.kind) {
-    case 'COMPLETE':
-      return `result: COMPLETE — all selected components installed and verified${outcome.upgradedFrom !== undefined ? `; upgraded pi-shuttle ${outcome.upgradedFrom} → ${PI_SHUTTLE_VERSION}` : ''}`;
-    case 'PARTIAL':
-      return `result: PARTIAL INSTALLATION${outcome.upgradedFrom !== undefined ? ` — upgraded pi-shuttle ${outcome.upgradedFrom} → ${PI_SHUTTLE_VERSION}` : ''}${outcome.omitted.length > 0 ? ` — not installed: ${outcome.omitted.join(', ')}` : ''}${outcome.notes.length > 0 ? `\n  notes: ${outcome.notes.join('\n  notes: ')}` : ''}`;
+    case 'COMPLETE': {
+      const change = successfulChange(outcome.upgradedFrom, outcome.sourceTransition);
+      return `result: COMPLETE — all selected components installed and verified${change !== undefined ? `; ${change}` : ''}`;
+    }
+    case 'PARTIAL': {
+      const change = successfulChange(outcome.upgradedFrom, outcome.sourceTransition);
+      return `result: PARTIAL INSTALLATION${change !== undefined ? ` — ${change}` : ''}${outcome.omitted.length > 0 ? ` — not installed: ${outcome.omitted.join(', ')}` : ''}${outcome.notes.length > 0 ? `\n  notes: ${outcome.notes.join('\n  notes: ')}` : ''}`;
+    }
     case 'ALREADY_INSTALLED':
       return `result: ALREADY INSTALLED — pi-shuttle ${outcome.version} is verified; no changes were needed`;
     case 'UPGRADE_AVAILABLE':
+      if (outcome.sourceTransition?.kind === 'latest-source') return `result: LATEST SOURCE UPDATE AVAILABLE — verified pi-shuttle Latest source can be updated from ${outcome.sourceTransition.installedSource} to ${outcome.sourceTransition.latestSource}; explicit confirmation is required`;
+      if (outcome.sourceTransition?.kind === 'stable-to-latest') return `result: CHANNEL SWITCH AVAILABLE — verified pi-shuttle Stable ${outcome.installedVersion} can switch to Latest ${outcome.installerVersion}; explicit confirmation is required`;
       return `result: UPGRADE AVAILABLE — verified pi-shuttle ${outcome.installedVersion} can be upgraded to ${outcome.installerVersion}; explicit confirmation is required`;
     case 'UPGRADE_DECLINED':
+      if (outcome.sourceTransition?.kind === 'latest-source') return 'result: LATEST SOURCE UPDATE DECLINED — pi-shuttle Latest source was preserved unchanged';
+      if (outcome.sourceTransition?.kind === 'stable-to-latest') return `result: CHANNEL SWITCH DECLINED — pi-shuttle Stable ${outcome.installedVersion} was preserved unchanged`;
       return `result: UPGRADE DECLINED — pi-shuttle ${outcome.installedVersion} was preserved unchanged`;
     case 'INCOMPLETE_DECLINED':
       return 'result: INCOMPLETE CLEANUP DECLINED — No installation changes were made.';

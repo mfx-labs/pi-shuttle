@@ -12,6 +12,7 @@ import { resolveLayout } from '../../src/host/environment.js';
 import { buildTarball, cleanupEnv, fullInstallEnv, gatewayFixtureFiles, makeEnv, piGuardFixtureFiles } from '../helpers/installer-fixtures.js';
 import { recursiveStateSnapshot } from '../helpers/state-snapshot.js';
 
+const SOURCE_A = `mfx-labs/pi-shuttle@${'a'.repeat(40)}`;
 const SOURCE = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
 const PHYSICAL_SOURCE = 'mfx-labs/pi-shuttle@5e6aef60dce37299cc7af2c6add10905be03a396';
 
@@ -144,6 +145,72 @@ test('valid FINAL receipt follows the normal installed/same-version path', async
       { selections: { gateway: true, piGuard: true }, artifactDir: env, releasePackageTgz: seeded.shuttle, uid: 12345 },
     ));
     assert.equal(result.kind, 'ALREADY_INSTALLED', JSON.stringify(result));
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('same-semver Stable to Latest requires channel-switch consent', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedStable(env);
+    const offers: Array<[string, string, unknown]> = [];
+    const outcome = await withFixturePi(seeded.runEnv, () => runInstall(
+      { home: env, platform: 'linux', arch: 'x64' },
+      latestOptions(seeded.shuttle, {
+        confirmUpgrade: async (installed, installer, transition) => {
+          offers.push([installed, installer, transition]);
+          return true;
+        },
+      }),
+    ));
+    assert.deepEqual(offers, [[
+      '0.1.1',
+      '0.1.1',
+      { kind: 'stable-to-latest', latestSource: SOURCE },
+    ]]);
+    assert.equal(outcome.kind, 'COMPLETE', JSON.stringify(outcome));
+    if (outcome.kind === 'COMPLETE') assert.deepEqual(outcome.sourceTransition, { kind: 'stable-to-latest', latestSource: SOURCE });
+  } finally {
+    cleanupEnv(env);
+  }
+});
+
+test('Latest source changes require source-aware consent; an exact source is already installed', async () => {
+  const env = makeEnv();
+  try {
+    const seeded = await seedStable(env);
+    const first = await withFixturePi(seeded.runEnv, () => runInstall(
+      { home: env, platform: 'linux', arch: 'x64' },
+      latestOptions(seeded.shuttle, { sourceIdentity: SOURCE_A, confirmUpgrade: async () => true }),
+    ));
+    assert.equal(first.kind, 'COMPLETE', JSON.stringify(first));
+
+    const offers: Array<[string, string, unknown]> = [];
+    const update = await withFixturePi(seeded.runEnv, () => runInstall(
+      { home: env, platform: 'linux', arch: 'x64' },
+      latestOptions(seeded.shuttle, {
+        confirmUpgrade: async (installed, installer, transition) => {
+          offers.push([installed, installer, transition]);
+          return true;
+        },
+      }),
+    ));
+    assert.deepEqual(offers, [[
+      '0.1.1',
+      '0.1.1',
+      { kind: 'latest-source', installedSource: SOURCE_A, latestSource: SOURCE },
+    ]]);
+    assert.equal(update.kind, 'COMPLETE', JSON.stringify(update));
+    if (update.kind === 'COMPLETE') assert.deepEqual(update.sourceTransition, { kind: 'latest-source', installedSource: SOURCE_A, latestSource: SOURCE });
+
+    let confirmations = 0;
+    const exact = await withFixturePi(seeded.runEnv, () => runInstall(
+      { home: env, platform: 'linux', arch: 'x64' },
+      latestOptions(seeded.shuttle, { confirmUpgrade: async () => { confirmations += 1; return true; } }),
+    ));
+    assert.deepEqual(exact, { kind: 'ALREADY_INSTALLED', version: '0.1.1' });
+    assert.equal(confirmations, 0, 'an exact Latest source must not request update consent');
   } finally {
     cleanupEnv(env);
   }

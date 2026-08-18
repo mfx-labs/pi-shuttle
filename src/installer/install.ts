@@ -40,15 +40,15 @@ import { regularFileOrNull, scanArtifactMembers } from './archive.js';
 import { findPackageRoot, hashPackageTree, readPackageIdentity } from './artifact.js';
 import { inspectInstallerReceipt, newReceipt, readReceipt, writeReceipt } from './receipt.js';
 import type { GatewayReceiptEntry, InstallReceipt, PiGuardReceiptEntry } from './receipt.js';
-import type { InstallerSelections } from './selection.js';
+import type { InstallerSelections, SourceTransition } from './selection.js';
 import { absolutePathProblem } from './selection.js';
 
 export type InstallOutcome =
-  | { readonly kind: 'COMPLETE'; readonly upgradedFrom?: string }
-  | { readonly kind: 'PARTIAL'; readonly omitted: readonly string[]; readonly notes: readonly string[]; readonly upgradedFrom?: string }
+  | { readonly kind: 'COMPLETE'; readonly upgradedFrom?: string; readonly sourceTransition?: SourceTransition }
+  | { readonly kind: 'PARTIAL'; readonly omitted: readonly string[]; readonly notes: readonly string[]; readonly upgradedFrom?: string; readonly sourceTransition?: SourceTransition }
   | { readonly kind: 'ALREADY_INSTALLED'; readonly version: string }
-  | { readonly kind: 'UPGRADE_AVAILABLE'; readonly installedVersion: string; readonly installerVersion: string }
-  | { readonly kind: 'UPGRADE_DECLINED'; readonly installedVersion: string; readonly installerVersion: string }
+  | { readonly kind: 'UPGRADE_AVAILABLE'; readonly installedVersion: string; readonly installerVersion: string; readonly sourceTransition?: SourceTransition }
+  | { readonly kind: 'UPGRADE_DECLINED'; readonly installedVersion: string; readonly installerVersion: string; readonly sourceTransition?: SourceTransition }
   | { readonly kind: 'INCOMPLETE_DECLINED' }
   | { readonly kind: 'FAILED'; readonly stage: string; readonly rollback: string; readonly message: string }
   | { readonly kind: 'UNSUPPORTED'; readonly reason: string }
@@ -77,7 +77,7 @@ export interface InstallOptions {
   /** Latest-channel source identity, e.g. mfx-labs/pi-shuttle@<full-sha>. */
   readonly sourceIdentity?: string;
   /** Called only after the existing installation's ownership is proven. */
-  readonly confirmUpgrade?: (installedVersion: string, installerVersion: string) => Promise<boolean>;
+  readonly confirmUpgrade?: (installedVersion: string, installerVersion: string, sourceTransition?: SourceTransition) => Promise<boolean>;
   /** Explicit consent for narrow cleanup followed by a fresh installation. */
   readonly confirmIncompleteCleanup?: (evidence: readonly string[]) => Promise<boolean>;
   /**
@@ -681,6 +681,7 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
 
   const piExecutable = resolveExecutable('pi');
   let upgradeFrom: string | undefined;
+  let sourceTransition: SourceTransition | undefined;
   let ownedBinTarget: string | undefined;
   let installedShuttlePath: string | undefined;
   let installedShuttleTreeSha256: string | undefined;
@@ -700,9 +701,13 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     installedShuttlePath = owned.value.installPath;
     installedShuttleTreeSha256 = owned.value.treeSha256;
     const comparison = compareVersionTriples(installedVersion, installerVersion);
-    const latestSourceTransition = options.sourceIdentity !== undefined
-      && (prior.receipt.channel !== 'latest' || prior.receipt.sourceIdentity !== options.sourceIdentity);
-    if (comparison === 0 && !latestSourceTransition) {
+    sourceTransition = comparison === 0 && options.sourceIdentity !== undefined
+      && (prior.receipt.channel !== 'latest' || prior.receipt.sourceIdentity !== options.sourceIdentity)
+      ? prior.receipt.channel === 'latest'
+        ? { kind: 'latest-source', installedSource: prior.receipt.sourceIdentity!, latestSource: options.sourceIdentity }
+        : { kind: 'stable-to-latest', latestSource: options.sourceIdentity }
+      : undefined;
+    if (comparison === 0 && sourceTransition === undefined) {
       const gatewayMissing = options.selections.gateway && prior.receipt.components.gateway === null;
       const piGuardMissing = options.selections.piGuard && prior.receipt.components.piGuard === null;
       const requestedEntries = [
@@ -720,18 +725,28 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
     if (comparison > 0) {
       return { kind: 'REFUSED', reason: `installed pi-shuttle ${prior.receipt.piShuttleVersion} is newer than installer ${PI_SHUTTLE_VERSION}; downgrade was refused and prior state was preserved` };
     }
-    if (comparison < 0 || latestSourceTransition) {
+    if (comparison < 0 || sourceTransition !== undefined) {
       if (options.confirmUpgrade === undefined) {
-        return { kind: 'UPGRADE_AVAILABLE', installedVersion: prior.receipt.piShuttleVersion, installerVersion: PI_SHUTTLE_VERSION };
+        return {
+          kind: 'UPGRADE_AVAILABLE',
+          installedVersion: prior.receipt.piShuttleVersion,
+          installerVersion: PI_SHUTTLE_VERSION,
+          ...(sourceTransition !== undefined ? { sourceTransition } : {}),
+        };
       }
       let accepted = false;
       try {
-        accepted = await options.confirmUpgrade(prior.receipt.piShuttleVersion, PI_SHUTTLE_VERSION);
+        accepted = await options.confirmUpgrade(prior.receipt.piShuttleVersion, PI_SHUTTLE_VERSION, sourceTransition);
       } catch (err) {
         return { kind: 'REFUSED', reason: `upgrade confirmation could not be completed (${(err as Error).message || 'unknown error'}); prior state was preserved` };
       }
       if (!accepted) {
-        return { kind: 'UPGRADE_DECLINED', installedVersion: prior.receipt.piShuttleVersion, installerVersion: PI_SHUTTLE_VERSION };
+        return {
+          kind: 'UPGRADE_DECLINED',
+          installedVersion: prior.receipt.piShuttleVersion,
+          installerVersion: PI_SHUTTLE_VERSION,
+          ...(sourceTransition !== undefined ? { sourceTransition } : {}),
+        };
       }
       if (options.releasePackageTgz === undefined) {
         return { kind: 'REFUSED', reason: 'controlled upgrade requires the verified pi-shuttle release package; use the official release installer. The existing installation was preserved unchanged' };
@@ -1144,6 +1159,18 @@ async function runInstallLocked(env: HostEnvironment, options: InstallOptions, l
   // Staging cleanup.
   removeStaging(attempt.stagingDir);
 
-  if (result === 'COMPLETE') return { kind: 'COMPLETE', ...(upgradeFrom !== undefined ? { upgradedFrom: upgradeFrom } : {}) };
-  return { kind: 'PARTIAL', omitted, notes, ...(upgradeFrom !== undefined ? { upgradedFrom: upgradeFrom } : {}) };
+  if (result === 'COMPLETE') {
+    return {
+      kind: 'COMPLETE',
+      ...(upgradeFrom !== undefined ? { upgradedFrom: upgradeFrom } : {}),
+      ...(sourceTransition !== undefined ? { sourceTransition } : {}),
+    };
+  }
+  return {
+    kind: 'PARTIAL',
+    omitted,
+    notes,
+    ...(upgradeFrom !== undefined ? { upgradedFrom: upgradeFrom } : {}),
+    ...(sourceTransition !== undefined ? { sourceTransition } : {}),
+  };
 }

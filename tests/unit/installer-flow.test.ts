@@ -13,6 +13,7 @@ import { REPO, buildTarball, cleanupEnv, fullInstallEnv, gatewayFixtureFiles, ma
 import type { InstallerRun } from '../helpers/installer-fixtures.js';
 import { readReceipt } from '../../src/installer/receipt.js';
 import { rollback, runInstall } from '../../src/installer/install.js';
+import { formatOutcome } from '../../src/installer/main.js';
 import { validateBinPath } from '../../src/installer/components.js';
 import { resolveLayout } from '../../src/host/environment.js';
 import { GATEWAY_PS1_BASELINE_COMMIT } from '../../src/compat/manifest.js';
@@ -57,6 +58,29 @@ function runInstallerInteractive(args: readonly string[], input: readonly string
     child.on('close', (code) => resolve({ code, stdout, stderr }));
   });
 }
+
+test('installer: successful result wording distinguishes semantic upgrades from source transitions', () => {
+  const prefix = 'result: COMPLETE — all selected components installed and verified';
+  assert.equal(formatOutcome({ kind: 'COMPLETE', upgradedFrom: '0.1.0' }), `${prefix}; upgraded pi-shuttle 0.1.0 → 0.1.1`);
+
+  const latest = formatOutcome({
+    kind: 'COMPLETE',
+    upgradedFrom: '0.1.1',
+    sourceTransition: {
+      kind: 'latest-source',
+      installedSource: `mfx-labs/pi-shuttle@${'a'.repeat(40)}`,
+      latestSource: `mfx-labs/pi-shuttle@${'b'.repeat(40)}`,
+    },
+  });
+  assert.equal(latest, `${prefix}; updated pi-shuttle Latest source`);
+  assert.doesNotMatch(latest, /upgraded pi-shuttle 0\.1\.1 → 0\.1\.1/);
+
+  assert.equal(formatOutcome({
+    kind: 'COMPLETE',
+    upgradedFrom: '0.1.1',
+    sourceTransition: { kind: 'stable-to-latest', latestSource: `mfx-labs/pi-shuttle@${'b'.repeat(40)}` },
+  }), `${prefix}; switched pi-shuttle 0.1.1 from Stable to Latest`);
+});
 
 test('installer: COMPLETE install of both components (batch)', async () => {
   const env = makeEnv();

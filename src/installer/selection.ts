@@ -13,6 +13,11 @@ export interface InstallerSelections {
   readonly piGuard: boolean;
 }
 
+/** Same-semver transition that is not a semantic-version upgrade. */
+export type SourceTransition =
+  | { readonly kind: 'latest-source'; readonly installedSource: string; readonly latestSource: string }
+  | { readonly kind: 'stable-to-latest'; readonly latestSource: string };
+
 export interface InstallerOptions {
   readonly help: boolean;
   readonly batch: boolean;
@@ -162,18 +167,50 @@ export interface PromptUI {
   ask(question: string, defaultValue?: string): Promise<string>;
 }
 
-function upgradeNotice(installedVersion: string, installerVersion: string): string {
-  return [
-    'Existing pi-shuttle installation detected:',
-    `  Installed: ${installedVersion}`,
-    `  Installer: ${installerVersion}`,
-    '',
-  ].join('\n');
+function upgradePromptText(installedVersion: string, installerVersion: string, sourceTransition?: SourceTransition): { readonly notice: string; readonly question: string; readonly accepted: string } {
+  if (sourceTransition?.kind === 'latest-source') {
+    return {
+      notice: [
+        'Existing pi-shuttle Latest installation detected:',
+        `  Version: ${installedVersion}`,
+        `  Installed source: ${sourceTransition.installedSource}`,
+        `  Latest source:    ${sourceTransition.latestSource}`,
+        '',
+      ].join('\n'),
+      question: 'Update to the new Latest source?',
+      accepted: 'Latest source update accepted by explicit batch invocation.',
+    };
+  }
+  if (sourceTransition?.kind === 'stable-to-latest') {
+    return {
+      notice: [
+        'Existing pi-shuttle Stable installation detected:',
+        `  Version: ${installedVersion}`,
+        '  Installed channel: stable',
+        '  Target channel:    latest',
+        `  Latest source:     ${sourceTransition.latestSource}`,
+        '',
+      ].join('\n'),
+      question: `Switch from Stable ${installedVersion} to Latest ${installerVersion}?`,
+      accepted: 'Stable-to-Latest switch accepted by explicit batch invocation.',
+    };
+  }
+  return {
+    notice: [
+      'Existing pi-shuttle installation detected:',
+      `  Installed: ${installedVersion}`,
+      `  Installer: ${installerVersion}`,
+      '',
+    ].join('\n'),
+    question: `Upgrade ${installedVersion} → ${installerVersion}?`,
+    accepted: 'Upgrade accepted by explicit batch invocation.',
+  };
 }
 
 /** Ask for explicit interactive consent after the core proves ownership. */
-export async function promptUpgrade(installedVersion: string, installerVersion: string): Promise<boolean> {
-  process.stdout.write(upgradeNotice(installedVersion, installerVersion));
+export async function promptUpgrade(installedVersion: string, installerVersion: string, sourceTransition?: SourceTransition): Promise<boolean> {
+  const prompt = upgradePromptText(installedVersion, installerVersion, sourceTransition);
+  process.stdout.write(prompt.notice);
   const rl = createInterface({ input: process.stdin, terminal: false });
   const lines = rl[Symbol.asyncIterator]();
   try {
@@ -184,15 +221,16 @@ export async function promptUpgrade(installedVersion: string, installerVersion: 
         const answer = next.done ? '' : next.value.trim();
         return answer.length > 0 ? answer : (defaultValue ?? '');
       },
-    }, `Upgrade ${installedVersion} → ${installerVersion}?`, true);
+    }, prompt.question, true);
   } finally {
     rl.close();
   }
 }
 
 /** Explicit batch installation is the non-interactive upgrade consent. */
-export async function approveBatchUpgrade(installedVersion: string, installerVersion: string): Promise<boolean> {
-  process.stdout.write(`${upgradeNotice(installedVersion, installerVersion)}Upgrade accepted by explicit batch invocation.\n`);
+export async function approveBatchUpgrade(installedVersion: string, installerVersion: string, sourceTransition?: SourceTransition): Promise<boolean> {
+  const prompt = upgradePromptText(installedVersion, installerVersion, sourceTransition);
+  process.stdout.write(`${prompt.notice}${prompt.accepted}\n`);
   return true;
 }
 
