@@ -1,278 +1,268 @@
 # pi-shuttle Product Contract
 
-**Status:** pre-release contract (gate PS-0). **Applies to:** pi-shuttle v0.1.0.
-**Normative inputs:** Project Gateway MCP closure `0720476b240f74372c7f1d0d1a78290b19537801`
-(WP-15 release-ready; runbook `docs/operations/project-gateway-operator-runbook.md`,
-WP-14B onboarding `docs/design/wp-14b-operator-onboarding.md`,
-ADR-026/ADR-037, `docs/design/pi-guard-compatibility-and-authority-projection.md`),
-and the pi-guard v0.1.2 repository (mfx-labs, commit `7a7580cc4cbd7926797564c72269394fc29a860a`, tag `v0.1.2`).
+**Status:** current product contract.  
+**Applies to:** pi-shuttle v0.1.1 Stable and the reviewed Latest source channel derived from `master`.
 
-## 1. What pi-shuttle is
+pi-shuttle is the end-user distribution and operator layer that composes Project Gateway MCP and pi-guard behind one bounded installation and CLI surface.
 
-pi-shuttle is the **end-user product and distribution layer**. A complete
-intended installation composes two separately versioned components behind
-one user surface:
+## 1. Product composition
 
-- **Project Gateway MCP** — ChatGPT ↔ project controlled gateway (nine-tool
-  stdio MCP runtime, trusted local lifecycle/authority control plane);
-- **pi-guard** — Pi-side authority enforcement (modes OFF/INSPECT/EDIT/WRITE
-  + trusted-API-only `PROJECTED`; v0.1.2 verified lane).
+A complete intended installation contains:
 
-plus pi-shuttle's own components: end-user installer, operator CLI
-(`pi-shuttle`), onboarding/configuration, ChatGPT Secure MCP Tunnel
-documentation, compatibility manifest, and release/test orchestration.
+- **pi-shuttle** — installer, operator CLI, project registration, health checks, startup, and product-level diagnostics;
+- **Project Gateway MCP** — bounded project access over stdio MCP;
+- **pi-guard** — Pi-side authority enforcement.
 
-A user may explicitly opt out of a component during interactive
-installation. The installer **must clearly report that the result is a
-PARTIAL installation** and `pi-shuttle doctor` must repeat that verdict
-until the omitted component is installed.
+The currently pinned component versions for v0.1.1 are:
 
-## 2. What pi-shuttle is NOT
+- Project Gateway: `0.1.0` (target-specific Linux/macOS package identity);
+- pi-guard: `0.1.2`;
+- Pi compatibility baseline: `0.83.0` with compatibility probing for newer candidates.
 
-- Not a fork, copy, or merge of Gateway or pi-guard source histories
-  (they stay separate; no history merge for packaging convenience).
-- Not a second storage engine: the trusted store is initialized ONLY by the
-  Gateway's committed `initializeTrustedStore()` orchestrator.
-- Not a tunnel: no HTTP server, OAuth server, tunnel implementation, or
-  embedded transport in the product. The Secure MCP Tunnel is external and
-  operator-owned (WP-14B §1/§3).
-- Not a system service: no daemonization, no service manager, no auto-update,
-  no GUI.
-- Not a generic package manager: no abstraction layer, no "latest" installs,
-  no arbitrary Node/Git/Pi version installation. Everything is pinned by the
-  compatibility manifest.
+The user may explicitly opt out of Gateway or pi-guard during installation. Such an installation is reported as partial rather than silently described as complete.
 
-## 3. Fixed product decisions (human-approved)
+## 2. Product boundaries
 
-1. One-command primary install: conceptually `curl -fsSL <installer-url> | bash`.
-   The public URL is **not finalized in this gate** (human authorization gate).
-2. Installer interactively asks at minimum: (1) install Gateway?; (2) install
-   Pi integration / pi-guard?; (3) installation directory; (4) command/bin
-   directory if necessary. A usable install prints next-step command guidance;
-   project registration remains the separate `pi-shuttle project add <path>`
-   operation.
-3. Installer pins compatible component versions; never silently installs
-   arbitrary latest versions.
-4. CLI is `pi-shuttle` with exactly `doctor`, `project add <path>`,
-   `project list`, `project remove <path-or-workspace-id>`, `start`
-   (plus `--help` / `--version` hygiene). No unrelated administration commands.
-5. `pi-shuttle project add <path>` hides all internal Gateway bootstrap
-   complexity from the end user (see §5).
-6. Initialization authority is **operator-only**. It must never become an MCP
-   tool, a model-callable authority, a ChatGPT-accessible trusted lifecycle
-   authority, or a generic lifecycle write authority.
-7. The Gateway remains stdio MCP internally. No embedded HTTP/OAuth/tunnel.
-8. Pi 0.83.0 remains the declared compatibility baseline. Pi 0.84.1 present
-   on the current Linux host is **not** evidence and must not be claimed.
-9. Linux x86_64 and macOS Intel x86_64 are supported targets. macOS
-   x86_64 was promoted by the separately human-authorized E1 gate after
-   the complete physical D acceptance journey passed and was recorded.
-   macOS arm64 remains technically eligible and distribution-bound but is
-   NOT support-promoted while physical Apple Silicon evidence is pending.
-   macOS is ONE product
-   lane; Intel x86_64 and Apple Silicon arm64 are architecture-specific
-   runtime TARGETS of the same macOS product path (ADR-003). The
-   intended macOS UX is identical for both targets — the same one-line
-   installer (`install.sh`) installation journey and the same
-   post-install CLI (`pi-shuttle doctor`, `pi-shuttle start`, existing
-   project commands) with NO public experimental or acceptance flags;
-   the host architecture is detected internally. Physical evidence
-   state never gates execution (ADR-003 §3); execution may be gated only
-   by concrete technical prerequisites. Both Darwin targets share the
-   provenance-complete dual-architecture macOS Gateway candidate; only
-   x86_64 has completed physical acceptance and support promotion.
-10. Default directory layout (both platforms, see platform-support-contract):
-    `~/.local/share/pi-shuttle`, `~/.local/state/pi-shuttle`,
-    `~/.config/pi-shuttle`, `~/.local/bin/pi-shuttle`.
+pi-shuttle is NOT:
 
-## 4. Known onboarding blocker (release-blocking for v0.1.0)
+- a fork or source-history merge of Gateway or pi-guard;
+- a generic shell or filesystem automation MCP;
+- a Git mutation/push/rebase authority;
+- a second trusted-storage implementation;
+- a tunnel implementation;
+- a daemon or operating-system service;
+- a generic package manager;
+- an auto-updater;
+- a GUI;
+- an AI-facing approval, issuance, activation, or self-grant surface.
 
-Confirmed in the Gateway closure tree:
+The Secure MCP Tunnel used for ChatGPT connectivity is external and operator-owned. pi-shuttle remains stdio MCP internally through Project Gateway.
 
-- `initializeTrustedStore()` (WP-8-C, `src/storage/initialization/initialize.ts`)
-  is complete and tested, and replays idempotently (INITIALIZED = verification-only).
-- Its production entry is intentionally unreachable: it requires a genuine
-  branded `StorageBootstrapActionProvenance`, whose only declared future
-  production consumer (`src/control-plane/storage-bootstrap-action.ts`) does
-  not exist. The runtime composition root (`src/runtime/mcp/compose.ts`)
-  mints the genuine provenance but only **re-verifies existing stores**
-  (`verifyStoreInstance` + generation seeding) — it never initializes.
-- Tests exercise initialization only through test-only provenance producers.
+## 3. Installation channels
 
-**Consequence:** a fresh end-user install cannot complete trusted-store
-provisioning through any supported production/operator workflow. pi-shuttle
-v0.1.0 cannot ship on top of the Gateway unchanged.
+pi-shuttle has two intentionally distinct installation channels.
 
-Resolution is the **smallest correct production composition surface**:
-an operator-only `bootstrap` CLI verb in the Gateway package that reuses the
-existing provenance pipeline, the WP-6 validator identity derivation, and
-`initializeTrustedStore()` (component-boundaries §4, ADR-001, work package
-PS-1). Users are never told to import private/internal source modules.
+### Stable
 
-## 5. Trusted-store / operator bootstrap composition (contract-level)
+Stable is distributed as an immutable versioned GitHub Release.
 
-`pi-shuttle project add <path>` is the supported HUMAN/OPERATOR-controlled
-bootstrap path. It:
+For v0.1.1:
 
-1. verifies the project root (exists, directory, canonicalized, is a Git
-   repository);
-2. verifies required Git/runtime conditions (doctor preflight; pinned lanes);
-3. derives workspace/configuration identity deterministically from the
-   canonical root (workspaceId `pgw:w:<32-hex>`, store locator
-   `~/.local/share/pi-shuttle/stores/<32-hex>`, configuration identity
-   derived by the Gateway's own WP-6 canonical computation — never
-   hand-computed or invented by pi-shuttle);
-4. initializes or verification-replays the trusted store — by invoking the
-   Gateway `bootstrap` verb (PS-1), which internally mints the genuine
-   provenance and calls `initializeTrustedStore()`; a second invocation is
-   the verification replay (committed replay semantics);
-5. creates operator-owned Git isolation state (`gitHome`/`gitTmpdir` empty
-   dirs outside every workspace root) and the version-2 `artifactLocation`
-   directory inside the project root;
-6. registers the workspace (derived `workspaceId`, canonical root, store
-   locator) in the operator runtime configuration;
-7. persists the runtime configuration safely (atomic write, 0600);
-8. verifies the resulting configuration (replay + resolved-config checks).
-
-The end user never sees or constructs: `initializeTrustedStore`, action
-provenance, configuration identity, configuration version, `store-v1`,
-`config-v1`, workspace identity, or Git isolation directories.
-
-The initialization authority stays operator-only: it is a CLI verb executed
-by a human, absent from the MCP tool surface, absent from pi-guard, absent
-from ChatGPT reach (no approval/issuance/activation/receipt tool exists).
-
-## 6. Compatibility manifest (design)
-
-Version identity and compatibility are explicit and pinned. Example
-(shape only; the real file ships in PS-2/PS-3):
-
-```json
-{
-  "piShuttle": "0.1.0",
-  "gateway": "0.1.0",
-  "gatewayCommit": "0720476b240f74372c7f1d0d1a78290b19537801",
-  "gatewayArtifactSha256": "<computed-at-release>",
-  "piGuard": "0.1.2",
-  "piGuardCommit": "7a7580cc4cbd7926797564c72269394fc29a860a",
-  "piGuardArtifactSha256": "<computed-at-release>",
-  "piCompatibilityBaseline": "0.83.0",
-  "node": "22.23.2",
-  "git": "2.45.4",
-  "gatewayDependencies": { "@modelcontextprotocol/server": "2.0.0", "ajv": "8.20.0", "zod": "4.4.3" },
-  "configurationVersion": "2",
-  "configFormatVersion": 1
-}
+```bash
+curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/install.sh | bash
 ```
 
-Rules: exact versions only; no ranges, no `latest`; every artifact carries a
-SHA-256 pin; the manifest ships with the installer and is embedded in the
-CLI; the CLI refuses to operate (fail closed) when the installed manifest
-does not match its own version. The manifest documents what is *claimed*;
-anything not in the manifest is unverified by definition. `gatewayCommit`
-pins the exact source closure for the packaged artifact; the packaged
-tarball is the pilot-proven `npm pack` artifact
-(`project-gateway-artifact-core-0.1.0.tgz` produced from the clean closure
-checkout).
+Stable identity is release/version based. Published Stable assets are immutable and verified against their release metadata and SHA-256 pins.
 
-### 6.1 Per-target Gateway descriptor (contracted — ADR-002/ADR-003; implemented)
+### Latest
 
-ADR-002 replaces the single global Gateway artifact identity above with a
-fail-closed per-host-target Gateway descriptor map. ADR-003 keeps one
-macOS product path with architecture-specific targets selected internally.
-The implementation retains the historical `lane` field names for these
-target IDs; renaming is not required for the product model.
+Latest follows reviewed `master`:
 
-Finalized descriptor shape (all fields mandatory; missing field = fail
-closed; `artifactSha256` is `null` until computed at release):
-
-```json
-{
-  "repository": "mfx-labs/project-gateway",
-  "commit": "55f764290a4567a20557f1db19d2a6fb97572a97",
-  "version": "0.1.0",
-  "packageName": "@project-gateway/artifact-core",
-  "artifactFileName": "project-gateway-artifact-core-0.1.0.tgz",
-  "artifactSha256": null,
-  "binName": "project-gateway-mcp",
-  "dependencies": { "@modelcontextprotocol/server": "2.0.0", "ajv": "8.20.0", "zod": "4.4.3" }
-}
+```bash
+curl -fsSL https://raw.githubusercontent.com/mfx-labs/pi-shuttle/master/install.sh | bash
 ```
 
-Contracted per-target bindings (current implementation state):
+Each Latest invocation resolves `master` once to one exact full commit SHA before building or running it. Latest keeps semantic version identity separate from source identity.
 
-- `linux-x86_64-posix-utf8-node22` → historical `mfx-labs/project-gateway`
-  (values above; UNCHANGED).
-- `darwin-arm64-posix-utf8-node22` and
-  `darwin-x86_64-posix-utf8-node22` → the SAME
-  `mfx-labs/project-gateway-macos` descriptor, commit
-  `a18bd287c9ccada7fd31932dbe9937062d0b6bc1`, version `0.1.0`,
-  package `@project-gateway/macos-core`, artifact
-  `project-gateway-macos-core-0.1.0.tgz`, bin `project-gateway-macos-mcp`,
-  same three dependency pins.
+A Latest install therefore uses a source-qualified pi-shuttle package identity equivalent to:
 
-Fail-closed: a host target absent from the map, or a descriptor with any
-missing/mismatched identity, is refused — never another lane's identity,
-never a fallback. The shared package contains tracked x64 and arm64 native
-variants; this distribution fact does not imply arm64 physical acceptance
-or support.
+```text
+pi-shuttle@0.1.1+latest.<exact-source-sha>
+```
 
-### 6.2 Unified macOS user journey (contracted — ADR-003; implemented)
+A newer Latest source commit may replace an older Latest source commit even when both report semantic version `0.1.1`. Post-v0.1.1 changes on `master` do not retroactively modify the immutable Stable v0.1.1 release.
 
-ADR-003 defines the macOS product path: ONE user-facing installation
-and runtime journey; Intel x86_64 and Apple Silicon arm64 are
-architecture-specific runtime targets of that same path. The existing
-manifest fields `supportedLanes`/`gatedLanes` keep their names in code,
-but their darwin entries are semantically host target IDs within the single
-macOS lane. Evidence and support state are TARGET-scoped; one macOS
-lane-level boolean must never imply equivalent evidence across
-architectures.
+`pi-shuttle --version` may describe a Latest build as pre-release/unpublished. This is expected because Latest is source-identified rather than represented by a new GitHub Release version.
 
-- **Public UX (both targets):** the SAME installation journey via the
-  one-line installer (`install.sh`), then the same post-install CLI
-  surface (`pi-shuttle doctor`, `pi-shuttle start`, existing project
-  commands). NO public `--experimental`, `--experimental-target`,
-  `--acceptance-lane`, or `--acceptance-target` flags in the intended
-  design; the host architecture is detected internally (x86_64 → x64
-  runtime variant; arm64 → arm64 runtime variant).
-- **Evidence vs execution:** physical acceptance evidence NEVER gates
-  download, installation, doctor, or start. Absent physical evidence
-  means only “physical behavior has not yet been formally demonstrated
-  on real hardware” — never incompatible, failed, or prohibited.
-- **Distribution state:** PGM-DIST-2 supplied the tracked arm64 candidate
-  and D0B bound both Darwin targets to the shared dual-architecture
-  package at commit
-  `a18bd287c9ccada7fd31932dbe9937062d0b6bc1`. This establishes
-  distribution availability only; arm64 physical evidence and support
-  remain pending.
-- **Support claims:** runtime/distribution availability, physical
-  evidence state, and product support claim are three distinct
-  concerns. Successful installation or experimental real-world use
-  never automatically promotes support status; missing formal evidence
-  never automatically prohibits use.
-- **Known-defect rule:** only a demonstrated technical incompatibility
-  or safety/correctness issue may justify an architecture-specific
-  execution block — never a preemptive block from missing evidence.
-- **Acceptance infrastructure:** formal acceptance is an internal
-  engineering/evidence workflow with the SAME public UX; a future Apple
-  Silicon host runs the same product journey to collect formal evidence
-  without a new macOS product lane.
-- **Support promotion:** target progression remains prepared/candidate →
-  physically accepted → supported. D recorded complete physical Intel
-  acceptance; the separately human-authorized E1 gate promotes ONLY the
-  x86_64 target. arm64 remains technically eligible and NOT
-  support-promoted without requiring a new macOS product lane.
+## 4. Primary installation UX
 
-## 7. Hard prohibitions (binding)
+The public installer asks only for installation choices it can actually perform:
 
-No exposure of initialization authority through MCP; no
-approval/issuance/activation authority surface; no generic admin MCP; no
-shell-execution MCP; no generic filesystem-write MCP; no merging of Gateway
-and pi-guard histories; no duplication of Gateway storage logic; no
-duplication of pi-guard authority logic; no auto-update; no GUI; no
-daemon/service management; no generic package-manager abstraction; no
-automatic installation of arbitrary Node/Git/Pi versions; no unsupported
-platform claims; no weakening of fail-closed behavior; no modification of
-existing Gateway authority semantics; no touching of the WP-13D debris in
-the Gateway development repository; no push / remote repository / tag /
-publish / deploy without separate human authorization.
+1. install Project Gateway MCP?;
+2. install Pi integration / pi-guard?;
+3. installation directory;
+4. command/bin directory.
+
+Project registration is NOT performed inside the installer.
+
+After a usable `COMPLETE` or `ALREADY INSTALLED` result, the installer prints the operator's next steps:
+
+```text
+pi-shuttle project add <path>
+pi-shuttle doctor
+pi-shuttle project list
+pi-shuttle --help
+```
+
+Failure, refusal, busy, declined cleanup, or otherwise unusable outcomes do not print normal success onboarding guidance.
+
+## 5. Persistent installation state
+
+The installer uses exactly three persistent state classes:
+
+- **CLEAN** — no valid final receipt and no recognized pi-shuttle leftovers;
+- **INSTALLED** — a valid final receipt selects a supported installation whose command, package, and selected components verify at point of use;
+- **INCOMPLETE** — recognizable pi-shuttle-owned leftovers from an interrupted or failed prior installation exist without a trustworthy final managed installation.
+
+INCOMPLETE recovery is intentionally simple:
+
+1. explain the recognized incomplete state;
+2. require explicit operator consent;
+3. remove only recognized pi-shuttle installer blockers;
+4. reinstall as a fresh managed installation;
+5. write one FINAL receipt only after successful activation.
+
+Projects, runtime configuration, trusted stores, Gateway, pi-guard, and unrelated files are not forensic recovery material and are not deleted merely because an earlier installer attempt was incomplete. Reusable verified components may be retained.
+
+Foreign, malformed, or ambiguous state is refused rather than guessed at.
+
+## 6. Installer coordination
+
+The installer has one ordinary per-user `install.lock` containing the installer PID.
+
+- absent lock → acquire;
+- live PID → report BUSY;
+- OS-confirmed dead PID → treat as stale interrupted-install residue, remove, and retry;
+- malformed, unreadable, symlink, directory, FIFO, or other special lock object → refuse safely.
+
+The product threat model is a trusted personal machine. The lock prevents ordinary concurrent installer invocations and handles stale interrupted attempts; it is not intended as a malicious same-UID adversarial race defense.
+
+FINAL receipt publication occurs atomically while the installer lock is held. There is no second persistent receipt lock.
+
+## 7. Active-target safety
+
+The installer must not destroy the currently usable pi-shuttle command merely because an exact Latest destination is present without a trustworthy final receipt.
+
+If the current command already targets the exact requested source-qualified Latest package, the installer verifies a fresh candidate and may reconcile the active package only when package/path/bin/source identity and tree match exactly. A mismatch is refused without deleting or overwriting the active command target.
+
+Rollback removes only state positively created by the current attempt and preserves a prior usable installation when available.
+
+## 8. Project onboarding
+
+Project registration is an explicit operator action:
+
+```bash
+pi-shuttle project add <path>
+```
+
+It:
+
+1. verifies and canonicalizes the selected Git project root;
+2. derives the workspace/store identity using the Gateway's committed identity rules;
+3. initializes or verification-replays the trusted store through the supported Gateway operator bootstrap path;
+4. creates operator-owned Git isolation state outside workspace roots;
+5. registers the project in pi-shuttle runtime configuration;
+6. verifies the resulting configuration.
+
+The end user does not construct Gateway storage provenance, configuration identity, workspace identity, or trusted-store internals manually.
+
+Initialization authority remains operator-only and is not exposed as an MCP tool.
+
+## 9. Operator CLI
+
+The intended CLI surface is:
+
+```text
+pi-shuttle doctor
+pi-shuttle project add <path>
+pi-shuttle project list
+pi-shuttle project remove <path-or-workspace-id>
+pi-shuttle start
+pi-shuttle --help
+pi-shuttle --version
+```
+
+`pi-shuttle start` launches the verified Gateway component as a foreground stdio MCP server.
+
+For ChatGPT through Secure MCP Tunnel, the tunnel client should spawn `pi-shuttle start`; the operator does not run a second standalone copy in parallel.
+
+## 10. Component verification
+
+Component identities are pinned and verified before activation.
+
+For the current v0.1.1 product:
+
+- Linux x86_64 Gateway uses `mfx-labs/project-gateway`, version `0.1.0`;
+- macOS x86_64 and arm64 targets use the shared `mfx-labs/project-gateway-macos`, version `0.1.0`;
+- pi-guard is `0.1.2`;
+- artifacts are SHA-256 pinned;
+- Gateway/pi-guard source and runtime identities are verified by the installer/doctor according to their supported checks.
+
+Stable binds the installed pi-shuttle package to immutable release assets. Latest additionally binds pi-shuttle to the exact resolved source SHA and verified source-qualified package tree.
+
+## 11. Runtime prerequisites
+
+Runtime dependencies are probed, never installed automatically by pi-shuttle:
+
+- Node.js minimum: `22.19.0`;
+- Git minimum: `2.30.0`;
+- Pi minimum candidate: `0.83.0` when pi-guard is selected.
+
+Pi `0.83.0` is the known-good compatibility baseline. Newer candidates require the committed pi-guard compatibility probe to pass.
+
+The installer refuses sudo/root user-content installation and uses a per-user layout.
+
+## 12. Platform support
+
+Product-supported for v0.1.1:
+
+- Linux x86_64;
+- macOS Intel x86_64.
+
+macOS Apple Silicon arm64 follows the same normal macOS installation journey and has a distribution-bound native candidate, but remains not product-supported until physical acceptance is completed. It is not claimed incompatible merely because support promotion is pending.
+
+Windows is unsupported.
+
+No public architecture selector, experimental target flag, or acceptance flag is part of the normal macOS UX.
+
+## 13. Workspace and Git boundaries
+
+Project access is confined to projects explicitly registered by the operator.
+
+Project Gateway provides a bounded MCP tool surface rather than a general command runner. Git access is inspection-oriented; the product does not provide AI clients with push, rebase, history rewrite, or equivalent mutation authority.
+
+## 14. Per-user layout
+
+Default layout:
+
+```text
+~/.local/share/pi-shuttle/
+  packages/
+  stores/
+  git-home/
+  git-tmp/
+  manifests/
+
+~/.local/state/pi-shuttle/
+  install.json
+  install.lock          # temporary while installer runs
+  staging/
+  logs/
+
+~/.config/pi-shuttle/
+  runtime.json
+
+~/.local/bin/pi-shuttle
+```
+
+`runtime.json` is operator/CLI-owned state. The installer does not register projects or write project runtime configuration as part of normal installation.
+
+## 15. Fail-closed behavior
+
+The product refuses rather than silently guesses or falls back when it encounters conditions such as:
+
+- unsupported/unknown host target;
+- target/envelope mismatch;
+- foreign or ambiguous installation state;
+- malformed or invalid final receipt;
+- component identity or digest mismatch;
+- incompatible runtime prerequisites;
+- unsafe special-file installer lock state.
+
+Recognized interrupted pi-shuttle state is the deliberate exception to a blanket refusal: it is surfaced as **INCOMPLETE** and may be cleaned/reinstalled only with explicit operator consent.
+
+## 16. Hard prohibitions
+
+No AI-facing initialization authority; no approval/issuance/activation authority surface; no generic admin MCP; no generic shell-execution MCP; no unrestricted filesystem-write MCP; no Git push/rebase/history-rewrite authority; no automatic installation of arbitrary Node/Git/Pi versions; no daemon/service management; no GUI; no generic package-manager abstraction; no auto-update; no unsupported platform claims; no weakening of project/workspace confinement or component identity verification.
+
+Stable release assets remain immutable. Changes made on `master` belong to Latest until a separately authorized future Stable release is created.

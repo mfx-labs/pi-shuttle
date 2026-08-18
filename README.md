@@ -2,7 +2,7 @@
 
 **A local, bounded way to connect AI coding agents to your projects.**
 
-pi-shuttle packages **Project Gateway** and **pi-guard** into one operator-facing product. It installs and verifies the reviewed components, registers only the projects you choose, checks that the environment is healthy, and starts a constrained MCP gateway — without giving an AI agent a general-purpose shell, unrestricted filesystem access, or Git push authority.
+pi-shuttle packages **Project Gateway** and **pi-guard** into one operator-facing product. It installs and verifies the reviewed components, lets you explicitly register only the projects you choose, checks that the environment is healthy, and starts a constrained MCP gateway — without giving an AI agent a general-purpose shell, unrestricted filesystem access, or Git push authority.
 
 > **v0.1.1 is available now.**
 >
@@ -19,9 +19,7 @@ Requirements:
 
 ### STABLE
 
-The stable channel uses immutable, versioned GitHub Releases. The semantic
-version identifies the published release; this is the reproducible,
-recommended path for stable/public use.
+The stable channel uses immutable, versioned GitHub Releases. The semantic version identifies the published release; this is the reproducible, recommended path for stable/public use.
 
 ```bash
 curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/install.sh | bash
@@ -29,30 +27,37 @@ curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/insta
 
 ### LATEST
 
-The latest channel follows reviewed `master`, resolves every invocation to
-one exact full commit SHA before building or running it, and may contain
-post-release fixes. It is intended for latest/internal/development use.
+The latest channel follows reviewed `master`, resolves every invocation to one exact full commit SHA before building or running it, and may contain post-release fixes. It is intended for latest/internal/development use.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mfx-labs/pi-shuttle/master/install.sh | bash
 ```
 
-Latest keeps the semantic package version separate from source identity; its
-diagnostics identify the source as `latest 0.1.1 @ <commit SHA>`. Post-v0.1.1
-changes on `master` are not retroactively part of the immutable v0.1.1
-release.
+Latest keeps the semantic package version separate from source identity; its diagnostics identify the installation as `latest 0.1.1 @ <commit SHA>`. Post-v0.1.1 changes on `master` are not retroactively part of the immutable v0.1.1 release. A newer Latest commit can therefore represent a source update even when the semantic version remains `0.1.1`.
 
-Then verify the installation:
+When running Latest, `pi-shuttle --version` may describe the build as **pre-release/unpublished**. That is expected: Latest is identified by its exact source commit rather than by a new GitHub Release version.
 
-```bash
-pi-shuttle doctor
-```
+### Interrupted install?
 
-Register a project:
+If a previous pi-shuttle installation was interrupted, rerun the installer. Recognized pi-shuttle-owned leftovers are reported as **INCOMPLETE**; with your confirmation, pi-shuttle cleans only known installer blockers and reinstalls while preserving projects, configuration, stores, retained package versions, and reusable Gateway/pi-guard installations. Foreign or ambiguous state is refused instead of guessed at.
+
+After a usable installation, the installer prints the same next steps:
 
 ```bash
+# Register a project
 pi-shuttle project add /path/to/project
+
+# Check installation and environment health
+pi-shuttle doctor
+
+# List registered projects
+pi-shuttle project list
+
+# Show available commands
+pi-shuttle --help
 ```
+
+Project registration is intentionally a separate operator action; the installer does not register a project automatically.
 
 At this point, choose how your MCP client will connect.
 
@@ -117,7 +122,7 @@ Three components work together:
 - **Project Gateway** — the bounded MCP/project-access component. It exposes exactly nine public MCP tools for validation, inspection, verification, controlled artifact drafting/persistence, and change inspection.
 - **pi-guard** — the Pi-side enforcement component that keeps the same boundaries meaningful inside the coding-agent environment.
 
-pi-shuttle pins the component identities used by a release and verifies downloaded artifacts before activation.
+pi-shuttle pins the component identities used by the installation and verifies downloaded artifacts before activation.
 
 ## Why it exists
 
@@ -139,7 +144,7 @@ unrestricted machine access
 | Self-issued authority | AI clients cannot approve or grant themselves authority |
 | Component identity | Version- and digest-verified |
 | Installation state | Per-user, operator-owned |
-| Unsupported environments | Fail closed instead of silently falling back |
+| Unknown/foreign state | Refused instead of silently guessed at |
 
 ## Supported platforms
 
@@ -154,7 +159,7 @@ unrestricted machine access
 
 Apple Silicon uses the **same normal macOS installation journey** as Intel Macs. There is no public architecture, lane, target, experimental, or acceptance selector.
 
-The v0.1.0 macOS Gateway package contains both x86_64 and arm64 native candidates, and the installer can structurally route an arm64 Mac to the shared macOS release. Physical Apple Silicon runtime acceptance has not yet been completed.
+The bundled macOS Gateway component (version `0.1.0`) contains both x86_64 and arm64 native candidates, and the installer can structurally route an arm64 Mac to the shared macOS release. Physical Apple Silicon runtime acceptance has not yet been completed.
 
 Therefore:
 
@@ -236,7 +241,11 @@ Git is used for inspection and project identity, not mutation. The Gateway does 
 
 ### Verified installation
 
-Release artifacts are bound to release envelopes and SHA-256 digests. The installer refuses mismatched artifacts rather than silently accepting another package or platform variant.
+Stable installs are bound to immutable versioned release assets and SHA-256 digests. Latest resolves `master` once to an exact commit SHA, builds from that exact snapshot, and binds the installed source-qualified pi-shuttle package to its source identity and verified package tree. Gateway and pi-guard remain pinned and digest-verified components.
+
+### Interrupted-install handling
+
+A valid final receipt represents a managed installation. Recognized interrupted pi-shuttle state is classified as **INCOMPLETE** and can be cleaned/reinstalled only with explicit operator confirmation. Cleanup is limited to known pi-shuttle installer blockers; project registrations, runtime configuration, stores, and reusable components are preserved.
 
 ### Per-user state
 
@@ -244,7 +253,7 @@ Installation and trusted state are operator-owned and per-user. `pi-shuttle doct
 
 ### Fail closed
 
-Unknown platforms, target/envelope mismatches, component drift, invalid receipts, integrity failures, and incompatible runtime conditions are surfaced as failures instead of falling back to another target.
+Unknown platforms, target/envelope mismatches, component drift, foreign or ambiguous installation state, integrity failures, and incompatible runtime conditions are surfaced as failures instead of silently falling back or guessing.
 
 ## macOS distribution note
 
@@ -273,7 +282,7 @@ Use `SHA256SUMS` to independently verify downloaded release assets.
 
 ## Development from source
 
-The public release is the recommended installation path. For development:
+The Stable release is the recommended installation path for reproducible/public use. For development from a checkout:
 
 ```bash
 git clone https://github.com/mfx-labs/pi-shuttle.git
@@ -287,7 +296,7 @@ The repository also contains release-engineering tooling for building from exact
 
 ## Documentation
 
-- [`docs/product-contract.md`](docs/product-contract.md) — product boundaries and composition
+- [`docs/product-contract.md`](docs/product-contract.md) — current product boundaries and composition
 - [`docs/platform-support-contract.md`](docs/platform-support-contract.md) — platform support and evidence policy
 - [`docs/installation-contract.md`](docs/installation-contract.md) — installer and verification behavior
 - [`docs/operator-cli-contract.md`](docs/operator-cli-contract.md) — operator command surface
