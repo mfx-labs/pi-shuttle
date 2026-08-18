@@ -29,12 +29,10 @@
  */
 import { COMPATIBILITY_MANIFEST, GIT_RUNTIME_MINIMUM, NODE_RUNTIME_MINIMUM, PI_GUARD_COMMIT, PI_GUARD_TAG, PI_GUARD_VERSION, PI_RUNTIME_MINIMUM, PI_SHUTTLE_VERSION, gatewayDescriptorForLane } from '../../compat/manifest.js';
 import { parseJsonRejectingDuplicates } from '../../config/json.js';
+import { closedObject, RELEASE_FILE_NAME_RE, SHA256_HEX_RE } from './document.js';
 
 export const ENVELOPE_SCHEMA_VERSION = 1;
-
-/** Closed asset file-name grammar: a single relative component, no traversal. */
-export const RELEASE_FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
-export const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
+export { RELEASE_FILE_NAME_RE, SHA256_HEX_RE } from './document.js';
 
 export interface ReleaseEnvelopeV1 {
   readonly schemaVersion: 1;
@@ -74,16 +72,6 @@ export interface ReleaseEnvelopeV1 {
 export type EnvelopeResult<T> = { readonly ok: true; readonly value: T } | { readonly ok: false; readonly code: string; readonly message: string };
 
 type UnknownRecord = Readonly<Record<string, unknown>>;
-
-/** Closed-object helper: reject unknown keys and non-object values. */
-function closedObject(value: unknown, allowedKeys: readonly string[], label: string): UnknownRecord | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as UnknownRecord;
-  for (const key of Object.keys(record)) {
-    if (!allowedKeys.includes(key)) return null;
-  }
-  return record;
-}
 
 function fail(code: string, message: string): EnvelopeResult<ReleaseEnvelopeV1> {
   return { ok: false, code, message };

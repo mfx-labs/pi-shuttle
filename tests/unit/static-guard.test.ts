@@ -131,12 +131,26 @@ test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the
   }
 });
 
-test('ps2/ps3 static guard: node:crypto is confined to identity derivation and artifact digests', () => {
+test('ps2/ps3 static guard: node:crypto is confined to identity derivation, artifact digests, and signed release metadata', () => {
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/registry/identity.ts' || rel(file) === 'src/installer/artifact.ts') continue;
+    if (rel(file) === 'src/registry/identity.ts' || rel(file) === 'src/installer/artifact.ts' || rel(file) === 'src/installer/release/trust-internal.ts') continue;
     assert.equal(content.includes('node:crypto'), false, `${rel(file)} must not use crypto`);
   }
+});
+
+test('slice1 static guard: generic trust construction stays behind the fixed production boundary', () => {
+  for (const file of files) {
+    const content = readFileSync(file, 'utf8');
+    if (rel(file) === 'src/installer/release/trust.ts' || rel(file) === 'src/installer/release/trust-internal.ts') continue;
+    assert.equal(content.includes("release/trust-internal.js"), false, `${rel(file)} must not import the generic trust implementation`);
+    assert.equal(content.includes("./trust-internal.js"), false, `${rel(file)} must not import the generic trust implementation`);
+  }
+  const exportsGenericVerifier = (source: string): boolean => /export\s+(?:(?:(?:async\s+)?function|const|let|var)\s+createTrustVerifier\b|default\s+createTrustVerifier\b|\{[^}]*\bcreateTrustVerifier\b[^}]*\})/s.test(source);
+  assert.equal(exportsGenericVerifier("export { createTrustVerifier } from './trust-internal.js';"), true);
+  assert.equal(exportsGenericVerifier("export { createTrustVerifier as verifierFactory } from './trust-internal.js';"), true);
+  const boundary = readFileSync(join(SRC, 'installer', 'release', 'trust.ts'), 'utf8');
+  assert.equal(exportsGenericVerifier(boundary), false, 'production trust boundary must not export arbitrary-policy verifier construction');
 });
 
 test('ps2/ps3 static guard: node:fs is confined to leaf modules with exact allowlists', () => {
