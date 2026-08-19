@@ -25,9 +25,10 @@
  */
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { HostEnvironment, LayoutPaths } from '../host/environment.js';
+import type { HostEnvironment, LayoutPaths, ManifestNativeLayout } from '../host/environment.js';
 import { readReceipt } from '../installer/receipt.js';
 import type { GatewayReceiptEntry, InstallReceipt } from '../installer/receipt.js';
+import type { ManifestNativeResolution } from '../manifest-native/resolve.js';
 import { acquireLock, releaseLock } from '../persistence/lock.js';
 import type { LockResult } from '../persistence/lock.js';
 
@@ -41,6 +42,15 @@ export interface OperatorContext {
   readonly pathEnv?: NodeJS.ProcessEnv;
   /** Injectable UID observation (test seam; defaults to `process.getuid()`). */
   readonly uid?: number;
+  /**
+   * Manifest-native lifecycle resolution (F-01 correction; test seam only,
+   * defaults to the production boundary). The project-lifecycle commands
+   * gate their operation on a RECONCILED Receipt Schema 1 installation;
+   * the production default is the compiled manifest-native lifecycle
+   * resolver. Tests inject the fixture-verified resolver; production
+   * callers never pass this.
+   */
+  readonly resolveManifestNative?: (layout: ManifestNativeLayout, lane: string) => Promise<ManifestNativeResolution>;
 }
 
 export interface GatewayFacts {
@@ -56,9 +66,14 @@ export function gateFailure(code: string, message: string, exitCode: 1 | 2): { r
 }
 
 /**
- * The receipt gate for Gateway-required operations (add, start): a usable,
- * verified Gateway installation recorded in the closed installation
- * receipt. Never infers presence from the filesystem; never reinstalls.
+ * HISTORICAL (F-01): the previous-generation installation-receipt gate.
+ * Reads the legacy `~/.local/state/pi-shuttle/install.json` PS-3 receipt
+ * and requires a `components.gateway` record. The manifest-native
+ * installer does not write install.json, and the current project-lifecycle
+ * CLI no longer reaches this function (it gates on Receipt Schema 1 via
+ * the manifest-native lifecycle resolver). Retained ONLY as historical
+ * reference for the excluded previous-generation path — it is unreachable
+ * from the current packaged CLI.
  */
 export function resolveGatewayInstallation(layout: LayoutPaths): GateResult<GatewayFacts> {
   const read = readReceipt(layout.installReceiptPath);

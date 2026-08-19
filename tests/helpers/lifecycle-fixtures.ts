@@ -15,6 +15,9 @@ import { componentDirName, GATEWAY_PACKAGE_NAME } from '../../src/installer/comp
 import { writeReceipt, newReceipt } from '../../src/installer/receipt.js';
 import type { ComponentStatus, GatewaySmoke } from '../../src/installer/receipt.js';
 import { writeFakePi } from './installer-fixtures.js';
+import { materializeNativeNamespace, nativeResolver, nativeTreeFiles } from './manifest-native-fixtures.js';
+import { FIXTURE_NOW, fixtureVerifier } from './release-trust-fixtures.js';
+import type { OperatorContext } from '../../src/lifecycle/state.js';
 
 /** Create a fresh isolated environment root (0700), on its CANONICAL spelling. */
 export function makeEnv(): string {
@@ -309,6 +312,44 @@ export function writeRuntimeDocument(env: string, document: unknown): string {
   const path = layout.runtimeConfigPath;
   writeFileSync(path, JSON.stringify(document, null, 2) + '\n', { mode: 0o600 });
   return path;
+}
+
+// ─── F-01: valid manifest-native project environment ─────────────────────
+
+export interface NativeProjectEnv {
+  readonly env: string;
+  readonly root: string;
+  readonly layout: ReturnType<typeof resolveLayout>;
+  readonly ctx: OperatorContext;
+  readonly pathEnv: NodeJS.ProcessEnv;
+}
+
+/**
+ * F-01: materialize a VALID Manifest-Native Installation Receipt Schema 1
+ * namespace whose Gateway bin is the bootstrap-capable fake CLI, and build
+ * an operator context whose resolver is the paired fixture resolver. No
+ * previous-generation install.json is written. Cleanup via cleanupEnv(env).
+ */
+export async function makeNativeProjectEnv(options: { readonly bin?: string } = {}): Promise<NativeProjectEnv> {
+  const env = makeEnv();
+  const layout = resolveLayout(env);
+  const verifier = fixtureVerifier(FIXTURE_NOW);
+  const bin = options.bin ?? FAKE_GATEWAY_SCRIPT;
+  await materializeNativeNamespace(env, {}, nativeTreeFiles({ 'bin/run.js': bin, 'lib/core.js': 'export const core = 1;\n' }), verifier);
+  // A real manifest-native install creates the disposable state root
+  // (`~/.local/state/pi-shuttle`); project.lock lives there. Mirror it so
+  // lock acquisition matches production post-install state.
+  mkdirSync(layout.stateDir, { recursive: true, mode: 0o700 });
+  const pathEnv = fixturePathEnv(env, { HOME: env });
+  const ctx: OperatorContext = {
+    env: { home: env, platform: 'linux', arch: 'x64' },
+    layout,
+    nodeExecutable: process.execPath,
+    pathEnv,
+    resolveManifestNative: nativeResolver(verifier),
+  };
+  const root = makeProjectRoot(env);
+  return { env, root, layout, ctx, pathEnv };
 }
 
 // ─── real-CLI subprocess runner ──────────────────────────────────────────

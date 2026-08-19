@@ -35,13 +35,17 @@ import type { CommandOutcome } from '../app.js';
 import { CONFIGURATION_VERSION } from '../compat/manifest.js';
 import { parseRuntimeDocument, readRuntimeDocument, serializeRuntimeDocument } from '../config/document.js';
 import type { RuntimeDocument, SurfaceConfig } from '../config/document.js';
-import { canonicalizePath } from '../host/environment.js';
+import { canonicalizePath, hostLane, resolveManifestNativeLayout } from '../host/environment.js';
+import type { ManifestNativeLayout } from '../host/environment.js';
 import { checkNodeLane, checkPlatformLane } from '../installer/preflight.js';
+import { resolveManifestNativeLifecycle } from '../manifest-native/resolve.js';
+import type { ManifestNativeResolution } from '../manifest-native/resolve.js';
+import type { ReconciledManifestNativeInstallation } from '../manifest-native/reconcile.js';
 import { resolveExecutable, runProcess } from '../process/runner.js';
 import { mutateDocumentAtomically, writeFileAtomic } from '../persistence/writer.js';
 import { deriveStoreId, deriveStoreLocator, deriveSurfaceId, deriveWorkspaceId } from '../registry/identity.js';
 import { deregisterSurface, listSurfaces, registerSurface } from '../registry/model.js';
-import { acquireProjectLock, pathExists, releaseProjectLock, resolveGatewayInstallation } from './state.js';
+import { acquireProjectLock, pathExists, releaseProjectLock } from './state.js';
 import type { OperatorContext } from './state.js';
 
 // ─── typed failure helpers ───────────────────────────────────────────────
@@ -52,6 +56,41 @@ function fail(code: string, detail: string, exitCode: 1 | 2): CommandOutcome {
 
 function ok(stdout: string): CommandOutcome {
   return { exitCode: 0, stdout, stderr: '' };
+}
+
+// ─── manifest-native installation gate (F-01) ─────────────────────────────
+
+export type ManifestNativeGateResult =
+  | { readonly ok: true; readonly installation: ReconciledManifestNativeInstallation }
+  | { readonly ok: false; readonly code: string; readonly message: string; readonly exitCode: 1 | 2 };
+
+/**
+ * The CURRENT project-lifecycle installation gate (F-01 correction). A
+ * reconciled Manifest-Native Installation Receipt Schema 1 installation is
+ * required before ANY project command operates:
+ *
+ *   signed channel/release metadata -> Receipt Schema 1 -> verified package
+ *   tree -> runtime-provenance gate
+ *
+ * It NEVER consults the previous-generation `install.json` receipt,
+ * `components.gateway`, or the old receipt parser (CLEAN lifecycle and
+ * malformed/ambiguous state both fail closed with truthfully mapped
+ * current-generation errors). The production default is the compiled
+ * manifest-native lifecycle resolver; `ctx.resolveManifestNative` is a
+ * test-only seam and never a production release-selection authority.
+ */
+async function requireManifestNativeInstallation(ctx: OperatorContext): Promise<ManifestNativeGateResult> {
+  const mnLayout = resolveManifestNativeLayout(ctx.env.home);
+  const lane = hostLane(ctx.env.platform, ctx.env.arch);
+  const resolve = ctx.resolveManifestNative ?? ((layout: ManifestNativeLayout, hostLaneName: string) => resolveManifestNativeLifecycle(layout, hostLaneName));
+  const resolution = await resolve(mnLayout, lane);
+  if (resolution.kind === 'CLEAN') {
+    return { ok: false, code: 'ERR-MN-PROJECT-NO-INSTALLATION', message: 'no manifest-native installation (clean manifest-native lifecycle); run the fresh installer first', exitCode: 1 };
+  }
+  if (resolution.kind === 'MALFORMED') {
+    return { ok: false, code: 'ERR-MN-PROJECT-STATE-MALFORMED', message: `manifest-native state is malformed and cannot support project operations; no repair or fallback is performed: ${resolution.reason}`, exitCode: 1 };
+  }
+  return { ok: true, installation: resolution.installation };
 }
 
 // ─── PS6-MAC-001 duplicate-object guard ───────────────────────────────────
@@ -241,9 +280,13 @@ export async function addProject(ctx: OperatorContext, inputPath: string): Promi
   const node = checkNodeLane();
   if (!node.ok) return { ok: false, ...fail('ERR-PS4-PREFLIGHT-NODE', `project add: ${node.message}`, 1) };
 
-  // 2. Installation receipt gate: a usable, verified Gateway is required.
-  const gateway = resolveGatewayInstallation(ctx.layout);
-  if (!gateway.ok) return { ok: false, ...fail(gateway.code, `project add: ${gateway.message}`, gateway.exitCode) };
+  // 2. Manifest-native installation gate (F-01): a reconciled Receipt
+  //    Schema 1 installation is required. The manifest-native lifecycle
+  //    resolver is the ONLY installation authority; the previous-generation
+  //    install.json receipt is never consulted.
+  const mnGate = await requireManifestNativeInstallation(ctx);
+  if (!mnGate.ok) return { ok: false, ...fail(mnGate.code, `project add: ${mnGate.message}`, mnGate.exitCode) };
+  const installation = mnGate.installation;
 
   // 3. Canonicalize the project root (symlink-resolved; fail closed).
   const canonicalRoot = canonicalizePath(inputPath);
@@ -328,7 +371,7 @@ export async function addProject(ctx: OperatorContext, inputPath: string): Promi
     // 9. Invoke the installed Gateway PS-1 operator bootstrap verb
     //    (argv arrays only; bounded output; never through MCP).
     const storeWasPresent = pathExists(join(locator, 'store-v1'));
-    const boot = await runProcess(ctx.nodeExecutable, [gateway.value.binPath, 'bootstrap', '--config', inputFile, '--output', outputFile], { env: ctx.pathEnv, timeoutMs: 60_000 });
+    const boot = await runProcess(ctx.nodeExecutable, [installation.binPath, 'bootstrap', '--config', inputFile, '--output', outputFile], { env: ctx.pathEnv, timeoutMs: 60_000 });
     if (boot.exitCode !== 0 || boot.signal !== null) {
       unlinkIfPresent(inputFile);
       const reason = boot.timedOut ? 'timed out' : boot.signal !== null ? `killed by ${boot.signal}` : `exit ${boot.exitCode ?? 'unknown'}`;
@@ -413,7 +456,9 @@ export async function addProject(ctx: OperatorContext, inputPath: string): Promi
  * state. Registry membership never implies operational health (that is
  * doctor's job).
  */
-export function listProjects(ctx: OperatorContext): CommandOutcome {
+export async function listProjects(ctx: OperatorContext): Promise<CommandOutcome> {
+  const mnGate = await requireManifestNativeInstallation(ctx);
+  if (!mnGate.ok) return fail(mnGate.code, `project list: ${mnGate.message}`, mnGate.exitCode);
   const read = readRuntimeDocument(ctx.layout.runtimeConfigPath);
   if (!read.ok) {
     if (read.code === 'absent') return ok('no registered projects\n');
@@ -440,7 +485,11 @@ export function listProjects(ctx: OperatorContext): CommandOutcome {
  * replay-verifies it. Unknown targets fail closed with the typed registry
  * error.
  */
-export function removeProject(ctx: OperatorContext, target: string): CommandOutcome {
+export async function removeProject(ctx: OperatorContext, target: string): Promise<CommandOutcome> {
+  // F-01: a reconciled manifest-native installation is required before any
+  // deregistration; the previous-generation install.json is never consulted.
+  const mnGate = await requireManifestNativeInstallation(ctx);
+  if (!mnGate.ok) return fail(mnGate.code, `project remove: ${mnGate.message}`, mnGate.exitCode);
   // A path-shaped target is canonicalized first; a workspaceId/surfaceId
   // is matched as the opaque identifier. When the path no longer resolves,
   // the canonical string still matches an exact registered root.

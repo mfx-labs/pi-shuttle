@@ -86,18 +86,18 @@ test('cli dispatch: malformed invocation exits 2 with usage on stderr', async ()
   }
 });
 
-test('cli dispatch: PS-4 operational handlers fail closed without an installation (exit 1, typed)', async () => {
+test('cli dispatch: PS-4 operational handlers fail closed without a manifest-native installation (exit 1, typed)', async () => {
   const add = await run(['project', 'add', '/tmp/proj'], { env: LINUX_ENV });
   assert.equal(add.exitCode, 1);
   assert.equal(add.stdout, '');
   assert.ok(add.stderr.includes('project add'), add.stderr);
-  assert.ok(add.stderr.includes('receipt'), add.stderr);
+  assert.ok(add.stderr.includes('no manifest-native installation'), add.stderr);
 
   const remove = await run(['project', 'remove', '/tmp/proj'], { env: LINUX_ENV });
   assert.equal(remove.exitCode, 1);
   assert.equal(remove.stdout, '');
   assert.ok(remove.stderr.includes('project remove'), remove.stderr);
-  assert.ok(remove.stderr.includes('no registered project matches'), remove.stderr);
+  assert.ok(remove.stderr.includes('no manifest-native installation'), remove.stderr);
 
   const start = await run(['start'], { env: LINUX_ENV });
   assert.equal(start.exitCode, 1);
@@ -105,10 +105,13 @@ test('cli dispatch: PS-4 operational handlers fail closed without an installatio
   assert.ok(start.stderr.includes('start'), start.stderr);
   assert.ok(start.stderr.includes('no manifest-native installation'), start.stderr);
 
-  // project list works without any installation (empty registry is valid).
+  // F-01: project list also requires a manifest-native installation and
+  // fails closed on clean state (it must not consult install.json).
   const list = await run(['project', 'list'], { env: LINUX_ENV });
-  assert.equal(list.exitCode, 0, list.stderr);
-  assert.equal(list.stdout, 'no registered projects\n');
+  assert.equal(list.exitCode, 1, list.stderr);
+  assert.equal(list.stdout, '');
+  assert.ok(list.stderr.includes('project list'), list.stderr);
+  assert.ok(list.stderr.includes('no manifest-native installation'), list.stderr);
 });
 
 test('cli dispatch: doctor runs on the injected environment (missing config = finding, exit 1)', async () => {
@@ -182,12 +185,14 @@ test('cli subprocess: real CLI help/version/unknown/deferred/doctor', async () =
   assert.equal(malformed.code, 2);
 
   const deferred = await runCli(['project', 'list'], home, probeEnv);
-  assert.equal(deferred.code, 0);
-  assert.equal(deferred.stdout, 'no registered projects\n');
+  // F-01: project list fails closed without a manifest-native installation
+  // (it must not consult install.json), even on a clean home.
+  assert.equal(deferred.code, 1, deferred.stderr);
+  assert.ok(deferred.stderr.includes('no manifest-native installation'), deferred.stderr);
 
   const add = await runCli(['project', 'add', '/nonexistent'], home, probeEnv);
   assert.equal(add.code, 1);
-  assert.ok(add.stderr.includes('receipt'), add.stderr);
+  assert.ok(add.stderr.includes('no manifest-native installation'), add.stderr);
 
   const doctor = await runCli(['doctor'], home, probeEnv);
   // SIR-PS2-003: missing runtime configuration is a finding → exit 1.
