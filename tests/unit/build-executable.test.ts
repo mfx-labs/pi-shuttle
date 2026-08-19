@@ -93,7 +93,7 @@ test('PS5-LINUX-001: a clean isolated build produces a directly executable dist/
     // Exercise the produced file DIRECTLY (no `node` prefix).
     const execResult = await run(cliPath, ['--version'], { timeoutMs: 30_000 });
     assert.equal(execResult.code, 0, `direct exec failed (exit ${execResult.code}): ${execResult.stderr}`);
-    assert.ok(execResult.stdout.includes('pi-shuttle 0.1.2'), execResult.stdout);
+    assert.ok(execResult.stdout.includes('pi-shuttle 0.1.3'), execResult.stdout);
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }
@@ -121,7 +121,7 @@ test('PS5-LINUX-001: the npm-pack release-shaped artifact preserves executable s
     // Execute the packaged CLI DIRECTLY (no `node` prefix).
     const runResult = await run(cliPath, ['--version'], { timeoutMs: 30_000 });
     assert.equal(runResult.code, 0, `packaged direct exec failed (exit ${runResult.code}): ${runResult.stderr}`);
-    assert.ok(runResult.stdout.includes('pi-shuttle 0.1.2'), runResult.stdout);
+    assert.ok(runResult.stdout.includes('pi-shuttle 0.1.3'), runResult.stdout);
   } finally {
     rmSync(packDir, { recursive: true, force: true });
   }
@@ -153,7 +153,7 @@ test('PS5-LINUX-001: the installed <binDir>/pi-shuttle symlink executes directly
     // Operator-style direct invocation (no `node` prefix).
     const version = await run(binLink, ['--version'], { timeoutMs: 30_000 });
     assert.equal(version.code, 0, `bin link direct exec failed (exit ${version.code}): ${version.stderr}`);
-    assert.ok(version.stdout.includes('pi-shuttle 0.1.2'), version.stdout);
+    assert.ok(version.stdout.includes('pi-shuttle 0.1.3'), version.stdout);
     const help = await run(binLink, ['--help'], { timeoutMs: 30_000 });
     assert.equal(help.code, 0, `bin link --help failed (exit ${help.code}): ${help.stderr}`);
     assert.ok(help.stdout.includes('usage: pi-shuttle'), help.stdout);

@@ -24,6 +24,7 @@ import { pathToFileURL } from 'node:url';
 const BUILDER = pathToFileURL(join(import.meta.dirname, '..', '..', '..', 'scripts', 'build-release.mjs')).href;
 const {
   checksumLines,
+  flatReleasePublicationAssets,
   readTgzPackageIdentity,
   releaseInventoryAssets,
   verifyPackageIdentity,
@@ -105,8 +106,51 @@ test('builder (E2A): manifest-native inventory contains only the pi-shuttle dist
   }
 });
 
-test('builder (E2A): SHA256SUMS rows cover the complete manifest-native inventory', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'dist-sums.XXXXXX'));
+test('builder (PUBLICATION-LAYOUT): the flat seven-asset publication inventory is exactly representable', () => {
+  const assets = flatReleasePublicationAssets({
+    piShuttleTgz: 'pi-shuttle-0.1.3.tgz',
+    gatewayArtifactFileName: 'project-gateway-macos-core-0.1.0.tgz',
+    releaseId: 'gateway-macos-release-002',
+    releaseManifestSha256: '6c09b30097d192abdb3575c5d9b882f45816b7c21d3966facf3d4a22ccfd6630',
+  });
+  assert.deepEqual(assets, [
+    'install.sh',
+    'pi-shuttle-0.1.3.tgz',
+    'project-gateway-macos-core-0.1.0.tgz',
+    'gateway-meta-keyring.json',
+    'gateway-meta-stable-channel.json',
+    'gateway-meta-release-gateway-macos-release-002-6c09b30097d192abdb3575c5d9b882f45816b7c21d3966facf3d4a22ccfd6630.json',
+  ]);
+  for (const asset of assets) {
+    assert.equal(/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(asset), true, asset);
+    assert.equal(asset.includes('/'), false, asset);
+    assert.equal(asset.includes('\\'), false, asset);
+  }
+});
+
+test('builder (PUBLICATION-LAYOUT): the flat publication inventory fails closed on non-canonical selection', () => {
+  for (const releaseId of ['Uppercase', 'has/slash', '..traversal']) {
+    assert.throws(
+      () => flatReleasePublicationAssets({ piShuttleTgz: 'pi-shuttle-0.1.3.tgz', gatewayArtifactFileName: 'project-gateway-macos-core-0.1.0.tgz', releaseId, releaseManifestSha256: '6c09b30097d192abdb3575c5d9b882f45816b7c21d3966facf3d4a22ccfd6630' }),
+      /cannot derive a canonical flat release-manifest asset name/,
+      releaseId,
+    );
+  }
+  for (const digest of ['ABCD', '6c09b30097d192abdb3575c5d9b882f45816b7c21d3966facf3d4a22ccfd663', 'has/slash']) {
+    assert.throws(
+      () => flatReleasePublicationAssets({ piShuttleTgz: 'pi-shuttle-0.1.3.tgz', gatewayArtifactFileName: 'project-gateway-macos-core-0.1.0.tgz', releaseId: 'gateway-macos-release-002', releaseManifestSha256: digest }),
+      /cannot derive a canonical flat release-manifest asset name/,
+      digest,
+    );
+  }
+  assert.throws(
+    () => flatReleasePublicationAssets({ piShuttleTgz: 'pi-shuttle-0.1.3.tgz', gatewayArtifactFileName: '../escape.tgz', releaseId: 'gateway-macos-release-002', releaseManifestSha256: '6c09b30097d192abdb3575c5d9b882f45816b7c21d3966facf3d4a22ccfd6630' }),
+    /not a single flat GitHub asset filename/,
+    'the gateway artifact file name must itself be one flat filename',
+  );
+});
+
+test('builder (E2A): SHA256SUMS rows cover the complete manifest-native inventory', () => {  const dir = mkdtempSync(join(tmpdir(), 'dist-sums.XXXXXX'));
   try {
     const assets = releaseInventoryAssets('pi-shuttle-0.1.1.tgz');
     for (const [index, asset] of assets.entries()) writeFileSync(join(dir, asset), `asset-${index}`);

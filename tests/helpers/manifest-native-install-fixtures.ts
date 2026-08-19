@@ -20,6 +20,7 @@ import { runProcess, resolveExecutable } from '../../src/installer/process.js';
 import type { ReleaseFetcher } from '../../src/installer/release/acquire.js';
 import type { FreshInstallDependencies, FreshInstallOutcome } from '../../src/manifest-native/install.js';
 import { runManifestNativeFreshInstall } from '../../src/manifest-native/install.js';
+import { releaseManifestAssetName } from '../../src/manifest-native/release-assets.js';
 import { nativeResolver, TEST_LANE, testLaneContract } from './manifest-native-fixtures.js';
 import { FIXTURE_NOW, fixtureVerifier, gatewayReleasePayload, signedGatewayRelease, signedKeyring, signedStableChannel } from './release-trust-fixtures.js';
 import type { TrustVerifier } from '../../src/installer/release/trust-internal.js';
@@ -49,8 +50,8 @@ export function ioError(code: string): NodeJS.ErrnoException {
   return err;
 }
 
-export const FIXTURE_METADATA_BASE = 'https://fixture.invalid/gateway-meta';
-export const FIXTURE_ARTIFACT_BASE = 'https://fixture.invalid/artifacts';
+export const FIXTURE_METADATA_BASE = 'https://fixture.invalid/releases/download/v0.1.3';
+export const FIXTURE_ARTIFACT_BASE = 'https://fixture.invalid/releases/download/v0.1.3';
 
 /** The fake Gateway bin served inside install artifacts (fake process target only). */
 export const INSTALL_BIN_SCRIPT = `#!/usr/bin/env node
@@ -138,12 +139,13 @@ export function installMetadataFetcher(release: InstallFixtureRelease, options: 
   return async (url: string, _redirectDepth?: number) => {
     const path = url.slice(url.indexOf('/', url.indexOf('://') + 3));
     const bytes = (text: string): Buffer => Buffer.from(text, 'utf8');
-    if (path.endsWith('/keyring.json')) return { status: 200, body: Readable.from([bytes(release.chain.keyringText)]), contentLength: Buffer.byteLength(release.chain.keyringText) };
-    if (path.endsWith('/stable-channel.json')) {
+    if (path.endsWith('/gateway-meta-keyring.json')) return { status: 200, body: Readable.from([bytes(release.chain.keyringText)]), contentLength: Buffer.byteLength(release.chain.keyringText) };
+    if (path.endsWith('/gateway-meta-stable-channel.json')) {
       if (options.failChannel) return { status: 404, body: Readable.from([Buffer.from('not found')]), contentLength: 9 };
       return { status: 200, body: Readable.from([bytes(release.chain.channelText)]), contentLength: Buffer.byteLength(release.chain.channelText) };
     }
-    if (path.includes(`/releases/${release.chain.releaseId}/`)) {
+    const manifestAsset = releaseManifestAssetName(release.chain.releaseId, release.chain.releaseManifestSha256);
+    if (manifestAsset !== null && path.endsWith(`/${manifestAsset}`)) {
       if (options.failRelease) return { status: 404, body: Readable.from([Buffer.from('not found')]), contentLength: 9 };
       return { status: 200, body: Readable.from([bytes(release.chain.releaseText)]), contentLength: Buffer.byteLength(release.chain.releaseText) };
     }

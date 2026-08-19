@@ -80,6 +80,7 @@ import { CACHE_SCHEMA_VERSION } from './cache.js';
 import type { ManifestNativeCacheDocument } from './cache.js';
 import { checkNativeObject, readBoundedNativeFile } from './fs.js';
 import { deriveBinPath, derivePackageRoot } from './paths.js';
+import { releaseManifestAssetName } from './release-assets.js';
 import { buildManifestNativeReceipt } from './receipt.js';
 import { resolveManifestNativeLifecycle } from './resolve.js';
 import type { ManifestNativeResolution } from './resolve.js';
@@ -93,14 +94,20 @@ import type { DurableIo } from './write.js';
  * metadata — never hosts, schemes, or URLs from untrusted content.
  */
 export const GATEWAY_RELEASE_ORIGIN = Object.freeze({
-  metadataBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.2/gateway-meta',
-  artifactBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.2',
+  metadataBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.3',
+  artifactBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.3',
 } as const);
 
-/** Compiled signed-metadata file names (stable policy). */
+/**
+ * Compiled signed-metadata flat release-asset file names (stable policy).
+ * GitHub Release assets cannot represent slash-bearing names, so every
+ * signed metadata document is ONE flat filename directly under the release
+ * tag; the release-manifest file name is derived deterministically from the
+ * already-validated signed selection (release-assets.ts).
+ */
 export const GATEWAY_SIGNED_METADATA_FILES = Object.freeze({
-  keyring: 'keyring.json',
-  stableChannel: 'stable-channel.json',
+  keyring: 'gateway-meta-keyring.json',
+  stableChannel: 'gateway-meta-stable-channel.json',
 } as const);
 
 /** Node major runtime floor implied by the `node22` lane protocol label. */
@@ -439,7 +446,11 @@ export async function runManifestNativeFreshInstall(env: HostEnvironment, deps: 
     const channel = verifyChannel(channelText, keyring.value);
     if (!channel.ok) return outcomeFailed('selection', channel.code, `current signed stable channel failed fresh verification: ${channel.message}`);
 
-    const releaseResult = await fetchSignedDocument(`${origin.metadataBaseUrl}/releases/${channel.value.releaseId}/${channel.value.releaseManifestSha256}.json`, attemptDir, uid, fetcher, 3);
+    const releaseManifestAsset = releaseManifestAssetName(channel.value.releaseId, channel.value.releaseManifestSha256);
+    if (releaseManifestAsset === null) {
+      return outcomeFailed('selection', 'ERR-MN-INSTALL-RELEASE-ASSET', 'signed release selection cannot derive a canonical flat release-manifest asset name');
+    }
+    const releaseResult = await fetchSignedDocument(`${origin.metadataBaseUrl}/${releaseManifestAsset}`, attemptDir, uid, fetcher, 3);
     if (!releaseResult.ok) return outcomeFailed('selection', releaseResult.code, releaseResult.message);
     const releaseText = releaseResult.text;
     const selected = verifySelection(channel.value, releaseText, keyring.value);

@@ -118,6 +118,44 @@ This procedure is sufficient for a clean environment to reproduce the corrected 
 commands, never placed in `/tmp`, generated release directories, or Git, and
 never included in logs or reports intended for commit.**
 
+### Publication-layout correction (2026-08-19): v0.1.2 stop + v0.1.3 flat release-asset naming
+
+The v0.1.2 publication attempt discovered that **GitHub Release assets cannot
+represent slash-bearing names**: REST `%2F`/raw uploads sanitize `/` to `.`, and
+the multipart API rejects the request (`Invalid name for request`); the download
+router performs no path expansion, so a `…/download/v0.1.1/x/y/install.sh` URL
+returns 404. The originally committed `GATEWAY_RELEASE_ORIGIN` used a
+slash-bearing `metadataBaseUrl`
+(`…/download/v0.1.2/gateway-meta` + `…/releases/<releaseId>/<sha>.json`), which
+is therefore unsatisfiable.
+
+Correction:
+
+- **pi-shuttle advances to 0.1.3.** The v0.1.2 tag is preserved as
+  **ABANDONED / UNPUBLISHED** (the draft release was deleted); no v0.1.2
+  production population exists and none is expected.
+- The compiled origin is now fully flat:
+  `metadataBaseUrl`/`artifactBaseUrl` = `https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.3`.
+- Every Gateway signed-metadata document is published as **ONE flat
+  release-asset filename directly under the release tag**:
+  - `gateway-meta-keyring.json`
+  - `gateway-meta-stable-channel.json`
+  - `gateway-meta-release-<releaseId>-<releaseManifestSha256>.json`
+  (e.g. `gateway-meta-release-gateway-macos-release-002-6c09b300….json`)
+- The Gateway artifact stays a single flat asset:
+  `…/download/v0.1.3/project-gateway-macos-core-0.1.0.tgz`.
+- The release-manifest file name is derived by the pure fail-closed
+  constructor `releaseManifestAssetName` (`src/manifest-native/release-assets.ts`)
+  from the **already-validated signed selection** — releaseId and digest grammars
+  exclude separators/traversal, and the result is validated against the shared
+  safe-file-name grammar. No caller-supplied file name or URL ever reaches the
+  transport.
+- **Trust boundaries are unchanged.** The keyring/channel/release-manifest
+  payload schemas contain no pi-shuttle version, GitHub tag, metadata URL, or
+  asset file name, so the signed metadata bytes prepared for v0.1.2 are reused
+  **unchanged** (no re-signing, no root change, no schema change). This is a
+  transport-representation correction only.
+
 ## Consequences
 
 - pi-shuttle's compiled `GATEWAY_TRUST_POLICY` root is now the genuine

@@ -19,7 +19,7 @@ const BASE = `${RELEASE_BASE_URL_PREFIX}/v0.1.0`;
 test('acquire: release-installer user-agent carries the current pi-shuttle version', () => {
   // Version-sensitive assertion: a future pi-shuttle bump must move this
   // expectation (the shipped HTTP identity must never go stale).
-  assert.equal(RELEASE_INSTALLER_USER_AGENT, 'pi-shuttle-release-installer/0.1.2');
+  assert.equal(RELEASE_INSTALLER_USER_AGENT, 'pi-shuttle-release-installer/0.1.3');
 });
 
 function body(buffer: Buffer, status = 200, extra: Partial<FetchResponse> = {}): FetchResponse {

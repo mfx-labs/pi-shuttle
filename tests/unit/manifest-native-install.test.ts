@@ -34,11 +34,13 @@ import {
   releaseBOverrides,
   runFreshInstall,
   FIXTURE_ARTIFACT_BASE,
+  FIXTURE_METADATA_BASE,
   installTreeFiles,
   INSTALL_BIN_SCRIPT,
 } from '../helpers/manifest-native-install-fixtures.js';
 import type { InstallFixtureRelease } from '../helpers/manifest-native-install-fixtures.js';
 import type { FreshInstallOutcome } from '../../src/manifest-native/install.js';
+import { releaseManifestAssetName } from '../../src/manifest-native/release-assets.js';
 import { ioError } from '../helpers/manifest-native-install-fixtures.js';
 
 function outcomeKind(outcome: FreshInstallOutcome): string {
@@ -129,6 +131,46 @@ test('install: full chain from CLEAN produces INSTALLED and a VALID runtime life
     });
     assert.equal(started.exitCode, 0, started.stderr);
     assert.equal(readFileSync(record, 'utf8').trim(), outcome.binPath, 'start must execute the exact verified installed bin');
+  } finally {
+    rmSync(env, { recursive: true, force: true });
+  }
+});
+
+test('install: flat publication layout — every metadata URL is ONE flat asset name under the release base', async () => {
+  const release = await buildInstallFixtureRelease(releaseAOverrides());
+  const env = makeEnv();
+  const requested: string[] = [];
+  try {
+    const baseFetcher = installMetadataFetcher(release);
+    const recording: typeof baseFetcher = async (url, depth) => {
+      requested.push(url);
+      return baseFetcher(url, depth);
+    };
+    const verifier = fixtureVerifier(FIXTURE_NOW);
+    const outcome = await runFreshInstall(env, release, freshInstallDeps(verifier, recording));
+    assert.equal(outcome.kind, 'INSTALLED', JSON.stringify(outcome));
+    // Exactly the signed metadata chain + the authenticated artifact, all flat.
+    const manifestAsset = releaseManifestAssetName(release.chain.releaseId, release.chain.releaseManifestSha256);
+    assert.notEqual(manifestAsset, null);
+    assert.deepEqual(requested.map((url) => url.slice(url.lastIndexOf('/') + 1)).sort(), [
+      release.artifactFileName,
+      'gateway-meta-keyring.json',
+      'gateway-meta-stable-channel.json',
+      manifestAsset as string,
+    ].sort());
+    for (const url of requested) {
+      // Exactly one path component below the release base: every asset is a
+      // flat single filename (the PUBLICATION-LAYOUT contract). No
+      // slash-bearing sub-path such as /gateway-meta/… or /releases/<id>/…
+      // may appear after the release tag.
+      assert.equal(url.startsWith(`${FIXTURE_METADATA_BASE}/`), true, url);
+      const file = url.slice(FIXTURE_METADATA_BASE.length + 1);
+      assert.equal(file.includes('/'), false, url);
+      assert.equal(file.includes('\\'), false, url);
+      assert.equal(/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file), true, url);
+    }
+    // The release-manifest URL is exactly the deterministic flat asset name.
+    assert.equal(requested.some((url) => url.endsWith(`/${manifestAsset}`)), true, JSON.stringify(requested));
   } finally {
     rmSync(env, { recursive: true, force: true });
   }
@@ -285,7 +327,7 @@ test('install: bad channel/release signature fails before any artifact authority
     const fetcher = installMetadataFetcher(release);
     const base = fetcher;
     const tampered: typeof base = async (url: string) => {
-      if (url.endsWith('/stable-channel.json')) {
+      if (url.endsWith('/gateway-meta-stable-channel.json')) {
         const bytes = Buffer.from(other.chain.channelText, 'utf8');
         return { status: 200, body: Readable.from([bytes]), contentLength: bytes.length };
       }

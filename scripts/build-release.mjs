@@ -35,6 +35,11 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { scanArtifactMembers } from '../dist/installer/archive.js';
 import { PI_SHUTTLE_PACKAGE_NAME } from '../dist/installer/components.js';
+import {
+  GATEWAY_META_KEYRING_ASSET,
+  GATEWAY_META_STABLE_CHANNEL_ASSET,
+  releaseManifestAssetName,
+} from '../dist/manifest-native/release-assets.js';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_DEFAULT = join(ROOT, 'dist-release', 'manifest-native-candidate');
@@ -93,6 +98,33 @@ function sha256File(path) {
  */
 export function releaseInventoryAssets(piShuttleTgz) {
   return [INSTALL_SH, piShuttleTgz];
+}
+
+/**
+ * The complete flat v<version> release PUBLICATION inventory — every asset
+ * a pi-shuttle GitHub Release must carry (SHA256SUMS lists all of them).
+ * GitHub Release assets cannot represent slash-bearing names, so every
+ * Gateway signed-metadata document is ONE flat filename directly under the
+ * release tag; the release-manifest asset name is derived deterministically
+ * from the already-validated signed selection and every asset is validated
+ * to be a single flat GitHub filename (fails closed). This builder
+ * physically produces only the pi-shuttle distribution (install.sh,
+ * pi-shuttle-<version>.tgz, SHA256SUMS); the Gateway artifact and the
+ * signed metadata arrive from the Gateway release pipeline and are checked
+ * here against the flat publication contract.
+ */
+export function flatReleasePublicationAssets({ piShuttleTgz, gatewayArtifactFileName, releaseId, releaseManifestSha256 }) {
+  const manifestAsset = releaseManifestAssetName(releaseId, releaseManifestSha256);
+  if (manifestAsset === null) {
+    throw new Error(`flatReleasePublicationAssets: signed selection cannot derive a canonical flat release-manifest asset name (releaseId=${JSON.stringify(releaseId)})`);
+  }
+  const assets = [INSTALL_SH, piShuttleTgz, gatewayArtifactFileName, GATEWAY_META_KEYRING_ASSET, GATEWAY_META_STABLE_CHANNEL_ASSET, manifestAsset];
+  for (const asset of assets) {
+    if (typeof asset !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(asset) || asset.includes('/') || asset.includes('\\')) {
+      throw new Error(`flatReleasePublicationAssets: ${JSON.stringify(asset)} is not a single flat GitHub asset filename (fail closed)`);
+    }
+  }
+  return assets;
 }
 
 /** SHA256SUMS rows for every published asset, sorted by the complete row. */
