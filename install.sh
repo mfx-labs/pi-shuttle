@@ -133,6 +133,12 @@ SOURCE_DIR="$(<"$WORK/source-root.txt")"
   cd "$SOURCE_DIR"
   npm ci --ignore-scripts --no-audit --no-fund
   npm run build
+  # Distribution hygiene: the packaged snapshot must not ship the
+  # previous-generation installer-only modules (historical test harness /
+  # old install core/selection/latest), so the public artifact presents no
+  # alternate previous-generation installer surface. The manifest-native
+  # entry (dist/installer/main.js) is the sole installer entry.
+  rm -f dist/installer/legacy-entry.js dist/installer/legacy-entry.d.ts dist/installer/install.js dist/installer/install.d.ts dist/installer/selection.js dist/installer/selection.d.ts dist/installer/release/latest.js dist/installer/release/latest.d.ts
   npm pack --ignore-scripts --no-audit --no-fund --pack-destination "$WORK" >/dev/null
 )
 
