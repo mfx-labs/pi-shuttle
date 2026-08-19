@@ -49,8 +49,8 @@ export type {
 
 /** Stable compiled trust/protocol policy; contains no Gateway release identity. */
 export const GATEWAY_TRUST_POLICY: GatewayTrustPolicy = Object.freeze({
-  rootKeyId: 'pgw-root-2026-01',
-  rootPublicKey: 'MCowBQYDK2VwAyEAzR+q5eDjA+KXrwkw1sPlKBOBQcnhkdv9mI+PX0kZl4Y=',
+  rootKeyId: 'pgw-root-2026-08',
+  rootPublicKey: 'MCowBQYDK2VwAyEA0SPPeH1nQexArKrMRhq5+CtgxDnm8pDmydmE+m5msqg=',
   supportedKeyringSchemas: Object.freeze([KEYRING_SCHEMA_VERSION]),
   supportedChannelSchemas: Object.freeze([CHANNEL_SCHEMA_VERSION]),
   supportedReleaseSchemas: Object.freeze([GATEWAY_RELEASE_SCHEMA_VERSION]),

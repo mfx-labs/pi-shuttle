@@ -93,8 +93,8 @@ import type { DurableIo } from './write.js';
  * metadata — never hosts, schemes, or URLs from untrusted content.
  */
 export const GATEWAY_RELEASE_ORIGIN = Object.freeze({
-  metadataBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1/gateway-meta',
-  artifactBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.1',
+  metadataBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.2/gateway-meta',
+  artifactBaseUrl: 'https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.2',
 } as const);
 
 /** Compiled signed-metadata file names (stable policy). */

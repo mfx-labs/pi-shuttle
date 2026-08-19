@@ -20,7 +20,7 @@ import type { LayoutPaths } from '../../src/host/environment.js';
 import { PI_SHUTTLE_VERSION } from '../../src/compat/manifest.js';
 import { buildTarball, cleanupEnv, fullInstallEnv, gatewayFixtureFiles, makeEnv, piGuardFixtureFiles, GATEWAY_ARTIFACT_NAME, PI_GUARD_ARTIFACT_NAME } from '../helpers/installer-fixtures.js';
 
-const PI_SHUTTLE_ARTIFACT_NAME = 'pi-shuttle-0.1.1.tgz';
+const PI_SHUTTLE_ARTIFACT_NAME = 'pi-shuttle-0.1.2.tgz';
 const SHA_RE = /^[0-9a-f]{64}$/;
 
 function sha256File(path: string): string {
@@ -221,7 +221,7 @@ test('release core: activates the pi-shuttle package and links the bin to persis
     assert.equal(receipt.receipt.components.piGuard?.digestVerified, true);
 
     // The activated pi-shuttle package is persistent packages storage…
-    const shuttleTarget = join(layout.packagesDir, 'pi-shuttle@0.1.1');
+    const shuttleTarget = join(layout.packagesDir, 'pi-shuttle@0.1.2');
     assert.ok(existsSync(join(shuttleTarget, 'dist', 'cli.js')), 'pi-shuttle package must be activated into packages storage');
     // …and the bin link points there — never into an ephemeral extraction.
     const link = readlinkSync(join(layout.binDir, 'pi-shuttle'));
@@ -771,7 +771,7 @@ test('release core: a corrupted release package fails closed with no mutation', 
 
     const layout = resolveLayout(env);
     assert.equal(existsSync(join(layout.binDir, 'pi-shuttle')), false, 'no bin link may be created');
-    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.1')), false, 'no pi-shuttle activation may exist');
+    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.2')), false, 'no pi-shuttle activation may exist');
     assert.equal(existsSync(join(layout.packagesDir, 'project-gateway-artifact-core@0.1.0')), false, 'no component activation may exist');
     assert.equal(existsSync(layout.installReceiptPath), false, 'no receipt may be written');
     assert.equal(readdirSync(layout.stagingDir).length, 0, 'staging must be rolled back');
@@ -799,7 +799,7 @@ test('release core: identity mismatch in the release package is refused (foreign
     assert.equal(outcome.kind, 'FAILED', JSON.stringify(outcome));
     const layout = resolveLayout(env);
     assert.equal(existsSync(join(layout.binDir, 'pi-shuttle')), false);
-    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.1')), false);
+    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.2')), false);
     assert.equal(existsSync(layout.installReceiptPath), false);
     assert.match(JSON.stringify(outcome), /pi-shuttle release/i);
     void gateway;

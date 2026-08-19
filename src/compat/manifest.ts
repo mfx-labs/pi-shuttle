@@ -32,7 +32,7 @@
  *   selection. Lane support claims remain target-scoped and independent
  *   from runtime eligibility.
  */
-export const PI_SHUTTLE_VERSION = '0.1.1';
+export const PI_SHUTTLE_VERSION = '0.1.2';
 export const PI_GUARD_VERSION = '0.1.2';
 export const PI_GUARD_COMMIT = '7a7580cc4cbd7926797564c72269394fc29a860a';
 /** pi-guard release tag at the pinned commit (release-envelope binding). */
