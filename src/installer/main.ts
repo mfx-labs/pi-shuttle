@@ -1,99 +1,85 @@
 /**
- * PS-3 installer entry (local lane): `node dist/installer/main.js` via the
- * `install.sh` entrypoint. This is NOT the `pi-shuttle` operational CLI —
- * the closed public grammar (doctor / project / start / --help /
- * --version) is unchanged; the installer is a separate operator surface
- * with its own closed argument grammar.
+ * FRESH-INSTALL Slice — production installer entry (manifest-native lane):
+ * `node dist/installer/main.js` via the `install.sh` entrypoint.
  *
- * Exit codes (documented, closed): 0 COMPLETE or a successful no-change
- * lifecycle result; 1 PARTIAL (truthful opt-out/unverified stack); 2
- * FAILED / UNSUPPORTED / REFUSED / malformed invocation.
+ * This is NOT the `pi-shuttle` operational CLI — the closed public grammar
+ * (doctor / project / start / --help / --version) is unchanged; the
+ * installer is a separate operator surface with its own closed argument
+ * grammar.
+ *
+ * The production Gateway fresh-install authority is the manifest-native
+ * orchestrator (src/manifest-native/install.ts): compiled trust policy ->
+ * current signed keyring/channel -> signed Gateway release manifest ->
+ * fresh VerifiedReleaseSelection -> artifact acquisition/verification ->
+ * package materialization -> signed cache -> Receipt Schema 1 LAST.
+ *
+ * Previous-generation installer options (component selections, install-dir/
+ * bin-dir overrides, upgrade prompts, latest-channel handoffs) are NOT
+ * accepted: this generation has no caller-selected release authority, no
+ * upgrade/rollback, and a fixed manifest-native layout. Any such argument
+ * is refused with typed guidance — never silently ignored.
+ *
+ * Exit codes (documented, closed): 0 INSTALLED / ALREADY_INSTALLED; 2
+ * FAILED / UNSUPPORTED / REFUSED / ALREADY_INSTALLED_UPDATE_REQUIRED /
+ * malformed invocation.
  */
 import { realpathSync } from 'node:fs';
-import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
-import { hostLane, resolveLayout } from '../host/environment.js';
-import { INSTALLER_USAGE, absolutePathProblem, approveBatchIncompleteCleanup, approveBatchUpgrade, parseInstallerArgs, promptIncompleteCleanup, promptInteractive, promptUpgrade } from './selection.js';
-import type { SourceTransition } from './selection.js';
-import { runInstall } from './install.js';
-import type { InstallOutcome } from './install.js';
-import { PI_SHUTTLE_VERSION } from '../compat/manifest.js';
-import { readReceipt } from './receipt.js';
-import { acquireLatestArtifacts } from './release/latest.js';
+import type { HostEnvironment } from '../host/environment.js';
+import { hostEnvironmentFromProcess } from '../host/environment.js';
+import { runManifestNativeFreshInstall } from '../manifest-native/install.js';
+import type { FreshInstallDependencies, FreshInstallOutcome } from '../manifest-native/install.js';
 
-export const INSTALLER_EXIT = { COMPLETE: 0, PARTIAL: 1, FAILED: 2 } as const;
+export const INSTALLER_EXIT = { COMPLETE: 0, FAILED: 2 } as const;
 
-export const LATEST_HANDOFF_ENV = {
-  source: 'PI_SHUTTLE_LATEST_SOURCE',
-  packageTgz: 'PI_SHUTTLE_LATEST_PACKAGE_TGZ',
-  artifactDir: 'PI_SHUTTLE_LATEST_ARTIFACT_DIR',
-} as const;
+export const INSTALLER_USAGE = `pi-shuttle installer (manifest-native lane)
+usage: install.sh [--help]
+
+Installs the signed stable Gateway release through the manifest-native
+trust chain (compiled trust policy -> current signed keyring/channel ->
+signed Gateway release manifest -> verified artifact -> content-addressed
+package -> signed cache -> Receipt Schema 1). No component selections, no
+upgrade, no rollback, no caller-selected release authority.
+`;
 
 export interface InstallerMainDependencies {
-  readonly latestAcquirer?: typeof acquireLatestArtifacts;
-  readonly installRunner?: typeof runInstall;
+  /** Injectable install runner (unit tests only; production = the manifest-native orchestrator). */
+  readonly installRunner?: (env: HostEnvironment) => Promise<FreshInstallOutcome>;
+  /** Injectable orchestrator dependencies (unit tests only; production defaults). */
+  readonly installDeps?: FreshInstallDependencies;
 }
 
-type LatestHandoff = {
-  readonly sourceIdentity: string;
-  readonly packageTgz: string;
-  readonly artifactDir?: string;
-};
-
-function latestHandoffFromEnv(env: NodeJS.ProcessEnv): LatestHandoff | { readonly error: string } | null {
-  const source = env[LATEST_HANDOFF_ENV.source];
-  if (source === undefined || source.length === 0) return null;
-  if (!/^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/.test(source)) return { error: 'latest source identity is not a valid full commit identity' };
-  const packageTgz = env[LATEST_HANDOFF_ENV.packageTgz];
-  if (packageTgz === undefined || packageTgz.length === 0) return { error: 'latest installer handoff is missing its verified pi-shuttle package' };
-  if (absolutePathProblem(packageTgz, 'latest package') !== null) return { error: 'latest installer handoff package path must be absolute' };
-  const artifactDir = env[LATEST_HANDOFF_ENV.artifactDir];
-  if (artifactDir !== undefined && absolutePathProblem(artifactDir, 'latest artifact directory') !== null) return { error: 'latest artifact directory path must be absolute' };
-  return {
-    sourceIdentity: source,
-    packageTgz,
-    ...(artifactDir !== undefined ? { artifactDir } : {}),
-  };
-}
-
-function successfulChange(upgradedFrom: string | undefined, sourceTransition: SourceTransition | undefined): string | undefined {
-  if (sourceTransition?.kind === 'latest-source') return 'updated pi-shuttle Latest source';
-  if (sourceTransition?.kind === 'stable-to-latest') return `switched pi-shuttle ${upgradedFrom ?? PI_SHUTTLE_VERSION} from Stable to Latest`;
-  return upgradedFrom !== undefined ? `upgraded pi-shuttle ${upgradedFrom} → ${PI_SHUTTLE_VERSION}` : undefined;
-}
-
-export function formatOutcome(outcome: InstallOutcome): string {
+export function formatFreshInstallOutcome(outcome: FreshInstallOutcome): string {
   switch (outcome.kind) {
-    case 'COMPLETE': {
-      const change = successfulChange(outcome.upgradedFrom, outcome.sourceTransition);
-      return `result: COMPLETE — all selected components installed and verified${change !== undefined ? `; ${change}` : ''}`;
-    }
-    case 'PARTIAL': {
-      const change = successfulChange(outcome.upgradedFrom, outcome.sourceTransition);
-      return `result: PARTIAL INSTALLATION${change !== undefined ? ` — ${change}` : ''}${outcome.omitted.length > 0 ? ` — not installed: ${outcome.omitted.join(', ')}` : ''}${outcome.notes.length > 0 ? `\n  notes: ${outcome.notes.join('\n  notes: ')}` : ''}`;
-    }
+    case 'INSTALLED':
+      return `result: INSTALLED — Gateway release ${outcome.releaseId} verified and activated (manifest-native lifecycle)`;
     case 'ALREADY_INSTALLED':
-      return `result: ALREADY INSTALLED — pi-shuttle ${outcome.version} is verified; no changes were needed`;
-    case 'UPGRADE_AVAILABLE':
-      if (outcome.sourceTransition?.kind === 'latest-source') return `result: LATEST SOURCE UPDATE AVAILABLE — verified pi-shuttle Latest source can be updated from ${outcome.sourceTransition.installedSource} to ${outcome.sourceTransition.latestSource}; explicit confirmation is required`;
-      if (outcome.sourceTransition?.kind === 'stable-to-latest') return `result: CHANNEL SWITCH AVAILABLE — verified pi-shuttle Stable ${outcome.installedVersion} can switch to Latest ${outcome.installerVersion}; explicit confirmation is required`;
-      return `result: UPGRADE AVAILABLE — verified pi-shuttle ${outcome.installedVersion} can be upgraded to ${outcome.installerVersion}; explicit confirmation is required`;
-    case 'UPGRADE_DECLINED':
-      if (outcome.sourceTransition?.kind === 'latest-source') return 'result: LATEST SOURCE UPDATE DECLINED — pi-shuttle Latest source was preserved unchanged';
-      if (outcome.sourceTransition?.kind === 'stable-to-latest') return `result: CHANNEL SWITCH DECLINED — pi-shuttle Stable ${outcome.installedVersion} was preserved unchanged`;
-      return `result: UPGRADE DECLINED — pi-shuttle ${outcome.installedVersion} was preserved unchanged`;
-    case 'INCOMPLETE_DECLINED':
-      return 'result: INCOMPLETE CLEANUP DECLINED — No installation changes were made.';
-    case 'FAILED':
-      return `result: FAILED at stage "${outcome.stage}" — ${outcome.message}\nrollback: ${outcome.rollback}`;
+      return `result: ALREADY INSTALLED — Gateway release ${outcome.releaseId} is the exact authenticated installation; durability barriers re-established; no changes were needed`;
+    case 'ALREADY_INSTALLED_UPDATE_REQUIRED':
+      return `result: REFUSED — a different Gateway release is already installed (installed ${outcome.installedReleaseId}, selected ${outcome.selectedReleaseId}); this installer is fresh-install only — update is not supported`;
     case 'UNSUPPORTED':
       return `result: UNSUPPORTED — ${outcome.reason}`;
     case 'REFUSED':
-      return `result: REFUSED — ${outcome.reason}`;
+      return `result: REFUSED — ${outcome.message} (${outcome.code})`;
+    case 'FAILED':
+      return `result: FAILED at stage "${outcome.stage}" — ${outcome.message} (${outcome.code})`;
   }
 }
 
-export function printPostInstallNextSteps(outcome: InstallOutcome): void {
-  if (outcome.kind !== 'COMPLETE' && outcome.kind !== 'ALREADY_INSTALLED') return;
+export function exitCodeFor(outcome: FreshInstallOutcome): number {
+  switch (outcome.kind) {
+    case 'INSTALLED':
+    case 'ALREADY_INSTALLED':
+      return INSTALLER_EXIT.COMPLETE;
+    case 'ALREADY_INSTALLED_UPDATE_REQUIRED':
+    case 'UNSUPPORTED':
+    case 'REFUSED':
+    case 'FAILED':
+      return INSTALLER_EXIT.FAILED;
+  }
+}
+
+export function printPostInstallNextSteps(outcome: FreshInstallOutcome): void {
+  if (outcome.kind !== 'INSTALLED' && outcome.kind !== 'ALREADY_INSTALLED') return;
   process.stdout.write([
     '',
     'Next steps:',
@@ -113,123 +99,31 @@ export function printPostInstallNextSteps(outcome: InstallOutcome): void {
   ].join('\n'));
 }
 
-export function exitCodeFor(outcome: InstallOutcome): number {
-  switch (outcome.kind) {
-    case 'COMPLETE':
-    case 'ALREADY_INSTALLED':
-    case 'UPGRADE_AVAILABLE':
-    case 'UPGRADE_DECLINED':
-    case 'INCOMPLETE_DECLINED':
-      return INSTALLER_EXIT.COMPLETE;
-    case 'PARTIAL':
-      return INSTALLER_EXIT.PARTIAL;
-    case 'FAILED':
-    case 'UNSUPPORTED':
-    case 'REFUSED':
-      return INSTALLER_EXIT.FAILED;
-  }
-}
-
 export async function main(argv: readonly string[], dependencies: InstallerMainDependencies = {}): Promise<number> {
-  const parsed = parseInstallerArgs(argv);
-  if (!parsed.ok) {
-    process.stderr.write(`pi-shuttle-installer: ${parsed.message}`);
-    return 2;
-  }
-  if (parsed.options.help) {
+  if (argv.length === 1 && (argv[0] === '--help' || argv[0] === '-h')) {
     process.stdout.write(INSTALLER_USAGE);
     return 0;
   }
-
-  const latest = latestHandoffFromEnv(installerEnvironment());
-  if (latest !== null && 'error' in latest) {
-    process.stderr.write(`pi-shuttle-installer: ${latest.error}\n`);
-    return 2;
-  }
-  if (latest !== null && (parsed.options.artifactDir !== undefined || parsed.options.expectGatewaySha256 !== undefined || parsed.options.expectPiGuardSha256 !== undefined)) {
-    process.stderr.write('pi-shuttle-installer: latest bootstrap owns artifact acquisition and digest verification; local artifact options are refused\n');
-    return 2;
+  if (argv.length > 0) {
+    process.stderr.write(`pi-shuttle-installer: unrecognized installer arguments ${argv.map((a) => `"${a}"`).join(', ')} — the manifest-native installer accepts no selections, paths, or release options; pass --help for usage\n`);
+    return INSTALLER_EXIT.FAILED;
   }
 
   const env = hostEnvironmentFromProcess();
   if (!env.ok) {
     process.stderr.write(`pi-shuttle-installer: ${env.message}\n`);
-    return 2;
+    return INSTALLER_EXIT.FAILED;
   }
-  const home = env.environment.home;
-  const layout = resolveLayout(home);
-  const prior = readReceipt(layout.installReceiptPath);
+  const runner = dependencies.installRunner ?? ((e: HostEnvironment) => runManifestNativeFreshInstall(e, dependencies.installDeps));
+  const outcome = await runner(env.environment);
 
-  if (latest !== null) {
-    process.stdout.write(`pi-shuttle latest installer\nversion: ${PI_SHUTTLE_VERSION}\nsource: ${latest.sourceIdentity}\nchannel: latest\n`);
+  process.stdout.write(`pi-shuttle installer (manifest-native lane)\n`);
+  process.stdout.write(`${formatFreshInstallOutcome(outcome)}\n`);
+  process.stdout.write(`manifest-native authority root: ${env.environment.home}/.local/share/pi-shuttle/manifest-native\n`);
+  if (outcome.kind === 'INSTALLED' || outcome.kind === 'ALREADY_INSTALLED') {
+    printPostInstallNextSteps(outcome);
   } else {
-    process.stdout.write(`pi-shuttle installer ${PI_SHUTTLE_VERSION} (pre-release, local lane)\n`);
-  }
-
-  let selections = parsed.options.selections;
-  let installDir = parsed.options.installDir;
-  let binDir = parsed.options.binDir;
-  const interactiveMode = selections === undefined;
-  if (selections === undefined) {
-    if (latest !== null && process.stdin.isTTY !== true) {
-      process.stderr.write('pi-shuttle-installer: interactive Latest installation requires a controlling terminal; use curl | bash from a terminal or pass the complete existing batch arguments\n');
-      return 2;
-    }
-    const interactive = await promptInteractive({
-      installDir: parsed.options.installDir ?? (prior.ok ? prior.receipt.installDir : layout.shareDir),
-      binDir: parsed.options.binDir ?? (prior.ok ? prior.receipt.binDir : layout.binDir),
-    });
-    selections = interactive.selections;
-    installDir = interactive.installDir;
-    binDir = interactive.binDir;
-  }
-
-  let latestArtifactDir: string | undefined;
-  let latestGatewaySha256: string | undefined;
-  let latestPiGuardSha256: string | undefined;
-  if (latest !== null) {
-    if (latest.artifactDir === undefined) {
-      const outcome: InstallOutcome = { kind: 'REFUSED', reason: 'latest installer handoff is missing its private artifact staging directory' };
-      process.stdout.write(`${formatOutcome(outcome)}\nreceipt: ${layout.installReceiptPath}\nno installation changes were finalized; prior installation state (if any) is preserved\n`);
-      return INSTALLER_EXIT.FAILED;
-    }
-    const acquired = await (dependencies.latestAcquirer ?? acquireLatestArtifacts)(hostLane(env.environment.platform, env.environment.arch), selections, latest.artifactDir);
-    if (!acquired.ok) {
-      const outcome: InstallOutcome = { kind: 'REFUSED', reason: acquired.message };
-      process.stdout.write(`${formatOutcome(outcome)}\nreceipt: ${layout.installReceiptPath}\nno installation changes were finalized; prior installation state (if any) is preserved\n`);
-      return INSTALLER_EXIT.FAILED;
-    }
-    latestArtifactDir = acquired.artifactDir;
-    latestGatewaySha256 = acquired.gatewaySha256;
-    latestPiGuardSha256 = acquired.piGuardSha256;
-  }
-
-  const outcome = await (dependencies.installRunner ?? runInstall)(env.environment, {
-    selections,
-    ...(installDir !== undefined ? { installDir } : {}),
-    ...(binDir !== undefined ? { binDir } : {}),
-    ...(parsed.options.artifactDir !== undefined ? { artifactDir: parsed.options.artifactDir } : {}),
-    ...(parsed.options.expectGatewaySha256 !== undefined ? { expectGatewaySha256: parsed.options.expectGatewaySha256 } : {}),
-    ...(parsed.options.expectPiGuardSha256 !== undefined ? { expectPiGuardSha256: parsed.options.expectPiGuardSha256 } : {}),
-    ...(latest !== null ? {
-      releasePackageTgz: latest.packageTgz,
-      sourceIdentity: latest.sourceIdentity,
-      ...(latestArtifactDir !== undefined ? { artifactDir: latestArtifactDir } : {}),
-      ...(latestGatewaySha256 !== undefined ? { expectGatewaySha256: latestGatewaySha256 } : {}),
-      ...(latestPiGuardSha256 !== undefined ? { expectPiGuardSha256: latestPiGuardSha256 } : {}),
-    } : {}),
-    confirmUpgrade: interactiveMode ? promptUpgrade : approveBatchUpgrade,
-    confirmIncompleteCleanup: interactiveMode ? promptIncompleteCleanup : approveBatchIncompleteCleanup,
-  });
-
-  process.stdout.write(`${formatOutcome(outcome)}\n`);
-  process.stdout.write(`receipt: ${layout.installReceiptPath}\n`);
-  if (outcome.kind === 'PARTIAL' || outcome.kind === 'COMPLETE') {
-    process.stdout.write(`platform lane: ${hostLane(env.environment.platform, env.environment.arch)}\n`);
-  }
-  printPostInstallNextSteps(outcome);
-  if (outcome.kind === 'FAILED' || outcome.kind === 'UNSUPPORTED' || outcome.kind === 'REFUSED') {
-    process.stdout.write('no final installation receipt was written; unrelated operator state was preserved\n');
+    process.stdout.write('no installation authority was changed; unrelated operator state was preserved\n');
   }
   return exitCodeFor(outcome);
 }

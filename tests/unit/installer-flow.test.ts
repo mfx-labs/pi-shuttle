@@ -13,7 +13,7 @@ import { REPO, buildTarball, cleanupEnv, fullInstallEnv, gatewayFixtureFiles, ma
 import type { InstallerRun } from '../helpers/installer-fixtures.js';
 import { readReceipt } from '../../src/installer/receipt.js';
 import { rollback, runInstall } from '../../src/installer/install.js';
-import { formatOutcome } from '../../src/installer/main.js';
+import { formatOutcome } from '../../src/installer/install.js';
 import { validateBinPath } from '../../src/installer/components.js';
 import { resolveLayout } from '../../src/host/environment.js';
 import { GATEWAY_PS1_BASELINE_COMMIT } from '../../src/compat/manifest.js';
@@ -45,7 +45,7 @@ function installArgs(artifactDir: string, extra: readonly string[] = []): string
 function runInstallerInteractive(args: readonly string[], input: readonly string[], env: { readonly home: string; readonly fixtureBin?: string; readonly extraEnv?: NodeJS.ProcessEnv }): Promise<InstallerRun> {
   return new Promise((resolve, reject) => {
     const pathEntries: string[] = [env.fixtureBin, join(env.home, '.local', 'bin'), process.env.PATH].filter((p): p is string => p !== undefined && p.length > 0);
-    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'main.js'), ...args], {
+    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'legacy-entry.js'), ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...env.extraEnv, HOME: env.home, PATH: pathEntries.join(':') },
     });
@@ -269,7 +269,7 @@ test('installer: relative HOME is rejected before Enter/EOF reaches interactive 
   try {
     const relativeHomeDir = join(env, 'interactive-relative-home');
     const relativeHome = relative(process.cwd(), relativeHomeDir);
-    const run = spawnSync(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'main.js')], {
+    const run = spawnSync(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'legacy-entry.js')], {
       input: '',
       encoding: 'utf8',
       timeout: 5_000,
@@ -636,7 +636,7 @@ test('installer: interactive installer omits project configuration and prints ne
     const runEnv = fullInstallEnv(env, '0.83.0', piState);
     const child = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
       const pathEntries = [runEnv.fixtureBin, process.env.PATH].filter((p): p is string => p !== undefined);
-      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js'), '--artifact-dir', env], {
+      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'legacy-entry.js'), '--artifact-dir', env], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...runEnv.extraEnv, HOME: env, PATH: pathEntries.join(':') },
       });
@@ -665,7 +665,7 @@ test('installer: interactive both-decline yields PARTIAL', async () => {
     const runEnv = fullInstallEnv(env);
     const child = await new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
       const pathEntries = [runEnv.fixtureBin, process.env.PATH].filter((p): p is string => p !== undefined);
-      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'main.js')], {
+      const proc = spawn(process.execPath, ['--require', join(import.meta.dirname, '..', '..', '..', 'tests', 'helpers', 'platform-linux.cjs'), join(import.meta.dirname, '..', '..', '..', 'dist', 'installer', 'legacy-entry.js')], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, ...runEnv.extraEnv, HOME: env, PATH: pathEntries.join(':') },
       });
@@ -701,7 +701,7 @@ test('installer: install.sh entrypoint help works', async () => {
   try {
     const result = spawnSync('bash', [join(REPO, 'install.sh'), '--help'], { encoding: 'utf8' });
     assert.equal(result.status, 0);
-    assert.ok(result.stdout.includes('usage: pi-shuttle-installer'));
+    assert.ok(result.stdout.includes('manifest-native'), result.stdout);
   } finally {
     cleanupEnv(env);
   }

@@ -23,11 +23,12 @@ die() { printf 'pi-shuttle-installer: %s\n' "$*" >&2; exit 2; }
 if [ "$#" -eq 1 ] && { [ "$1" = '--help' ] || [ "$1" = '-h' ]; }; then
   cat <<'EOF'
 pi-shuttle latest installer
-usage: curl -fsSL https://raw.githubusercontent.com/mfx-labs/pi-shuttle/master/install.sh | bash [installer options]
+usage: curl -fsSL https://raw.githubusercontent.com/mfx-labs/pi-shuttle/master/install.sh | bash
 
 The latest channel resolves master to one exact commit before building and
-invoking the snapshot installer. Pass explicit selections for non-interactive
-use, for example: --batch --gateway yes --pi-guard yes.
+invoking the snapshot installer. The installer installs the signed stable
+Gateway release through the manifest-native trust chain; it accepts no
+selections or release options (pass --help to the installer for usage).
 EOF
   exit 0
 fi

@@ -228,7 +228,7 @@ export function runInstaller(args: readonly string[], env: { readonly home: stri
     const pathEntries: string[] = env.path !== undefined
       ? [env.path]
       : [env.fixtureBin, join(env.home, '.local', 'bin'), process.env.PATH].filter((p): p is string => p !== undefined && p.length > 0);
-    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'main.js'), ...args], {
+    const child = spawn(process.execPath, ['--require', join(REPO, 'tests', 'helpers', 'platform-linux.cjs'), join(REPO, 'dist', 'installer', 'legacy-entry.js'), ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,

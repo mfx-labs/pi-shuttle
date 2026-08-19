@@ -131,10 +131,12 @@ test('PS5-LINUX-001: the installed <binDir>/pi-shuttle symlink executes directly
   const home = mkdtempSync(join(tmpdir(), 'ps5-install-'));
   chmodSync(home, 0o700);
   try {
-    // Real PS-3 installer entrypoint, batch, no components (the bin link
-    // is composed before component installation; components are not
-    // needed to prove the link/executable composition).
-    const install = await run('bash', [join(REPO, 'install.sh'), '--batch', '--gateway', 'no', '--pi-guard', 'no'], {
+    // Historical previous-generation installer entry (legacy harness;
+    // the manifest-native production entry is Gateway-only and does not
+    // compose the pi-shuttle bin link). Batch, no components: the bin
+    // link is composed before component installation; components are not
+    // needed to prove the link/executable composition.
+    const install = await run(process.execPath, [join(REPO, 'dist', 'installer', 'legacy-entry.js'), '--batch', '--gateway', 'no', '--pi-guard', 'no'], {
       env: { ...process.env, HOME: home },
       timeoutMs: 120_000,
     });

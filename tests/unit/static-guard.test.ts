@@ -83,6 +83,9 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/installer/release/bootstrap.ts': ['existsSync', 'mkdirSync', 'readFileSync', 'realpathSync', 'rmSync', 'mkdtempSync'],
   // Installer entry direct-execution guard (symlink-safe argv comparison):
   'src/installer/main.ts': ['realpathSync'],
+  // Historical previous-generation installer entry (test-support harness
+  // only; unreachable from the manifest-native production install authority):
+  'src/installer/legacy-entry.ts': ['realpathSync'],
   'src/process/runner.ts': ['accessSync', 'constants'],
   // PS-4 lifecycle boundary (approved operator-directory creation + probes):
   'src/lifecycle/state.ts': ['existsSync'],
@@ -96,6 +99,10 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   // Manifest-native durable publication (NEW-STATE Slice B; the only
   // manifest-native mutation surface — same class as the persistence writer):
   'src/manifest-native/write.ts': ['closeSync', 'constants', 'fchmodSync', 'fstatSync', 'fsyncSync', 'linkSync', 'mkdirSync', 'openSync', 'unlinkSync', 'writeSync'],
+  // Manifest-native fresh-install orchestrator (FRESH-INSTALL Slice; the
+  // production Gateway install authority — staging/materialization only,
+  // confined to the manifest-native work/authority roots):
+  'src/manifest-native/install.ts': ['chmodSync', 'closeSync', 'constants', 'fstatSync', 'fsyncSync', 'lstatSync', 'mkdirSync', 'openSync', 'readdirSync', 'renameSync', 'rmSync'],
 };
 
 test('ps2/ps3 static guard: no network/tunnel/MCP vocabulary in src (PS-8A release acquisition boundary exempt)', () => {
@@ -136,6 +143,32 @@ test('ps2/ps3/ps4 static guard: process.env is confined to the host seam and the
     if (rel(file) === 'src/host/environment.ts' || rel(file) === 'src/process/runner.ts' || rel(file) === 'src/compat/pi-guard-probe.ts' || rel(file) === 'src/installer/release/bootstrap.ts') continue;
     assert.equal(content.includes('process.env'), false, `${rel(file)} must not read the environment directly`);
   }
+});
+
+test('fresh-install static guard: production install entries invoke only the manifest-native orchestrator', () => {
+  for (const file of ['src/installer/main.ts', 'src/installer/release/bootstrap.ts']) {
+    const content = readFileSync(join(REPO, file), 'utf8');
+    assert.equal(content.includes("from './install.js'"), false, `${file} must not reach the previous-generation install core`);
+    assert.equal(content.includes("from '../install.js'"), false, `${file} must not reach the previous-generation install core`);
+    assert.equal(content.includes("from './selection.js'"), false, `${file} must not reach previous-generation selection machinery`);
+    assert.equal(content.includes('runInstall('), false, `${file} must not invoke the previous-generation install core`);
+    assert.equal(content.includes('release/latest'), false, `${file} must not use the previous-generation latest channel`);
+    assert.equal(content.includes('receipt.js'), false, `${file} must not write the previous-generation receipt`);
+  }
+  const mainEntry = readFileSync(join(REPO, 'src/installer/main.ts'), 'utf8');
+  assert.equal(mainEntry.includes('manifest-native/install.js'), true, 'the local-lane entry must route through the manifest-native orchestrator');
+  assert.equal(mainEntry.includes('runManifestNativeFreshInstall'), true, 'the local-lane entry must invoke the manifest-native orchestrator');
+  const releaseEntry = readFileSync(join(REPO, 'src/installer/release/bootstrap.ts'), 'utf8');
+  assert.equal(releaseEntry.includes("from '../main.js'"), true, 'the release entry must route through the same manifest-native entry');
+});
+
+test('fresh-install static guard: the orchestrator contains no concrete Gateway release identity', () => {
+  const source = readFileSync(join(SRC, 'manifest-native', 'install.ts'), 'utf8');
+  for (const forbidden of ['GATEWAY_PACKAGE_VERSION', 'GATEWAY_PS1_BASELINE_COMMIT', 'gatewayDescriptorForLane', 'artifact-core', 'macos-core']) {
+    assert.equal(source.includes(forbidden), false, `src/manifest-native/install.ts must not reference ${forbidden}`);
+  }
+  assert.equal(source.includes('compat/manifest'), false, 'the orchestrator must not import the previous-generation compatibility manifest');
+  assert.equal(source.includes("release/latest"), false, 'the orchestrator must not use the previous-generation latest channel');
 });
 
 test('slice-b static guard: manifest-native durable publication is confined to the manifest-native module and tests', () => {
@@ -199,7 +232,7 @@ test('ps2/ps3 static guard: filesystem mutation vocabulary lives only in the wri
   const MUTATING = ['renameSync', 'mkdirSync', 'unlinkSync', 'rmSync', 'cpSync', 'chmodSync', 'symlinkSync', 'writeFileSync', 'copyFileSync', 'truncateSync'];
   for (const file of files) {
     const content = readFileSync(file, 'utf8');
-    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || rel(file) === 'src/manifest-native/write.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;
+    if (rel(file) === 'src/persistence/writer.ts' || rel(file) === 'src/persistence/lock.ts' || rel(file) === 'src/manifest-native/write.ts' || rel(file) === 'src/manifest-native/install.ts' || INSTALLER(file) || rel(file) === 'src/lifecycle/projects.ts') continue;
     for (const name of MUTATING) {
       assert.equal(content.includes(name), false, `${rel(file)} must not mutate the filesystem (${name})`);
     }

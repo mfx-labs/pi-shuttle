@@ -374,25 +374,40 @@ test('latest public pipe without a controlling terminal exposes EOF, never shell
   }
 });
 
-test('actual Latest Node entry refuses non-TTY script bytes before creating installer state', () => {
+test('actual Latest Node entry never interprets stdin script bytes; --help is state-free (FRESH-INSTALL Slice)', () => {
   const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-node-no-tty-'));
   try {
-    const packageTgz = join(dir, 'pi-shuttle.tgz');
-    const artifactDir = join(dir, 'artifacts');
-    writeFileSync(packageTgz, 'fixture');
-    const result = spawnSync(process.execPath, [join(REPO, 'dist', 'installer', 'main.js')], {
+    // The manifest-native installer has no prompts and no stdin protocol:
+    // piping install.sh bytes at it must yield clean --help output with no
+    // mutation and no previous-generation handoff handling.
+    const result = spawnSync(process.execPath, [join(REPO, 'dist', 'installer', 'main.js'), '--help'], {
       encoding: 'utf8',
       input: readFileSync(join(REPO, 'install.sh')),
       env: {
         ...process.env,
         HOME: dir,
         PI_SHUTTLE_LATEST_SOURCE: `mfx-labs/pi-shuttle@${SHA}`,
-        PI_SHUTTLE_LATEST_PACKAGE_TGZ: packageTgz,
-        PI_SHUTTLE_LATEST_ARTIFACT_DIR: artifactDir,
+        PI_SHUTTLE_LATEST_PACKAGE_TGZ: join(dir, 'pi-shuttle.tgz'),
       },
     });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    assert.ok(result.stdout.includes('manifest-native'), result.stdout);
+    assert.equal(existsSync(join(dir, '.local')), false, 'help must precede any installer mutation');
+  } finally {
+    clean(dir);
+  }
+});
+
+test('actual Latest Node entry refuses previous-generation installer arguments before mutation', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-latest-node-args-'));
+  try {
+    const result = spawnSync(process.execPath, [join(REPO, 'dist', 'installer', 'main.js'), '--batch', '--gateway', 'no', '--pi-guard', 'no'], {
+      encoding: 'utf8',
+      input: '',
+      env: { ...process.env, HOME: dir },
+    });
     assert.equal(result.status, 2, result.stdout + result.stderr);
-    assert.match(result.stderr, /interactive Latest installation requires a controlling terminal/);
+    assert.ok(result.stderr.includes('unrecognized installer arguments'), result.stderr);
     assert.equal(existsSync(join(dir, '.local')), false, 'refusal must precede installer mutation');
   } finally {
     clean(dir);
