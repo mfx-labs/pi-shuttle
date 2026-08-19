@@ -85,10 +85,10 @@ test('doctor: Latest receipt verifies its semantic version, exact source slot, c
   const { env, ctx, layout } = await healthyContext();
   try {
     const sourceIdentity = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
-    const root = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', sourceIdentity));
+    const root = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', sourceIdentity));
     mkdirSync(join(root, 'dist'), { recursive: true, mode: 0o700 });
     mkdirSync(layout.binDir, { recursive: true, mode: 0o700 });
-    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.3', bin: { 'pi-shuttle': './dist/cli.js' } }));
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.4', bin: { 'pi-shuttle': './dist/cli.js' } }));
     writeFileSync(join(root, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
     symlinkSync(join(root, 'dist', 'cli.js'), join(layout.binDir, 'pi-shuttle'));
     const digest = await hashPackageTree(root);
@@ -113,7 +113,7 @@ test('doctor: Latest receipt verifies its semantic version, exact source slot, c
     assert.equal(verdicts(healthy.report)['receipt'], 'supported', formatDoctorReport(healthy.report));
     assert.match(healthy.report.checks.find((check) => check.id === 'receipt')!.detail, /package bytes verified/);
 
-    const wrongPath = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', `mfx-labs/pi-shuttle@${'c'.repeat(40)}`));
+    const wrongPath = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', `mfx-labs/pi-shuttle@${'c'.repeat(40)}`));
     assert.equal(writeReceipt(layout.installReceiptPath, { ...boundReceipt, piShuttleInstallPath: wrongPath }).ok, true);
     const wrongPathResult = await runDoctor(ctx);
     assert.equal(wrongPathResult.ok, true);
@@ -122,9 +122,9 @@ test('doctor: Latest receipt verifies its semantic version, exact source slot, c
     assert.match(wrongPathResult.report.checks.find((check) => check.id === 'receipt')!.detail, /exact source SHA/);
 
     assert.equal(writeReceipt(layout.installReceiptPath, boundReceipt).ok, true);
-    const stable = join(layout.packagesDir, 'pi-shuttle@0.1.3');
+    const stable = join(layout.packagesDir, 'pi-shuttle@0.1.4');
     mkdirSync(join(stable, 'dist'), { recursive: true, mode: 0o700 });
-    writeFileSync(join(stable, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.3', bin: { 'pi-shuttle': './dist/cli.js' } }));
+    writeFileSync(join(stable, 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.4', bin: { 'pi-shuttle': './dist/cli.js' } }));
     writeFileSync(join(stable, 'dist', 'cli.js'), '#!/usr/bin/env node\n');
     rmSync(join(layout.binDir, 'pi-shuttle'));
     symlinkSync(join(stable, 'dist', 'cli.js'), join(layout.binDir, 'pi-shuttle'));

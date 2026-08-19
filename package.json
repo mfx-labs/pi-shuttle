@@ -1,6 +1,6 @@
 {
   "name": "pi-shuttle",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "End-user product/distribution layer for the Project Gateway MCP + pi-guard composed installation (operator CLI; pre-release, unpublished).",
   "private": true,
   "license": "MIT",

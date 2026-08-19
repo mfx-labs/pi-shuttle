@@ -24,7 +24,7 @@ const REPO = join(import.meta.dirname, '..', '..', '..');
 
 test('manifest: exact approved pins are preserved', () => {
   assert.equal(COMPATIBILITY_MANIFEST.piShuttle, PI_SHUTTLE_VERSION);
-  assert.equal(COMPATIBILITY_MANIFEST.piShuttle, '0.1.3');
+  assert.equal(COMPATIBILITY_MANIFEST.piShuttle, '0.1.4');
   assert.equal(COMPATIBILITY_MANIFEST.gateway, '0.1.0');
   // Gateway committed baseline: the exact source closure (PS-6I
   // local baseline; mfx-labs/project-gateway).

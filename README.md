@@ -17,7 +17,7 @@ Giving an AI coding agent access to a project often means giving it far more aut
 
 | Layer | Owns | Governed by |
 |---|---|---|
-| **pi-shuttle** | trusted bootstrap, release selection, acquisition, installation, integrity verification, installed-lifecycle resolution, doctor/start integration | its own release authority (`v0.1.3`) |
+| **pi-shuttle** | trusted bootstrap, release selection, acquisition, installation, integrity verification, installed-lifecycle resolution, doctor/start integration | its own release authority (`v0.1.4`) |
 | **Project Gateway** | MCP runtime, MCP tools, workspace/business logic, artifact/domain functionality | production-signed Gateway release manifests (e.g. `gateway-macos-release-002`) |
 | **pi-guard** | Pi-side enforcement inside the coding-agent environment | independently managed |
 
@@ -49,10 +49,10 @@ No caller-selected Gateway version, releaseId, URL, digest, executable, or files
 
 ## Installation
 
-The current stable installation path (pinned to the public v0.1.3 release):
+The current stable installation path (pinned to the public v0.1.4 release):
 
 ```bash
-curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.3/install.sh | bash
+curl -fsSL https://github.com/mfx-labs/pi-shuttle/releases/download/v0.1.4/install.sh | bash
 ```
 
 The installer accepts no selections, installation paths, or release options; Gateway release identity comes entirely from the signed metadata chain at install time. Installation is per-user and refuses to run as root.
@@ -99,7 +99,7 @@ artifact / package-tree verification
 
 Ordinary Gateway patch releases can advance **independently of pi-shuttle**: Gateway version, releaseId, source commit, artifact SHA, and package-tree SHA arrive in production-signed Gateway metadata, not in a pi-shuttle source release. pi-shuttle changes only when a stable cross-component contract changes — for example trust policy/root, signing protocol/schema, supported host-lane policy, package/bin contract, transport policy, archive/layout policy, trusted release origins, or installer/lifecycle protocol.
 
-**Current production (status):** Gateway release `gateway-macos-release-002` (package `0.1.0`, source commit `f6f1bd71…`) is published on the pi-shuttle `v0.1.3` release origin. This is the currently published production release — not a permanent compiled dependency of pi-shuttle.
+**Current production (status):** Gateway release `gateway-macos-release-002` (package `0.1.0`, source commit `f6f1bd71…`) is published on the pi-shuttle `v0.1.4` release origin. This is the currently published production release — not a permanent compiled dependency of pi-shuttle.
 
 ## Installed lifecycle
 
@@ -118,9 +118,10 @@ Ordinary Gateway patch releases can advance **independently of pi-shuttle**: Gat
 
 ## Releases
 
-- **Current:** pi-shuttle **v0.1.3** (published, manifest-native).
+- **Current:** pi-shuttle **v0.1.4** (manifest-native).
+- v0.1.3 is the previous published manifest-native release.
 - v0.1.2 is an **abandoned/unpublished** tag — no GitHub Release exists for it and it is not a released product version.
-- v0.1.0 / v0.1.1 were the previous installation generation (envelope-based distribution) and are superseded by the manifest-native v0.1.3 release.
+- v0.1.0 / v0.1.1 were the previous installation generation (envelope-based distribution) and are superseded by the manifest-native v0.1.4 release.
 
 ## Development / architecture docs
 
@@ -139,4 +140,4 @@ The previous-generation contract documents (`docs/product-contract.md`, `docs/in
 
 ## License
 
-The pi-shuttle repository and the v0.1.3 source distribution are licensed under the **MIT License**. See [LICENSE](LICENSE) for the full text. This license covers the pi-shuttle repository only; referenced components (Project Gateway, pi-guard, and third-party dependencies) retain their own licenses.
+The pi-shuttle repository and the v0.1.4 source distribution are licensed under the **MIT License**. See [LICENSE](LICENSE) for the full text. This license covers the pi-shuttle repository only; referenced components (Project Gateway, pi-guard, and third-party dependencies) retain their own licenses.

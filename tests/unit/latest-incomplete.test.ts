@@ -16,14 +16,14 @@ const SOURCE_A = `mfx-labs/pi-shuttle@${'a'.repeat(40)}`;
 const SOURCE = `mfx-labs/pi-shuttle@${'b'.repeat(40)}`;
 const PHYSICAL_SOURCE = 'mfx-labs/pi-shuttle@5e6aef60dce37299cc7af2c6add10905be03a396';
 
-function shuttleFiles(version = '0.1.3', body = 'console.log("fixture pi-shuttle");'): Record<string, string> {
+function shuttleFiles(version = '0.1.4', body = 'console.log("fixture pi-shuttle");'): Record<string, string> {
   return {
     'package.json': JSON.stringify({ name: 'pi-shuttle', version, type: 'module', bin: { 'pi-shuttle': './dist/cli.js' } }),
     'dist/cli.js': `#!/usr/bin/env node\n${body}\n`,
   };
 }
 
-function writeShuttlePackage(root: string, version = '0.1.3', body = 'console.log("fixture pi-shuttle");'): void {
+function writeShuttlePackage(root: string, version = '0.1.4', body = 'console.log("fixture pi-shuttle");'): void {
   mkdirSync(join(root, 'dist'), { recursive: true, mode: 0o700 });
   for (const [name, content] of Object.entries(shuttleFiles(version, body))) writeFileSync(join(root, name), content, { mode: 0o700 });
 }
@@ -36,14 +36,14 @@ function activateLatestCommand(layout: ReturnType<typeof resolveLayout>, target:
 }
 
 function seedActiveLatest(layout: ReturnType<typeof resolveLayout>, source = SOURCE, body = 'console.log("fixture pi-shuttle");'): string {
-  const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', source));
-  writeShuttlePackage(target, '0.1.3', body);
+  const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', source));
+  writeShuttlePackage(target, '0.1.4', body);
   return activateLatestCommand(layout, target);
 }
 
 function seedMatchingActiveLatest(layout: ReturnType<typeof resolveLayout>, source = SOURCE): string {
-  const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', source));
-  cpSync(join(layout.packagesDir, 'pi-shuttle@0.1.3'), target, { recursive: true });
+  const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', source));
+  cpSync(join(layout.packagesDir, 'pi-shuttle@0.1.4'), target, { recursive: true });
   return activateLatestCommand(layout, target);
 }
 
@@ -69,7 +69,7 @@ async function withFixturePi<T>(runEnv: ReturnType<typeof fullInstallEnv>, fn: (
 async function fixtureArtifacts(env: string) {
   const gateway = await buildTarball(env, gatewayFixtureFiles(), 'project-gateway-artifact-core-0.1.0.tgz');
   const piGuard = await buildTarball(env, piGuardFixtureFiles(), 'pi-guard-0.1.2.tgz');
-  const shuttle = await buildTarball(env, shuttleFiles(), 'pi-shuttle-0.1.3.tgz');
+  const shuttle = await buildTarball(env, shuttleFiles(), 'pi-shuttle-0.1.4.tgz');
   return { gateway, piGuard, shuttle };
 }
 
@@ -165,8 +165,8 @@ test('same-semver Stable to Latest requires channel-switch consent', async () =>
       }),
     ));
     assert.deepEqual(offers, [[
-      '0.1.3',
-      '0.1.3',
+      '0.1.4',
+      '0.1.4',
       { kind: 'stable-to-latest', latestSource: SOURCE },
     ]]);
     assert.equal(outcome.kind, 'COMPLETE', JSON.stringify(outcome));
@@ -197,8 +197,8 @@ test('Latest source changes require source-aware consent; an exact source is alr
       }),
     ));
     assert.deepEqual(offers, [[
-      '0.1.3',
-      '0.1.3',
+      '0.1.4',
+      '0.1.4',
       { kind: 'latest-source', installedSource: SOURCE_A, latestSource: SOURCE },
     ]]);
     assert.equal(update.kind, 'COMPLETE', JSON.stringify(update));
@@ -209,7 +209,7 @@ test('Latest source changes require source-aware consent; an exact source is alr
       { home: env, platform: 'linux', arch: 'x64' },
       latestOptions(seeded.shuttle, { confirmUpgrade: async () => { confirmations += 1; return true; } }),
     ));
-    assert.deepEqual(exact, { kind: 'ALREADY_INSTALLED', version: '0.1.3' });
+    assert.deepEqual(exact, { kind: 'ALREADY_INSTALLED', version: '0.1.4' });
     assert.equal(confirmations, 0, 'an exact Latest source must not request update consent');
   } finally {
     cleanupEnv(env);
@@ -268,7 +268,7 @@ test('multiple retained pi-shuttle versions are INCOMPLETE evidence, not ambigui
     ));
     assert.equal(outcome.kind, 'COMPLETE', JSON.stringify(outcome));
     assert.equal(existsSync(old), true);
-    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.3')), true);
+    assert.equal(existsSync(join(layout.packagesDir, 'pi-shuttle@0.1.4')), true);
   } finally {
     cleanupEnv(env);
   }
@@ -341,7 +341,7 @@ test('accepted incomplete cleanup performs a fresh source-qualified Latest insta
       latestOptions(seeded.shuttle),
     ));
     assert.equal(outcome.kind, 'COMPLETE', JSON.stringify(outcome));
-    const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', SOURCE));
+    const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', SOURCE));
     assert.notEqual(readlinkSync(join(layout.binDir, 'pi-shuttle')), oldCommand);
     assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(target, 'dist', 'cli.js'));
     assert.equal(readFileSync(gatewayPackage, 'utf8'), gatewayBefore, 'Gateway package is reused');
@@ -365,9 +365,9 @@ test('an inactive incomplete exact Latest destination is removed and recreated o
   try {
     const artifacts = await fixtureArtifacts(env);
     const layout = resolveLayout(env);
-    const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', SOURCE));
+    const target = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', SOURCE));
     mkdirSync(join(target, 'dist'), { recursive: true, mode: 0o700 });
-    for (const [name, content] of Object.entries(shuttleFiles('0.1.3', 'console.log("incomplete bytes");'))) writeFileSync(join(target, name), content, { mode: 0o700 });
+    for (const [name, content] of Object.entries(shuttleFiles('0.1.4', 'console.log("incomplete bytes");'))) writeFileSync(join(target, name), content, { mode: 0o700 });
     const state = classify(env);
     assert.equal(state.kind, 'INCOMPLETE');
     if (state.kind === 'INCOMPLETE') assert.equal(state.state.activeExactLatestTarget, undefined);
@@ -557,7 +557,7 @@ test('FINAL Latest receipt publication happens after activation and rolls activa
     assert.equal(outcome.kind === 'FAILED' && outcome.stage, 'receipt');
     assert.equal(existsSync(layout.installReceiptPath), false);
     assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), commandBefore, 'failed final publication restores the old command');
-    assert.equal(existsSync(join(layout.packagesDir, piShuttlePackageDirName('0.1.3', SOURCE))), false, 'attempt package rolls back');
+    assert.equal(existsSync(join(layout.packagesDir, piShuttlePackageDirName('0.1.4', SOURCE))), false, 'attempt package rolls back');
   } finally {
     cleanupEnv(env);
   }
@@ -569,7 +569,7 @@ test('exact physical-machine fixture cleans/reinstalls without touching projects
     const seeded = await seedStable(env);
     const layout = resolveLayout(env);
     const final = JSON.parse(readFileSync(layout.installReceiptPath, 'utf8')) as Record<string, unknown>;
-    const retained = join(layout.packagesDir, 'pi-shuttle@0.1.3');
+    const retained = join(layout.packagesDir, 'pi-shuttle@0.1.4');
     const active = join(layout.packagesDir, 'pi-shuttle@0.1.0');
     mkdirSync(join(active, 'dist'), { recursive: true, mode: 0o700 });
     for (const [name, content] of Object.entries(shuttleFiles('0.1.0', 'console.log("active 0.1.0");'))) writeFileSync(join(active, name), content, { mode: 0o700 });
@@ -618,8 +618,8 @@ test('exact physical-machine fixture cleans/reinstalls without touching projects
     assert.deepEqual(recursiveStateSnapshot(protectedPaths), before);
     assert.equal(installCount(seeded.piState), piInstallsBefore);
     assert.equal(existsSync(active), true, 'old active package is retained');
-    assert.equal(existsSync(retained), true, 'retained 0.1.3 package is retained');
-    const latest = join(layout.packagesDir, piShuttlePackageDirName('0.1.3', PHYSICAL_SOURCE));
+    assert.equal(existsSync(retained), true, 'retained 0.1.4 package is retained');
+    const latest = join(layout.packagesDir, piShuttlePackageDirName('0.1.4', PHYSICAL_SOURCE));
     assert.equal(readlinkSync(join(layout.binDir, 'pi-shuttle')), join(latest, 'dist', 'cli.js'));
     assert.equal(existsSync(join(layout.stateDir, 'install.lock')), false);
     assert.equal(existsSync(join(layout.stateDir, 'install.json.lock')), false);

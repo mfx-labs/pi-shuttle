@@ -61,7 +61,7 @@ function runInstallerInteractive(args: readonly string[], input: readonly string
 
 test('installer: successful result wording distinguishes semantic upgrades from source transitions', () => {
   const prefix = 'result: COMPLETE — all selected components installed and verified';
-  assert.equal(formatOutcome({ kind: 'COMPLETE', upgradedFrom: '0.1.0' }), `${prefix}; upgraded pi-shuttle 0.1.0 → 0.1.3`);
+  assert.equal(formatOutcome({ kind: 'COMPLETE', upgradedFrom: '0.1.0' }), `${prefix}; upgraded pi-shuttle 0.1.0 → 0.1.4`);
 
   const latest = formatOutcome({
     kind: 'COMPLETE',
