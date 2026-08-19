@@ -26,7 +26,8 @@ function buildInstallSh(dir: string): string {
   const template = readFileSync(join(REPO, 'scripts', 'install-release.template.sh'), 'utf8');
   const installSh = template
     .replaceAll('__RELEASE_VERSION__', '0.1.1')
-    .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', 'p'.repeat(64));
+    .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', 'p'.repeat(64))
+    .replaceAll('__PI_SHUTTLE_SOURCE_SHA__', 'a'.repeat(40));
   const path = join(dir, 'install.sh');
   writeFileSync(path, installSh);
   return path;
@@ -69,15 +70,21 @@ test('dist (E2A): the corrected template carries no previous-generation release 
   }
 });
 
-test('dist (E2A): the generated installer embeds the pi-shuttle digest and no unresolved placeholder', () => {
+test('dist (E2A): the generated installer embeds the pi-shuttle digest and source identity and no unresolved placeholder', () => {
   const dir = mkdtempSync(join(tmpdir(), 'dist-shell.XXXXXX'));
   try {
     const generated = readFileSync(buildInstallSh(dir), 'utf8');
     assert.ok(generated.includes(`PI_SHUTTLE_TGZ_SHA256="${'p'.repeat(64)}"`), 'pi-shuttle package digest slot must be embedded');
+    assert.ok(generated.includes(`PI_SHUTTLE_SOURCE_SHA="${'a'.repeat(40)}"`), 'pi-shuttle source identity slot must be embedded');
     assert.equal(generated.includes('__PI_SHUTTLE_TGZ_SHA256__'), false);
     assert.equal(generated.includes('__RELEASE_VERSION__'), false);
+    assert.equal(generated.includes('__PI_SHUTTLE_SOURCE_SHA__'), false);
     // Routes to the manifest-native production entry only.
     assert.ok(generated.includes('dist/installer/main.js'), 'the generated installer must run the manifest-native production entry');
+    // The generated installer binds the verified release package into the
+    // distribution handoff contract consumed by the production installer.
+    assert.ok(generated.includes('PI_SHUTTLE_LATEST_PACKAGE_TGZ'), 'the generated installer must provide the distribution package handoff');
+    assert.ok(generated.includes('PI_SHUTTLE_LATEST_SOURCE'), 'the generated installer must provide the distribution source identity');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -154,6 +161,72 @@ test('dist (F-07): a valid https:// QA override passes validation (still downloa
     assert.equal(result.stderr.includes('must be an https:// URL'), false, 'a valid https override must pass validation');
     assert.ok(fetchLog !== null, 'a valid override must reach the fetch stage');
     assert.match(fetchLog, /pi-shuttle-0\.1\.1\.tgz/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('dist (MN-1): the generated installer binds the digest-verified package into the distribution handoff', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'dist-shell.XXXXXX'));
+  try {
+    // A real fixture pi-shuttle package with a fake installer entry that
+    // records the handoff environment it is invoked with.
+    const pkg = join(dir, 'pkg');
+    mkdirSync(join(pkg, 'package', 'dist', 'installer'), { recursive: true });
+    writeFileSync(join(pkg, 'package', 'package.json'), JSON.stringify({ name: 'pi-shuttle', version: '0.1.1' }));
+    writeFileSync(
+      join(pkg, 'package', 'dist', 'installer', 'main.js'),
+      "const fs = require('node:fs');\nconst crypto = require('node:crypto');\nconst tgz = process.env.PI_SHUTTLE_LATEST_PACKAGE_TGZ;\nconst digest = crypto.createHash('sha256').update(fs.readFileSync(tgz)).digest('hex');\nfs.writeFileSync(process.env.HANDOFF_LOG, JSON.stringify({ source: process.env.PI_SHUTTLE_LATEST_SOURCE, tgz, digest }));\n",
+    );
+    const tgz = join(dir, 'pi-shuttle-0.1.1.tgz');
+    const packed = spawnSync('tar', ['-czf', tgz, '-C', pkg, 'package'], { encoding: 'utf8' });
+    assert.equal(packed.status, 0, packed.stderr);
+    const { createHash } = await import('node:crypto');
+    const sha = createHash('sha256').update(readFileSync(tgz)).digest('hex');
+
+    // Generate the installer exactly as the release builder would (real digest).
+    const template = readFileSync(join(REPO, 'scripts', 'install-release.template.sh'), 'utf8');
+    const installSh = template
+      .replaceAll('__RELEASE_VERSION__', '0.1.1')
+      .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', sha)
+      .replaceAll('__PI_SHUTTLE_SOURCE_SHA__', 'b'.repeat(40));
+    const installShPath = join(dir, 'install-real.sh');
+    writeFileSync(installShPath, installSh);
+    chmodSync(installShPath, 0o755);
+
+    // Fake curl that "downloads" the fixture tgz (honoring curl's `-o`
+    // output option); real shasum/tar/node run.
+    const bin = join(dir, 'bin');
+    mkdirSync(bin, { recursive: true });
+    const curl = join(bin, 'curl');
+    writeFileSync(curl, '#!/bin/sh\nout=""\nprev=""\nfor a in "$@"; do if [ "$prev" = "-o" ]; then out="$a"; fi; prev="$a"; done\ncat "$FAKE_TGZ" > "$out"\n');
+    chmodSync(curl, 0o755);
+
+    const shasumCheck = spawnSync('shasum', ['-a', '256', tgz], { encoding: 'utf8' });
+    if (shasumCheck.status !== 0) {
+      t.skip('shasum not available; the release installer contract requires it');
+      return;
+    }
+
+    const handoffLog = join(dir, 'handoff.log');
+    const result = spawnSync('bash', [installShPath], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}:${process.env['PATH'] ?? ''}`, FAKE_TGZ: tgz, HANDOFF_LOG: handoffLog, HOME: dir },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const logged = JSON.parse(readFileSync(handoffLog, 'utf8')) as { source: string; tgz: string; digest: string };
+    // sourceIdentity matches the accepted grammar; the handoff is absolute and
+    // names the release package exactly.
+    assert.equal(logged.source, `mfx-labs/pi-shuttle@${'b'.repeat(40)}`);
+    assert.match(logged.source, /^mfx-labs\/pi-shuttle@[0-9a-f]{40}$/);
+    assert.ok(logged.tgz.startsWith('/'), 'the handoff package path must be absolute');
+    assert.ok(logged.tgz.endsWith('pi-shuttle-0.1.1.tgz'), logged.tgz);
+    // The persisted/exposed package is the SAME digest-verified artifact: the
+    // fixture installer measured the handoff file's SHA-256 in-band and it
+    // equals the embedded release digest — no second download, no alternate
+    // package selection. (The installer's EXIT trap removes its WORK dir, so
+    // byte-equality is proven by the handoff-time digest above.)
+    assert.equal(logged.digest, sha, 'the handoff must be the exact digest-verified release package');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

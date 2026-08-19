@@ -22,7 +22,12 @@
  * publishes npm packages, or modifies component repositories.
  *
  * Usage:
- *   node scripts/build-release.mjs [--out <dir>] [--release-version <v>]
+ *   node scripts/build-release.mjs [--out <dir>] [--release-version <v>] [--source-sha <full-sha>]
+ *
+ * The pi-shuttle source identity embedded in the generated install.sh is the
+ * exact commit this release candidate was built from (default: the release
+ * candidate repository's own HEAD), and is a trusted release-build input —
+ * never caller text.
  *
  * Requires: `npm run build` already done in this repository (the
  * builder validates its output against the built release modules).
@@ -158,18 +163,19 @@ export function verifyPackageIdentity(identity, expectedName, expectedVersion, l
 }
 
 function parseArgs(argv) {
-  const options = { out: OUT_DEFAULT, releaseVersion: null };
+  const options = { out: OUT_DEFAULT, releaseVersion: null, sourceSha: null };
   let i = 0;
   while (i < argv.length) {
     const flag = argv[i];
     const value = argv[i + 1];
-    if (flag === '--out' || flag === '--release-version') {
+    if (flag === '--out' || flag === '--release-version' || flag === '--source-sha') {
       if (value === undefined) fail(`${flag} requires a value`);
       if (flag === '--out') options.out = value;
-      else options.releaseVersion = value;
+      else if (flag === '--release-version') options.releaseVersion = value;
+      else options.sourceSha = value;
       i += 2;
     } else {
-      fail(`unknown argument: ${flag}\nusage: node scripts/build-release.mjs [--out <dir>] [--release-version <v>]`);
+      fail(`unknown argument: ${flag}\nusage: node scripts/build-release.mjs [--out <dir>] [--release-version <v>] [--source-sha <full-sha>]`);
     }
   }
   return options;
@@ -182,6 +188,13 @@ async function main() {
   const PI_SHUTTLE_TGZ = `pi-shuttle-${RELEASE_VERSION}.tgz`;
   const SHA256SUMS = 'SHA256SUMS';
   const out = resolve(options.out);
+  // Trusted release-build input: the exact pi-shuttle commit this candidate
+  // tree is built from (release repository HEAD by default; --source-sha
+  // override for a detached/verified build). Never caller text at install time.
+  const sourceSha = options.sourceSha ?? run('git', ['rev-parse', 'HEAD'], { cwd: ROOT });
+  if (!/^[0-9a-f]{40}$/.test(sourceSha)) {
+    fail(`pi-shuttle source identity must be one full commit SHA (got ${JSON.stringify(String(sourceSha).slice(0, 16))})`);
+  }
 
   if (!existsSync(join(ROOT, 'dist', 'installer', 'main.js'))) {
     fail('dist is missing or stale — run `npm run build` first');
@@ -241,8 +254,9 @@ async function main() {
     const template = readFileSync(join(ROOT, 'scripts', 'install-release.template.sh'), 'utf8');
     const installSh = template
       .replaceAll('__RELEASE_VERSION__', RELEASE_VERSION)
-      .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', piShuttleSha);
-    if (installSh.includes('__RELEASE_VERSION__') || installSh.includes('__PI_SHUTTLE_TGZ_SHA256__')) {
+      .replaceAll('__PI_SHUTTLE_TGZ_SHA256__', piShuttleSha)
+      .replaceAll('__PI_SHUTTLE_SOURCE_SHA__', sourceSha);
+    if (installSh.includes('__RELEASE_VERSION__') || installSh.includes('__PI_SHUTTLE_TGZ_SHA256__') || installSh.includes('__PI_SHUTTLE_SOURCE_SHA__')) {
       fail('generated install.sh contains an unresolved template placeholder');
     }
     const installShPath = join(out, INSTALL_SH);

@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import type { HostEnvironment } from '../../src/host/environment.js';
 import { hashPackageTree } from '../../src/installer/artifact.js';
+import { PI_SHUTTLE_PACKAGE_NAME } from '../../src/installer/components.js';
 import { runProcess, resolveExecutable } from '../../src/installer/process.js';
 import type { ReleaseFetcher } from '../../src/installer/release/acquire.js';
 import type { FreshInstallDependencies, FreshInstallOutcome } from '../../src/manifest-native/install.js';
@@ -199,4 +200,52 @@ export function releaseBOverrides(): Record<string, unknown> {
     artifactFileName: 'gateway-native-core-0.2.0.tgz',
     upgradePolicy: { acceptedPredecessorReleaseIds: ['gateway-native-release-aaa'], rollback: 'immediate-predecessor' },
   };
+}
+
+export interface DistributionFixtureOverrides {
+  readonly name?: string;
+  readonly bin?: Record<string, string>;
+  /** Set false to omit the CLI file entirely (incomplete distribution package). */
+  readonly includeCli?: boolean;
+  readonly cliContent?: string;
+}
+
+export interface DistributionFixture {
+  /** Absolute path to the verified current pi-shuttle distribution package tgz. */
+  readonly packageTgz: string;
+  /** The paired verified bootstrap source identity (`mfx-labs/pi-shuttle@<full-sha>`). */
+  readonly sourceIdentity: string;
+}
+
+function defaultDistributionCli(version: string): string {
+  return `#!/usr/bin/env node\nprocess.stdout.write('pi-shuttle ${version}\\n');\n`;
+}
+
+/**
+ * Build a current pi-shuttle distribution package fixture (install.sh
+ * handoff shape): a REAL gzip tar of an npm-pack `package/` tree carrying
+ * the pi-shuttle identity + a `dist/cli.js` bin, plus the paired verified
+ * bootstrap source identity. The caller owns cleanup of the fixture dir
+ * (the packageTgz lives in a fresh temp dir that must outlive the install
+ * under test — the handoff file must exist when the installer reads it).
+ */
+export async function buildDistributionFixture(version: string, overrides: DistributionFixtureOverrides = {}): Promise<DistributionFixture> {
+  const name = overrides.name ?? PI_SHUTTLE_PACKAGE_NAME;
+  const bin = overrides.bin ?? { 'pi-shuttle': 'dist/cli.js' };
+  const dir = mkdtempSync(join(tmpdir(), 'pi-shuttle-distribution-fixture-'));
+  const parent = join(dir, 'pack');
+  const tree = join(parent, 'package');
+  mkdirSync(join(tree, 'dist'), { recursive: true, mode: 0o700 });
+  writeFileSync(join(tree, 'package.json'), JSON.stringify({ name, version, bin }), { mode: 0o600 });
+  if (overrides.includeCli !== false) {
+    writeFileSync(join(tree, 'dist', 'cli.js'), overrides.cliContent ?? defaultDistributionCli(version), { mode: 0o600 });
+  }
+  chmodSync(tree, 0o700);
+  chmodSync(join(tree, 'dist'), 0o700);
+  const tgzPath = join(dir, 'pi-shuttle.tgz');
+  const tar = resolveExecutable('tar');
+  assert.ok(tar !== null, 'tar must be available for distribution fixtures');
+  const packed = await runProcess(tar, ['-czf', tgzPath, '-C', parent, 'package']);
+  assert.equal(packed.exitCode, 0, packed.stderr);
+  return { packageTgz: tgzPath, sourceIdentity: `mfx-labs/pi-shuttle@${'a'.repeat(40)}` };
 }

@@ -56,6 +56,8 @@ import { hostLane, resolveManifestNativeLayout } from '../host/environment.js';
 import { scanArtifactMembers } from '../installer/archive.js';
 import { findPackageRoot, hashPackageTree, PACKAGE_TREE_MAX_ENTRIES, readPackageIdentity } from '../installer/artifact.js';
 import type { PackageIdentity } from '../installer/artifact.js';
+import { exposeCurrentDistributionLauncher, installCurrentDistribution } from '../installer/distribution.js';
+import type { DistributionHandoff, DistributionInstallResult } from '../installer/distribution.js';
 import { resolveExecutable, runProcess } from '../installer/process.js';
 import { acquireVerifiedFile, downloadToFile } from '../installer/release/acquire.js';
 import type { ReleaseFetcher } from '../installer/release/acquire.js';
@@ -148,6 +150,15 @@ export interface FreshInstallDependencies {
   readonly tarExecutable?: string;
   /** Compiled trusted origin override (tests only; production = fixed policy). */
   readonly metadataOrigin?: { readonly metadataBaseUrl: string; readonly artifactBaseUrl: string };
+  /**
+   * Verified current pi-shuttle distribution package handoff (install.sh
+   * bootstrap). OPTIONAL in the orchestrator: Gateway-only mode is preserved
+   * for existing install tests. The production entry REQUIRES it, so a
+   * successful installer run leaves both the manifest-native Gateway
+   * installation AND the current pi-shuttle distribution package installed
+   * with its canonical launcher exposed.
+   */
+  readonly distribution?: DistributionHandoff;
 }
 
 function outcomeFailed(stage: string, code: string, message: string): FreshInstallOutcome {
@@ -156,6 +167,43 @@ function outcomeFailed(stage: string, code: string, message: string): FreshInsta
 
 function outcomeRefused(code: string, message: string): FreshInstallOutcome {
   return { kind: 'REFUSED', code, message };
+}
+
+type InstalledDistribution = Extract<DistributionInstallResult, { readonly ok: true }>;
+
+/**
+ * Persist + validate the current pi-shuttle distribution package when the
+ * bootstrap handoff is present. Runs BEFORE the Gateway transaction on both
+ * the CLEAN and VALID-exact paths; the canonical launcher exposure is a
+ * separate LAST step after receipt publication.
+ */
+async function installDistributionIfHandoff(
+  env: HostEnvironment,
+  deps: FreshInstallDependencies,
+  uid: number,
+  tarExecutable: string,
+  stagingDir: string,
+): Promise<{ readonly ok: true; readonly distribution: InstalledDistribution | null } | { readonly ok: false; readonly code: string; readonly message: string }> {
+  const handoff = deps.distribution;
+  if (handoff === undefined) return { ok: true, distribution: null };
+  const installed = await installCurrentDistribution({ home: env.home, uid, tarExecutable, stagingDir, handoff });
+  if (!installed.ok) {
+    return { ok: false, code: installed.code, message: `current pi-shuttle distribution could not be installed: ${installed.message}` };
+  }
+  return { ok: true, distribution: installed };
+}
+
+/**
+ * Expose the canonical pi-shuttle launcher to the installed current
+ * distribution package. MUST run LAST, after receipt publication; a failed
+ * exposure returns FAILED and never leaves a partially written launcher.
+ */
+function exposeDistributionLauncher(distribution: InstalledDistribution, env: HostEnvironment): { readonly ok: true } | { readonly ok: false; readonly outcome: FreshInstallOutcome } {
+  const exposed = exposeCurrentDistributionLauncher({ home: env.home, packageRoot: distribution.packageRoot, binPath: distribution.binPath });
+  if (!exposed.ok) {
+    return { ok: false, outcome: outcomeFailed('distribution', exposed.code, `current pi-shuttle canonical launcher could not be exposed: ${exposed.message}`) };
+  }
+  return { ok: true };
 }
 
 /**
@@ -468,6 +516,10 @@ export async function runManifestNativeFreshInstall(env: HostEnvironment, deps: 
         && contract.packageName === selection.release.packageName
         && contract.binName === selection.release.binName;
       if (exact) {
+        // Current pi-shuttle distribution package (persist + validate)
+        // BEFORE the Gateway idempotent transaction.
+        const distributionInstall = await installDistributionIfHandoff(env, deps, uid, tarExecutable, attemptDir);
+        if (!distributionInstall.ok) return outcomeFailed('distribution', distributionInstall.code, distributionInstall.message);
         // FI-01: the existing package being relied upon must cross the
         // package durability barrier (validate -> file/dir/parent fsync ->
         // final rehash) before cache/receipt reuse success. Nothing is
@@ -488,6 +540,10 @@ export async function runManifestNativeFreshInstall(env: HostEnvironment, deps: 
         if (!cachePublish.ok) return outcomeFailed('cache', cachePublish.code, `idempotent retry cache durability barrier failed: ${cachePublish.message}`);
         const receiptPublish = publishManifestNativeReceipt(layout, resolution.installation.receipt, io, uid);
         if (!receiptPublish.ok) return outcomeFailed('receipt', receiptPublish.code, `idempotent retry receipt durability barrier failed: ${receiptPublish.message}`);
+        if (distributionInstall.distribution !== null) {
+          const launcher = exposeDistributionLauncher(distributionInstall.distribution, env);
+          if (!launcher.ok) return launcher.outcome;
+        }
         try {
           rmSync(attemptDir, { recursive: true, force: true });
         } catch {
@@ -501,6 +557,12 @@ export async function runManifestNativeFreshInstall(env: HostEnvironment, deps: 
         selectedReleaseId: selection.channel.releaseId,
       };
     }
+
+    // 5b. Current pi-shuttle distribution package (persist + validate) —
+    //     installed BEFORE the Gateway transaction. The canonical launcher
+    //     exposure is LAST, after receipt publication.
+    const distributionInstall = await installDistributionIfHandoff(env, deps, uid, tarExecutable, attemptDir);
+    if (!distributionInstall.ok) return outcomeFailed('distribution', distributionInstall.code, distributionInstall.message);
 
     // 6. Content-addressed final package target: early orphan reuse/conflict.
     const expectedTreeSha256 = selection.release.packageTreeSha256;
@@ -677,6 +739,13 @@ export async function runManifestNativeFreshInstall(env: HostEnvironment, deps: 
     const receiptPublish = publishManifestNativeReceipt(layout, built.receipt, io, uid);
     if (!receiptPublish.ok) {
       return outcomeFailed('receipt', receiptPublish.code, `receipt publication failed: ${receiptPublish.message}`);
+    }
+
+    // Launcher exposure LAST: after the full Gateway transaction, pointing
+    // only at the validated bin inside the installed distribution package.
+    if (distributionInstall.distribution !== null) {
+      const launcher = exposeDistributionLauncher(distributionInstall.distribution, env);
+      if (!launcher.ok) return launcher.outcome;
     }
 
     return {

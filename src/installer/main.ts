@@ -25,7 +25,8 @@
  */
 import { realpathSync } from 'node:fs';
 import type { HostEnvironment } from '../host/environment.js';
-import { hostEnvironmentFromProcess } from '../host/environment.js';
+import { hostEnvironmentFromProcess, installerEnvironment } from '../host/environment.js';
+import { parseDistributionHandoff } from './distribution.js';
 import { runManifestNativeFreshInstall } from '../manifest-native/install.js';
 import type { FreshInstallDependencies, FreshInstallOutcome } from '../manifest-native/install.js';
 
@@ -37,8 +38,11 @@ usage: install.sh [--help]
 Installs the signed stable Gateway release through the manifest-native
 trust chain (compiled trust policy -> current signed keyring/channel ->
 signed Gateway release manifest -> verified artifact -> content-addressed
-package -> signed cache -> Receipt Schema 1). No component selections, no
-upgrade, no rollback, no caller-selected release authority.
+package -> signed cache -> Receipt Schema 1), persists the CURRENT
+pi-shuttle distribution package (the verified artifact that ran this
+installer), and exposes the canonical launcher (~/.local/bin/pi-shuttle).
+No component selections, no upgrade, no rollback, no caller-selected
+release authority.
 `;
 
 export interface InstallerMainDependencies {
@@ -114,7 +118,20 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
     process.stderr.write(`pi-shuttle-installer: ${env.message}\n`);
     return INSTALLER_EXIT.FAILED;
   }
-  const runner = dependencies.installRunner ?? ((e: HostEnvironment) => runManifestNativeFreshInstall(e, dependencies.installDeps));
+  let runner = dependencies.installRunner;
+  if (runner === undefined) {
+    // Production path: the current pi-shuttle distribution handoff is
+    // REQUIRED — a successful installer run must leave both the
+    // manifest-native Gateway installation AND the current pi-shuttle
+    // distribution package installed with its canonical launcher exposed.
+    const parsed = parseDistributionHandoff(installerEnvironment());
+    if (!parsed.ok) {
+      process.stderr.write(`pi-shuttle-installer: ${parsed.message}; refusing to run without a verified current pi-shuttle distribution\n`);
+      return INSTALLER_EXIT.FAILED;
+    }
+    const installDeps: FreshInstallDependencies = { ...dependencies.installDeps, distribution: dependencies.installDeps?.distribution ?? parsed.value };
+    runner = (e: HostEnvironment) => runManifestNativeFreshInstall(e, installDeps);
+  }
   const outcome = await runner(env.environment);
 
   process.stdout.write(`pi-shuttle installer (manifest-native lane)\n`);
@@ -122,6 +139,12 @@ export async function main(argv: readonly string[], dependencies: InstallerMainD
   process.stdout.write(`manifest-native authority root: ${env.environment.home}/.local/share/pi-shuttle/manifest-native\n`);
   if (outcome.kind === 'INSTALLED' || outcome.kind === 'ALREADY_INSTALLED') {
     printPostInstallNextSteps(outcome);
+  } else if (outcome.kind === 'FAILED') {
+    // Truthful: a FAILED outcome may have published durable install steps
+    // (the manifest-native transaction and/or the current pi-shuttle
+    // distribution) before failing. Claiming that "no installation
+    // authority was changed" would be false.
+    process.stdout.write(`installation failed at stage "${outcome.stage}"; prior durable install steps may already exist; unrelated operator state was not modified\n`);
   } else {
     process.stdout.write('no installation authority was changed; unrelated operator state was preserved\n');
   }

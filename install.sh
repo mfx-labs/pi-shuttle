@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # pi-shuttle dual-channel installer entrypoint.
 #
-# With a built checkout this remains the repository-local launcher. When the
-# dist tree is absent (including curl | bash), it bootstraps the latest source
-# channel into a private temporary directory and invokes that snapshot's
-# installer with the operator's argv unchanged.
+# With a built checkout this remains the repository-local launcher. A
+# repo-local built invocation is NOT a functional standalone installer: the
+# production installer entry fails closed unless the current pi-shuttle
+# distribution handoff (PI_SHUTTLE_LATEST_SOURCE /
+# PI_SHUTTLE_LATEST_PACKAGE_TGZ) is exported. Only the bootstrap path below
+# builds the exact source snapshot, exports that handoff, and invokes the
+# snapshot installer with the operator's argv unchanged; the repo-local
+# built branch above never exports the handoff, so it cannot complete a
+# production install on its own.
 set -euo pipefail
 
 SOURCE_PATH="${BASH_SOURCE[0]-}"

@@ -76,6 +76,11 @@ const FS_ALLOWLIST: Readonly<Record<string, readonly string[]>> = {
   'src/installer/preflight.ts': ['mkdirSync'],
   'src/installer/components.ts': ['existsSync', 'lstatSync', 'mkdirSync', 'renameSync', 'rmSync'],
   'src/installer/install.ts': ['lstatSync', 'mkdirSync', 'readdirSync', 'readlinkSync', 'realpathSync', 'renameSync', 'rmSync', 'symlinkSync'],
+  // Current pi-shuttle distribution package persist/validate + canonical
+  // launcher exposure (installer boundary; the bootstrap activation
+  // correction — content-addressed distribution namespace + atomic
+  // symlink swap, outside the manifest-native authority root):
+  'src/installer/distribution.ts': ['chmodSync', 'closeSync', 'constants', 'fstatSync', 'fsyncSync', 'lstatSync', 'mkdirSync', 'openSync', 'readdirSync', 'readlinkSync', 'renameSync', 'rmSync', 'symlinkSync'],
   'src/installer/artifact.ts': ['closeSync', 'constants', 'createReadStream', 'fstatSync', 'lstatSync', 'openSync', 'readdirSync', 'readSync'],
   'src/installer/archive.ts': ['createReadStream', 'lstatSync', 'readFileSync'],
   // PS-8A release boundary (verified staging + handoff files):

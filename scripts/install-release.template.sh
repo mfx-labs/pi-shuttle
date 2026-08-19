@@ -26,6 +26,7 @@ die() { printf 'pi-shuttle-installer: %s\n' "$*" >&2; exit 2; }
 
 RELEASE_VERSION="__RELEASE_VERSION__"
 PI_SHUTTLE_TGZ_SHA256="__PI_SHUTTLE_TGZ_SHA256__"
+PI_SHUTTLE_SOURCE_SHA="__PI_SHUTTLE_SOURCE_SHA__"
 RELEASE_BASE_URL="https://github.com/mfx-labs/pi-shuttle/releases/download/v${RELEASE_VERSION}"
 # QA/test override only: production installs never set this. The value is
 # validated as an https:// URL below so it can never be interpreted as a
@@ -49,6 +50,11 @@ chain: compiled trust policy -> signed keyring -> signed stable channel ->
 signed Gateway release manifest -> verified artifact -> content-addressed
 package -> signed cache -> Receipt Schema 1.
 
+The installer also persists the CURRENT pi-shuttle distribution package (this
+digest-verified artifact) and exposes the canonical launcher
+~/.local/bin/pi-shuttle, so a successful run leaves both the manifest-native
+Gateway installation and the current pi-shuttle distribution live.
+
 The installer accepts no component selections, no installation paths, no
 release options, and no caller-selected release authority. The Gateway
 signed metadata and artifact are downloaded and cryptographically verified
@@ -60,6 +66,12 @@ EOF
       die "unrecognized installer option '$arg': the manifest-native installer accepts no selections, paths, or release options (pass --help for usage)" ;;
   esac
 done
+
+# The embedded source identity is a trusted release-build input (the exact
+# pi-shuttle commit this installer was built from); it is never caller text.
+if ! [[ "$PI_SHUTTLE_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  die 'release installer is missing a valid pi-shuttle source identity (full commit SHA)'
+fi
 
 if [ "$(id -u)" = "0" ] 2>/dev/null; then
   die 'refusing to run as root: pi-shuttle installs per-user only'
@@ -92,11 +104,22 @@ if [ "$(shasum -a 256 "$PKG_TGZ" | awk '{print $1}')" != "$PI_SHUTTLE_TGZ_SHA256
   die 'pi-shuttle package digest mismatch — refusing to continue (nothing was installed)'
 fi
 
+# Bind the EXACT digest-verified release package into the installer's current
+# pi-shuttle distribution handoff. The manifest-native installer persists and
+# exposes THIS verified artifact as the current pi-shuttle distribution and
+# canonical launcher — no second download, no alternate package selection, no
+# caller-selected package authority.
+export PI_SHUTTLE_LATEST_PACKAGE_TGZ="$PKG_TGZ"
+export PI_SHUTTLE_LATEST_SOURCE="mfx-labs/pi-shuttle@$PI_SHUTTLE_SOURCE_SHA"
+
 mkdir -p "$WORK/pkg"
 tar -xzf "$PKG_TGZ" -C "$WORK/pkg"
 CORE="$WORK/pkg/package/dist/installer/main.js"
 if [ ! -f "$CORE" ]; then
   die 'release package is missing the manifest-native installer entry (dist/installer/main.js)'
+fi
+if [ ! -f "$WORK/pkg/package/package.json" ]; then
+  die 'release package is missing package.json'
 fi
 
 # Run the manifest-native installer (no exec: the EXIT trap above must fire
